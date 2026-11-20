@@ -1,0 +1,175 @@
+name: Build and release MooBee Live
+
+on:
+  push:
+    branches: [main, 'release/**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Test and compile web app
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+
+  web:
+    name: Self-hosted web distribution
+    runs-on: ubuntu-24.04
+    needs: verify
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Package self-hosted web app and local API
+        run: |
+          tar -czf "moobee-live-web-${GITHUB_SHA::7}.tar.gz" \
+            package.json package-lock.json \
+            apps/api/package.json apps/api/server.mjs apps/api/validation.mjs \
+            apps/web/package.json apps/web/dist apps/desktop/package.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-node-bundle
+          path: moobee-live-web-*.tar.gz
+          if-no-files-found: error
+
+  desktop:
+    name: Desktop — ${{ matrix.label }}
+    if: startsWith(github.ref, 'refs/heads/release/') || github.event_name == 'workflow_dispatch'
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            label: macos-arm64
+            args: '--bundles dmg'
+          - platform: macos-15-intel
+            label: macos-x64
+            args: '--bundles dmg'
+          - platform: windows-latest
+            label: windows-x64
+            args: '--bundles nsis'
+          - platform: ubuntu-24.04
+            label: linux-x64
+            args: '--bundles deb'
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+      - name: Install Linux native dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev librsvg2-dev libayatana-appindicator3-dev patchelf
+      - run: npm ci
+      - name: Build desktop installer
+        uses: tauri-apps/tauri-action@v1
+        env:
+          APPLE_SIGNING_IDENTITY: '-'
+        with:
+          projectPath: apps/desktop
+          args: ${{ matrix.args }}
+      - name: Collect installer files
+        shell: bash
+        run: |
+          mkdir -p release-assets
+          find apps/desktop/src-tauri/target -type f \( -name '*.dmg' -o -name '*.deb' -o -name '*setup.exe' \) -print -exec sh -c 'cp "$1" "release-assets/${{ matrix.label }}-$(basename "$1")"' _ '{}' \;
+          test -n "$(find release-assets -type f -print -quit)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.label }}
+          path: release-assets/*
+          if-no-files-found: error
+
+  android:
+    name: Android ARM64 test APK
+    if: startsWith(github.ref, 'refs/heads/release/') || github.event_name == 'workflow_dispatch'
+    needs: verify
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android toolchain
+        run: |
+          sdkmanager --install 'platforms;android-35' 'build-tools;35.0.0' 'ndk;27.2.12479018'
+          echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+      - run: npm ci
+      - name: Generate Tauri Android project
+        working-directory: apps/desktop
+        run: npx tauri android init --ci
+      - name: Build Android debug-signed APK
+        working-directory: apps/desktop
+        run: npx tauri android build --apk --debug --target aarch64 --ci
+      - name: Collect installable debug APK
+        run: |
+          mkdir -p release-assets
+          find apps/desktop/src-tauri/gen/android/app/build/outputs/apk -type f -name '*.apk' -exec cp '{}' release-assets/moobee-live-android-arm64-debug.apk \;
+          test -s release-assets/moobee-live-android-arm64-debug.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-arm64-debug
+          path: release-assets/*.apk
+          if-no-files-found: error
+
+  publish:
+    name: Publish alpha prerelease
+    if: startsWith(github.ref, 'refs/heads/release/')
+    needs: [verify, web, desktop, android]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+      - name: Publish only when every platform built successfully
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF_NAME#release/}"
+          case "$TAG" in v*) ;; *) echo 'Release branch must be named release/v*' >&2; exit 1 ;; esac
+          mapfile -d '' FILES < <(find release-assets -type f -print0)
+          test "${#FILES[@]}" -ge 5
+          gh release create "$TAG" "${FILES[@]}" \
+            --target "$GITHUB_SHA" \
+            --title "MooBee Live $TAG (Alpha)" \
+            --notes-file docs/RELEASE_NOTES.md \
+            --prerelease
+

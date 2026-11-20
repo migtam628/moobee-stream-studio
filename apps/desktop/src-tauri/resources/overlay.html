@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MooBee Live Alert Overlay</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; width: 100%; background: transparent; overflow: hidden; }
+    #root { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
+    #alert { display: none; min-width: 380px; padding: 28px 48px; text-align: center; border: 2px solid #b18dff; border-radius: 22px; color: white; background: linear-gradient(135deg, #452d7aeF, #1b142cec); box-shadow: 0 12px 75px #8b54e277; }
+    #alert.visible { display: block; animation: intro .5s cubic-bezier(.2,1.2,.3,1) both; }
+    #symbol { background: #9d77ed; border-radius: 50%; width: 64px; height: 64px; line-height: 64px; margin: 0 auto 12px; font-size: 35px; }
+    #kind { color: #d0b9ff; letter-spacing: 3px; font-size: 13px; font-weight: 800; }
+    #name { margin: 9px 0; font-size: 34px; font-weight: 800; }
+    #message { margin: 0; color: #ede2ff; font-size: 17px; }
+    @keyframes intro { from { opacity: 0; transform: translateY(40px) scale(.85); } to { opacity: 1; transform: translateY(0) scale(1); } }
+    @media(prefers-reduced-motion:reduce) { #alert.visible { animation: none; } }
+  </style>
+</head>
+<body>
+  <div id="root"><section id="alert" aria-live="polite"><div id="symbol">✦</div><div id="kind"></div><h1 id="name"></h1><p id="message"></p></section></div>
+  <script>
+    const stream = new EventSource('/api/events');
+    const container = document.getElementById('alert');
+    let timer;
+    stream.addEventListener('alert', function (event) {
+      const value = JSON.parse(event.data);
+      document.getElementById('kind').textContent = 'NEW ' + String(value.type || 'follow').toUpperCase();
+      document.getElementById('name').textContent = String(value.name || 'Viewer');
+      document.getElementById('message').textContent = String(value.message || '');
+      container.classList.remove('visible');
+      void container.offsetWidth;
+      container.classList.add('visible');
+      clearTimeout(timer);
+      timer = setTimeout(() => container.classList.remove('visible'), 5500);
+    });
+  </script>
+</body>
+</html>

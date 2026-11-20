@@ -1,0 +1,12 @@
+services:
+  moobee-live:
+    build: .
+    network_mode: host
+    environment:
+      API_HOST: 127.0.0.1
+      API_PORT: '8787'
+      OBS_WS_URL: ws://127.0.0.1:4455
+      # Set OBS_WS_PASSWORD via your local environment or enter it in the UI.
+      OBS_WS_PASSWORD: ${OBS_WS_PASSWORD:-}
+      ALLOW_REMOTE_OBS: 'false'
+    restart: unless-stopped

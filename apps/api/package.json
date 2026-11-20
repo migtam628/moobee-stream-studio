@@ -1,0 +1,10 @@
+{
+  "name": "@moobee-live/api",
+  "private": true,
+  "type": "module",
+  "scripts": {"dev": "node --env-file-if-exists=../../.env --watch server.mjs", "start": "node --env-file-if-exists=../../.env server.mjs"},
+  "dependencies": {
+    "express": "^5.1.0",
+    "obs-websocket-js": "^5.0.6"
+  }
+}

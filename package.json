@@ -1,0 +1,24 @@
+{
+  "name": "moobee-live",
+  "private": true,
+  "version": "0.2.0",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n api,web -c blue,magenta \"npm run dev -w @moobee-live/api\" \"npm run dev -w @moobee-live/web\"",
+    "build": "npm run build -w @moobee-live/web",
+    "start": "npm run start -w @moobee-live/api",
+    "test": "node --test apps/api/test/*.test.mjs",
+    "test:e2e": "node scripts/visual-qa.mjs",
+    "desktop:dev": "npm run tauri:dev -w @moobee-live/desktop",
+    "desktop:build": "npm run tauri:build -w @moobee-live/desktop"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "playwright": "^1.65.1"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
