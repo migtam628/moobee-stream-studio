@@ -41,6 +41,10 @@ jobs:
             package.json package-lock.json \
             apps/api/package.json apps/api/server.mjs apps/api/validation.mjs apps/api/studio.mjs \
             apps/web/package.json apps/web/dist apps/desktop/package.json apps/desktop/src-tauri/resources/overlay.html
+      - name: Verify standalone web archive contains its runtime modules
+        run: |
+          tar -tzf moobee-stream-studio-web-*.tar.gz | grep -qx 'apps/api/studio.mjs'
+          tar -tzf moobee-stream-studio-web-*.tar.gz | grep -qx 'apps/desktop/src-tauri/resources/overlay.html'
       - uses: actions/upload-artifact@v4
         with:
           name: web-node-bundle
@@ -170,7 +174,9 @@ jobs:
           for expected in macos-arm64 macos-x64 windows-x64 linux-x64; do
             find release-assets -type f -name "${expected}-*" -print -quit | grep -q . || { echo "Missing installer for ${expected}"; exit 1; }
           done
-          find release-assets -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+          while IFS= read -r -d '' file; do
+            ( cd "$(dirname "$file")" && sha256sum "$(basename "$file")" )
+          done < <(find release-assets -type f -print0 | sort -z) > SHA256SUMS.txt
           gh release create "$TAG" "${FILES[@]}" SHA256SUMS.txt \
             --target "$GITHUB_SHA" \
             --title "MooBee Stream Studio $TAG — Standalone Capture Alpha" \
