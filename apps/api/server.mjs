@@ -121,6 +121,9 @@ app.get('/api/studio/snapshot', (_req, res) => {
 app.get('/api/clips', (_req, res) => res.json({
   available: false, clips: [], reason: 'GIF test clips are available in the installed macOS/Windows desktop app'
 }));
+app.post('/api/clips/capture-avi', (_req, res) => res.status(501).json({
+  error: 'Native MJPEG AVI recording is available only in the installed Windows/macOS app'
+}));
 app.post('/api/clips/capture', (_req, res) => res.status(501).json({
   error: 'Install MooBee Studio for local test capture. Browser and cloud capture are not available.'
 }));
