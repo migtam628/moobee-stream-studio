@@ -9,6 +9,7 @@
 - Tauri 2 desktop application and original React creator control center.
 - Native display enumeration and screenshot previews on macOS and Windows, using the bundled Rust XCap library. Screen Recording permission is required on macOS.
 - **Clips → Capture Silent GIF**: a first-party 2–10 second, approximately 2 fps local display test clip. The saved GIF can be previewed and the file path copied inside the app.
+- **Web Clips → Record shared screen**: user-approved browser-native screen capture via `getDisplayMedia` and `MediaRecorder` saves a short silent WebM/MP4 file locally where supported. The browser does not upload the recording or require a streaming service.
 - Our own local scene management: create/rename/duplicate/delete scenes, select program/preview scenes, enable Studio Mode, take transitions, add/remove display sources, and control source visibility.
 - Native scene drafts persist in Tauri's local storage; the web/API edition now saves scene collections atomically on disk, with Docker volume persistence.
 - Independent Node local-only API with `/api/studio/status`, `/api/studio/action`, `/api/studio/collection`, `/api/capture/displays`, SSE events, and alert-testing endpoints.
@@ -33,6 +34,10 @@ Open **Studio → Add Scene** to create a scene. Each row can be renamed, duplic
 Scene collection backup: open **Settings → Scene Collection Backup** to export or import `moobee-studio-scenes.json`. The format is versioned (`version: 1`), constrained to 40 scenes/30 display sources per scene, and validated before replacement. Export a backup before importing. Old native Alpha 0.3 drafts are migrated automatically when valid.
 
 The standalone local web/API edition runs with `npm run dev`; see `docs/TAURI.md`. Its API persists to `~/.moobee-stream-studio/scenes.v1.json`, or the `MOOBEE_DATA_DIR` override. Docker Compose binds `./data` to the internal state folder. Restrict access to this private data and back it up. The API binds to 127.0.0.1 by default and has no remote authentication. **Never expose it directly to the internet.**
+
+## Browser-local recording acceptance
+
+On the HTTPS web preview or localhost, open **Clips → Browser screen recording**, choose 5, 10 or 30 seconds and click **Record shared screen**. Approve a screen, window, or tab in the browser dialog. Use **Stop** or the automatic duration limit, preview the local result, and select **Save recording**. WebM or MP4 depends on your browser. This does not record microphone/system audio or compose MooBee scenes. Unsupported browsers/mobile devices display a clear unavailable message.
 
 ## Native test clip acceptance
 
