@@ -1,5 +1,6 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 process.env.NODE_ENV = 'test';
 const { app } = await import('../server.mjs');
 const server = await new Promise(resolve => {
@@ -11,6 +12,7 @@ after(async () => { await new Promise(resolve => server.close(resolve)); });
 test('standalone API health and studio status', async () => {
   const health = await (await fetch(`${root}/api/health`)).json();
   assert.equal(health.engine, 'in-house');
+  assert.equal(health.version, JSON.parse(readFileSync(new URL('../../../package.json', import.meta.url), 'utf8')).version);
   const response = await fetch(`${root}/api/studio/status`);
   assert.equal(response.status, 200);
   const studio = await response.json();
