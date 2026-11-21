@@ -110,6 +110,62 @@ async fn serve_overlays(state: OverlayState) {
     }
 }
 
+// Screenshots are the first vertical slice of MooBee's own media engine.
+// Continuous GPU composition, synchronized audio, encoding and RTMP remain separate milestones.
+#[derive(Serialize)]
+struct DisplayInfo {
+    id: usize,
+    name: String,
+    width: u32,
+    height: u32,
+}
+
+#[tauri::command]
+fn list_displays() -> Result<Vec<DisplayInfo>, String> {
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    {
+        let monitors = xcap::Monitor::all().map_err(|error| error.to_string())?;
+        monitors
+            .into_iter()
+            .enumerate()
+            .map(|(id, monitor)| Ok(DisplayInfo {
+                id,
+                name: monitor.friendly_name().map_err(|error| error.to_string())?,
+                width: monitor.width().map_err(|error| error.to_string())?,
+                height: monitor.height().map_err(|error| error.to_string())?,
+            }))
+            .collect()
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        Ok(Vec::new())
+    }
+}
+
+#[tauri::command]
+fn capture_display(display_id: usize) -> Result<String, String> {
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    {
+        use base64::Engine as _;
+        let monitor = xcap::Monitor::all()
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .nth(display_id)
+            .ok_or_else(|| "Display not found; refresh available displays".to_string())?;
+        let screenshot = monitor.capture_image().map_err(|error| error.to_string())?;
+        let image = image::DynamicImage::ImageRgba8(screenshot);
+        let preview = image.resize(960, 540, image::imageops::FilterType::Triangle);
+        let mut cursor = std::io::Cursor::new(Vec::new());
+        preview.write_to(&mut cursor, image::ImageFormat::Png).map_err(|error| error.to_string())?;
+        Ok(format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(cursor.into_inner())))
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        let _ = display_id;
+        Err("Native display capture is not implemented on this platform yet".into())
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let (sender, _) = broadcast::channel(100);
@@ -121,7 +177,7 @@ pub fn run() {
             tauri::async_runtime::spawn(serve_overlays(runner_state));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![emit_test_alert])
+        .invoke_handler(tauri::generate_handler![emit_test_alert, list_displays, capture_display])
         .run(tauri::generate_context!())
         .expect("failed to run MooBee Live desktop");
 }
