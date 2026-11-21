@@ -30,6 +30,7 @@ pub struct ClipInfo {
     id: String,
     path: String,
     bytes: u64,
+    format: &'static str,
     modified_ms: u128,
 }
 
@@ -177,10 +178,17 @@ pub fn list_test_clips(app: tauri::AppHandle) -> Result<Vec<ClipInfo>, String> {
     for item in fs::read_dir(directory).map_err(|error| error.to_string())? {
         let entry = item.map_err(|error| error.to_string())?;
         let name = entry.file_name().to_string_lossy().into_owned();
-        if let Some(id) = name.strip_prefix("clip-").and_then(|n| n.strip_suffix(".gif")) {
+        // Both capture experiments stay under the private UUID-only clip directory.
+        let parsed = name
+            .strip_prefix("clip-")
+            .and_then(|filename| {
+                filename.strip_suffix(".gif").map(|id| (id, "gif", MAX_CLIP_BYTES))
+                    .or_else(|| filename.strip_suffix(".avi").map(|id| (id, "avi", 64 * 1024 * 1024)))
+            });
+        if let Some((id, format, max_size)) = parsed {
             if uuid::Uuid::parse_str(id).is_ok_and(|uuid| uuid.to_string() == id) {
                 let meta = entry.metadata().map_err(|error| error.to_string())?;
-                if meta.is_file() && meta.len() <= MAX_CLIP_BYTES {
+                if meta.is_file() && meta.len() <= max_size {
                     let modified_ms = meta
                         .modified()
                         .ok()
@@ -190,6 +198,7 @@ pub fn list_test_clips(app: tauri::AppHandle) -> Result<Vec<ClipInfo>, String> {
                         id: id.to_owned(),
                         path: entry.path().to_string_lossy().into_owned(),
                         bytes: meta.len(),
+                        format,
                         modified_ms,
                     });
                 }
