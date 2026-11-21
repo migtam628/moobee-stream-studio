@@ -87,6 +87,11 @@ try {
   await mobile.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'domcontentloaded' });
   await mobile.getByRole('heading', { name: 'Studio' }).waitFor();
   await mobile.screenshot({ path: new URL('mobile.png', dir).pathname, fullPage: true });
+  await mobile.getByRole('button', { name: 'Open navigation' }).click();
+  await mobile.getByRole('button', { name: 'Clips' }).click();
+  await mobile.getByRole('heading', { name: 'Browser screen recording' }).waitFor();
+  await mobile.screenshot({ path: new URL('mobile-clips.png', dir).pathname, fullPage: true });
+
   const overflow = await mobile.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 2);
   if (overflow) throw new Error('Mobile viewport has unintended horizontal overflow');
   if (errors.length) throw new Error(`Browser errors: ${errors.join('; ')}`);
