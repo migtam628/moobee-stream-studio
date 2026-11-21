@@ -183,6 +183,12 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
     const clips = await invoke<{ id: string; path: string; bytes: number }[]>('list_test_clips')
     return { available: true, clips }
   }
+  if (path === '/clips/capture-avi') {
+    if (typeof body.displayId !== 'number' || !Number.isSafeInteger(body.displayId) ||
+        typeof body.seconds !== 'number' || !Number.isInteger(body.seconds) ||
+        body.seconds < 2 || body.seconds > 8) throw new Error('Native AVI test duration must be 2–8 seconds')
+    return await invoke('capture_silent_avi', { displayId: body.displayId, seconds: body.seconds })
+  }
   if (path === '/clips/capture') {
     if (typeof body.displayId !== 'number' || !Number.isSafeInteger(body.displayId) ||
         typeof body.seconds !== 'number' || !Number.isInteger(body.seconds) ||
