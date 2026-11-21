@@ -1,6 +1,6 @@
 # MooBee Stream Studio
 
-**Standalone Alpha 0.3.5 (native frame-source diagnostics)** — a native streaming studio foundation, independent of OBS Studio and Streamlabs. The old 0.2 installers are legacy OBS-controller builds and are **not** standalone.
+**Standalone Alpha 0.3.6 (native MJPEG AVI test video)** — a native streaming studio foundation, independent of OBS Studio and Streamlabs. The old 0.2 installers are legacy OBS-controller builds and are **not** standalone.
 
 ![Early visual direction](docs/design-reference.webp)
 
@@ -10,6 +10,7 @@
 - Native display enumeration and screenshot previews on macOS and Windows, using the bundled Rust XCap library. Screen Recording permission is required on macOS.
 - **Clips → Capture Silent GIF**: a first-party 2–10 second, approximately 2 fps local display test clip. The saved GIF can be previewed and the file path copied inside the app.
 - **Native Capture Input Diagnostic**: measure continuous raw frames arriving from the bundled XCap video source on Mac/Windows, with average FPS, resolution, first-frame latency and maximum gap. This is not a recorder or streamer.
+- **Capture Video AVI** (Windows/macOS): record a short 2–8 second, 640×360, 10 fps silent MJPEG AVI video from the continuous native capture stream, encoded/muxed by our own Rust code. It is a video-file output test, not the final audio/video recorder. Play AVI externally in VLC or a compatible media player.
 - **Web Clips → Record shared screen**: browser-native canvas compositing combines an approved screen, optional webcam picture-in-picture and optional microphone/shared audio. The browser records a 1280×720 WebM/MP4 where supported and saves the file locally, without uploading it.
 - Our own local scene management: create/rename/duplicate/delete scenes, select program/preview scenes, enable Studio Mode, take transitions, add/remove display sources, and control source visibility.
 - Native scene drafts persist in Tauri's local storage; the web/API edition now saves scene collections atomically on disk, with Docker volume persistence.
@@ -39,6 +40,10 @@ The standalone local web/API edition runs with `npm run dev`; see `docs/TAURI.md
 ## Browser-local recording acceptance
 
 On the HTTPS web preview or localhost, open **Clips → Browser screen recording**, choose 5, 10 or 30 seconds and click **Record shared screen**. Approve a screen, window, or tab in the browser dialog. Use **Stop** or the automatic duration limit, preview the local result, and select **Save recording**. WebM or MP4 depends on your browser. Microphone or shared audio must be explicitly enabled and approved. Audio capture varies by platform/browser. This test compositor is not yet the full MooBee scene graph. Unsupported browsers/mobile devices display a clear unavailable message.
+
+## Native silent video-file acceptance
+
+Install the Windows/macOS test build, select a display in **Clips**, choose 4 seconds, and select **Capture Video AVI**. The built-in Rust pipeline samples continuous incoming video frames, compresses them to JPEG, wraps them into an indexed RIFF AVI container, and writes to the local `test-clips` app-data folder. Use **Copy file path** and open the `.avi` in an MJPEG AVI-capable player such as VLC; validate that it plays for the requested duration. No external process is needed for capture/encoding, but playback relies on the chosen player. This experiment is **silent**, capped at 640×360/10 fps and 8 seconds, and does not activate the main Record or Go Live controls.
 
 ## Native real-time frame diagnostics
 
