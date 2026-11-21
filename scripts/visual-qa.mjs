@@ -49,13 +49,27 @@ try {
   // Simulated browser stream tests UI wiring without attempting permissionless real capture.
   const recordingPage = await browser.newPage({ viewport: { width: 1200, height: 800 } });
   await recordingPage.addInitScript(() => {
-    const fakeTrack = { addEventListener() {}, stop() {} };
+    const screenCanvas = document.createElement('canvas');
+    screenCanvas.width = 640;
+    screenCanvas.height = 360;
+    const screenContext = screenCanvas.getContext('2d');
+    screenContext.fillStyle = '#6839d0';
+    screenContext.fillRect(0, 0, 640, 360);
+    const cameraCanvas = document.createElement('canvas');
+    cameraCanvas.width = 320;
+    cameraCanvas.height = 180;
+    const cameraContext = cameraCanvas.getContext('2d');
+    cameraContext.fillStyle = '#3ba8b1';
+    cameraContext.fillRect(0, 0, 320, 180);
     Object.defineProperty(navigator, 'mediaDevices', {
       configurable: true,
-      value: { getDisplayMedia: async () => ({
-        getTracks: () => [fakeTrack],
-        getVideoTracks: () => [fakeTrack]
-      }) }
+      value: {
+        getDisplayMedia: async () => screenCanvas.captureStream(30),
+        getUserMedia: async options => {
+          if (!options.video) return new MediaStream([]);
+          return cameraCanvas.captureStream(30);
+        }
+      }
     });
     class FakeRecorder {
       static isTypeSupported(type) { return type.startsWith('video/webm'); }
@@ -76,7 +90,11 @@ try {
   });
   await recordingPage.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'domcontentloaded' });
   await recordingPage.getByRole('button', { name: 'Clips' }).first().click();
+  await recordingPage.getByLabel('Webcam picture-in-picture').check();
+  await recordingPage.getByLabel('Camera position').selectOption('left');
   await recordingPage.getByRole('button', { name: 'Record shared screen' }).click();
+  await recordingPage.getByLabel('Live composited screen and camera preview').waitFor();
+
   await recordingPage.getByRole('button', { name: /Stop ·/ }).click();
   await recordingPage.getByText('Local recording ready').waitFor({ timeout: 5000 });
   const saveLink = recordingPage.getByRole('link', { name: 'Save recording' });

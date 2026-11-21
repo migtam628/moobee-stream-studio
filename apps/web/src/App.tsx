@@ -321,7 +321,7 @@ function ClipLab() {
     } finally { setWorking(false) }
   }
   const selected = clips.find(item => item.id === selectedClip)
-  return <><div className="workspace-heading"><div><h1>Clips</h1><p>Local recording experiments using native desktop capture or browser screen sharing.</p></div><span className="status-pill">Silent GIF prototype · 2 fps</span></div>
+  return <><div className="workspace-heading"><div><h1>Clips</h1><p>Local capture tools: short desktop GIFs or composited browser video with optional webcam and audio.</p></div><span className="status-pill">Silent GIF prototype · 2 fps</span></div>
     {!desktop && <BrowserRecorder/>}
     <div className="settings-layout clip-lab-grid">
       <Panel title="Capture a test clip" icon={Clapperboard}>
@@ -391,7 +391,7 @@ export default function App() {
   const go = (target: Tab) => { setTab(target); setDrawerOpen(false) }
   return <div className="app-shell">
     <header className="app-topbar"><div className="brand"><RadioTower size={27}/><span>MooBee <em>Studio</em></span></div><div className="top-divider"/><div className="project-select"><span>Workspace</span><strong>My Studio</strong></div><div className="top-spacer"/><div className="destination-pills"><span className="dest-label">Destinations</span><span className="destination"><span className="dest-icon twitch">T</span>Twitch <small>Not linked</small></span><span className="destination"><span className="dest-icon youtube">▶</span>YouTube <small>Not linked</small></span><span className="destination"><span className="dest-icon kick">K</span>Kick <small>Not linked</small></span></div><div className="top-divider"/><span className="profile">MT</span><button className="mobile-menu" type="button" aria-label={drawerOpen ? 'Close navigation' : 'Open navigation'} aria-expanded={drawerOpen} onClick={() => setDrawerOpen(!drawerOpen)}><LayoutGrid size={22}/></button></header>
-    <aside className={`sidebar ${drawerOpen ? 'drawer-open' : ''}`}><nav>{navigation.map(({ label, icon: Icon }) => <button key={label} className={`nav-item ${tab === label ? 'active' : ''}`} onClick={() => go(label)}><Icon size={19}/><span>{label}</span></button>)}</nav><div className="sidebar-bottom"><div className="release-label">ALPHA 0.3.3 (DEV)</div><button onClick={() => go('Settings')}><CircleHelp size={16}/>Engine guide</button></div></aside>
+    <aside className={`sidebar ${drawerOpen ? 'drawer-open' : ''}`}><nav>{navigation.map(({ label, icon: Icon }) => <button key={label} className={`nav-item ${tab === label ? 'active' : ''}`} onClick={() => go(label)}><Icon size={19}/><span>{label}</span></button>)}</nav><div className="sidebar-bottom"><div className="release-label">ALPHA 0.3.4 (DEV)</div><button onClick={() => go('Settings')}><CircleHelp size={16}/>Engine guide</button></div></aside>
     <main className="workspace">
       {error && <div className="error-banner" role="alert"><span>{error}</span><button onClick={() => setError('')}><X size={17}/></button></div>}
       {(tab === 'Studio' || tab === 'Scenes') && <Studio status={status} perform={perform} pending={pending} setTab={go}/>}

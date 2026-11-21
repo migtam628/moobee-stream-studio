@@ -21,3 +21,20 @@
 .browser-recorder-download{margin-bottom:1px}
 .browser-recorder-note{color:#a59ab7;border-top:1px solid #353144;line-height:1.6;font-size:11px;padding:13px 20px;margin:0}
 @media(max-width:700px){.browser-recorder{margin-top:12px}.browser-recorder-head{padding:15px}.browser-recorder-form{padding:14px}.browser-recorder-actions{align-items:flex-start;flex-direction:column}}
+
+/* Native browser compositor controls and live 16:9 canvas preview */
+.browser-recorder-options{display:flex;gap:14px;flex-wrap:wrap}
+.browser-recorder-options>label{display:flex;flex-direction:column;gap:7px;color:#d7cbea;font-size:12px;font-weight:700;min-width:165px}
+.browser-recorder-toggles{display:flex;flex-wrap:wrap;gap:12px 18px;padding:14px;border:1px solid #484055;border-radius:8px;background:#1b1a28}
+.browser-recorder-toggles label{display:inline-flex;gap:8px;align-items:center;font-size:12px;color:#d5cee5;cursor:pointer}
+.browser-recorder-toggles input{width:16px;height:16px;accent-color:#b59bea;cursor:pointer}
+.browser-recorder-toggles label:has(input:disabled){opacity:.55}
+.browser-composition{position:relative;display:block;aspect-ratio:16/9;width:100%;max-width:760px;border:1px solid #58446e;border-radius:9px;overflow:hidden;background:#15121f}
+.browser-composition canvas{display:block;width:100%;height:100%;object-fit:contain}
+.browser-composition-empty{position:absolute;inset:0;pointer-events:none;background:radial-gradient(circle at 48% 38%,#35264f,#171321 76%);display:flex;flex-direction:column;gap:9px;align-items:center;justify-content:center;color:#bcaada;text-align:center;padding:20px}
+.browser-composition-empty strong{font-size:14px;color:#e8ddf9}
+.browser-composition-empty span{font-size:11px;line-height:1.5;color:#afa1c2}
+.browser-composition-live{position:absolute;top:12px;left:12px;border-radius:5px;padding:7px 11px;background:#bd334b;color:#fff;font-size:11px;font-weight:800;letter-spacing:.6px}
+.browser-recorder-notice{color:#f1d99a;background:#463a24;border:1px solid #685234;padding:10px;border-radius:7px;font-size:12px}
+.browser-recorder-actions>button:focus-visible,.browser-recorder-download:focus-visible,.browser-recorder-options select:focus-visible{outline:2px solid #d6c0ff;outline-offset:2px}
+@media(max-width:700px){.browser-recorder-options>label{width:100%;max-width:none}.browser-composition-empty span{font-size:10px}.browser-recorder-toggles{flex-direction:column;align-items:flex-start}}
