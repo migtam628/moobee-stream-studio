@@ -1,4 +1,4 @@
-name: Build and release MooBee Live
+name: Build and release MooBee Stream Studio
 
 on:
   push:
@@ -37,14 +37,14 @@ jobs:
       - run: npm run build
       - name: Package self-hosted web app and local API
         run: |
-          tar -czf "moobee-live-web-${GITHUB_SHA::7}.tar.gz" \
+          tar -czf "moobee-stream-studio-web-${GITHUB_SHA::7}.tar.gz" \
             package.json package-lock.json \
-            apps/api/package.json apps/api/server.mjs apps/api/validation.mjs \
-            apps/web/package.json apps/web/dist apps/desktop/package.json
+            apps/api/package.json apps/api/server.mjs apps/api/validation.mjs apps/api/studio.mjs \
+            apps/web/package.json apps/web/dist apps/desktop/package.json apps/desktop/src-tauri/resources/overlay.html
       - uses: actions/upload-artifact@v4
         with:
           name: web-node-bundle
-          path: moobee-live-web-*.tar.gz
+          path: moobee-stream-studio-web-*.tar.gz
           if-no-files-found: error
 
   desktop:
@@ -139,7 +139,7 @@ jobs:
       - name: Collect installable debug APK
         run: |
           mkdir -p release-assets
-          find apps/desktop/src-tauri/gen/android/app/build/outputs/apk -type f -name '*.apk' -exec cp '{}' release-assets/moobee-live-android-arm64-debug.apk \;
+          find apps/desktop/src-tauri/gen/android/app/build/outputs/apk -type f -name '*.apk' -exec cp '{}' release-assets/moobee-stream-studio-android-arm64-debug.apk \;
           test -s release-assets/moobee-live-android-arm64-debug.apk
       - uses: actions/upload-artifact@v4
         with:
@@ -159,7 +159,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: release-assets
-      - name: Publish desktop and web prerelease even if Android fails
+      - name: Publish standalone prerelease and checksums
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -167,9 +167,13 @@ jobs:
           case "$TAG" in v*) ;; *) echo 'Release branch must be named release/v*' >&2; exit 1 ;; esac
           mapfile -d '' FILES < <(find release-assets -type f -print0)
           test "${#FILES[@]}" -ge 5
-          gh release create "$TAG" "${FILES[@]}" \
+          for expected in macos-arm64 macos-x64 windows-x64 linux-x64; do
+            find release-assets -type f -name "${expected}-*" -print -quit | grep -q . || { echo "Missing installer for ${expected}"; exit 1; }
+          done
+          find release-assets -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+          gh release create "$TAG" "${FILES[@]}" SHA256SUMS.txt \
             --target "$GITHUB_SHA" \
-            --title "MooBee Live $TAG (Alpha)" \
+            --title "MooBee Stream Studio $TAG — Standalone Capture Alpha" \
             --notes-file docs/RELEASE_NOTES.md \
             --prerelease
 
