@@ -8,16 +8,16 @@ MooBee is a separate broadcasting product. Users should install MooBee, sign in 
 
 | Feature | Alpha 0.3 scope | Gate before calling it complete |
 |---|---|---|
-| Scene data model | Implemented for native desktop and local Node API | Add persistent shared schema + migrations and tests |
+| Scene data model | Versioned portable collection JSON, rename/duplicate/delete, validated import/export on both clients | Consolidate native and API validators into a single shared schema + migrations |
 | Preview/program scene selection | Implemented as state | Verify GPU compositor shows accurate preview and program pixels |
-| Add screen source | Implemented for first display on macOS/Windows | Device chooser, permission flow, hotplug and multi-display testing |
+| Add screen source | Native display picker and scene source removal on Mac/Windows | Permission flow, hotplug and multi-display hardware testing |
 | Single-frame capture | Rust screenshot command via XCap on macOS/Windows | Live hardware QA, performance and permission acceptance |
 | Preview | Still screenshot approximately every 5 seconds | Replace with synchronized low latency continuous frames |
 | Audio mixer | Not implemented | Actual capture, level meters, mute, mixing, sync |
 | Recording | Not implemented | Produce playable files, crash-safe muxing, seek/test across OS |
 | Streaming | Not implemented | Encode and RTMP/SRT push to test endpoint; confirm receiving side |
 | Alerts | Local test overlay service | Composite into actual video output |
-| Web/API | Local scene control and event SSE | Authentication, persistence, RBAC, remote TLS, audited endpoints |
+| Web/API | Local scene control, SSE, atomic file persistence and JSON backup/restore | Auth, RBAC, remote TLS, audited endpoints and durable multiuser database |
 | Android/Linux capture | Not implemented | Implement and hardware-test platform-native capture |
 
 **Do not mark output capabilities live/working until the corresponding media tests pass.**
