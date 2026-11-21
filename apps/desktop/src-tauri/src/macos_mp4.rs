@@ -8,7 +8,7 @@ use tauri::Manager;
 #[cfg(target_os = "macos")]
 use std::{
     ffi::{CStr, CString},
-    fs::{self, File},
+    fs::{self, OpenOptions},
     os::raw::{c_char, c_int},
     sync::atomic::Ordering,
 };
@@ -104,8 +104,8 @@ fn record_mp4_to_private_folder(
         return Err(format!("Native macOS recording failed: {message}"));
     }
 
-    let file = File::open(&temporary)
-        .map_err(|error| format!("Native recorder created no MP4 file: {error}"))?;
+    let file = OpenOptions::new().read(true).write(true).open(&temporary)
+        .map_err(|error| format!("Native recorder created no readable/syncable MP4 file: {error}"))?;
     let len = file.metadata().map_err(|error| error.to_string())?.len();
     if !(4096..=256 * 1024 * 1024).contains(&len) {
         drop(file);
