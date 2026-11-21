@@ -66,6 +66,23 @@ try {
 }
 
 app.disable('x-powered-by');
+// Guard the unauthenticated loopback API against DNS rebinding and hostile browser origins.
+const trustedHostname = hostname => ['127.0.0.1', 'localhost', '[::1]'].includes(hostname.toLowerCase());
+app.use((req, res, next) => {
+  const hostName = (req.headers.host || '').replace(/:\d+$/, '');
+  if (!trustedHostname(hostName)) return res.status(403).json({ error: 'MooBee local API only accepts loopback hosts' });
+  if (req.headers.origin) {
+    try {
+      const origin = new URL(req.headers.origin);
+      if (origin.protocol !== 'http:' || !trustedHostname(origin.hostname)) {
+        return res.status(403).json({ error: 'Untrusted browser origin' });
+      }
+    } catch {
+      return res.status(403).json({ error: 'Invalid browser origin' });
+    }
+  }
+  next();
+});
 app.use(express.json({ limit: '128kb' }));
 app.use((_req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
