@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>NSScreenCaptureUsageDescription</key>
+  <string>MooBee Stream Studio requests permission only when you choose to capture a selected display for a local recording.</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>MooBee Stream Studio uses your microphone only when you enable microphone audio in a local recording.</string>
+  <key>NSCameraUsageDescription</key>
+  <string>MooBee Stream Studio uses a camera only when you explicitly enable an on-screen webcam source.</string>
+</dict>
+</plist>
