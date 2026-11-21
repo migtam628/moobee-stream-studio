@@ -49,7 +49,7 @@
 .clip-result>div{min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:8px}
 .clip-result small{color:#9ac2bd}
 .clip-result code,.clip-path code{font-size:11px;color:#c5b5db;overflow-wrap:anywhere;word-break:break-word}
-.clip-preview{aspect-ratio:16/9;margin:15px;background:#111019;display:grid;place-items:center;border-radius:7px;overflow:hidden}
+.clip-preview{position:relative;aspect-ratio:16/9;margin:15px;background:#111019;display:grid;place-items:center;border-radius:7px;overflow:hidden}
 .clip-preview img{width:100%;height:100%;object-fit:contain}
 .clip-list{max-height:220px;overflow:auto;margin:0 15px 15px;border:1px solid #393246;border-radius:7px}
 .clip-list-row{background:transparent;border:0;color:#e7dffc;border-bottom:1px solid #312b40;padding:11px 13px;width:100%;display:flex;align-items:center;gap:8px;font-size:12px;text-align:left}
