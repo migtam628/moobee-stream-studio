@@ -1,6 +1,6 @@
 # MooBee Stream Studio
 
-**Standalone Alpha 0.3.7 (native media file reliability)** — a native streaming studio foundation, independent of OBS Studio and Streamlabs. The old 0.2 installers are legacy OBS-controller builds and are **not** standalone.
+**Standalone Alpha 0.3.8 (macOS native H.264 MP4 recording experiment)** — a native streaming studio foundation, independent of OBS Studio and Streamlabs. The old 0.2 installers are legacy OBS-controller builds and are **not** standalone.
 
 ![Early visual direction](docs/design-reference.webp)
 
@@ -11,6 +11,7 @@
 - **Clips → Capture Silent GIF**: a first-party 2–10 second, approximately 2 fps local display test clip. The saved GIF can be previewed and the file path copied inside the app.
 - **Native Capture Input Diagnostic**: measure continuous raw frames arriving from the bundled XCap video source on Mac/Windows, with average FPS, resolution, first-frame latency and maximum gap. This is not a recorder or streamer.
 - **Capture Video AVI** (Windows/macOS): record a short 2–8 second, 640×360, 10 fps silent MJPEG AVI video from the continuous native capture stream, encoded/muxed by our own Rust code. It is a video-file output test, not the final audio/video recorder. Play AVI externally in VLC or a compatible media player.
+- **macOS 15+ → Capture MP4 (macOS test)**: a first-party native ScreenCaptureKit test that captures a selected display to a local H.264 MP4 for 3–15 seconds, with optional system audio and experimental microphone capture. The system codec is integrated into the installed Mac app, without OBS/Streamlabs or external FFmpeg capture. It does not yet capture MooBee scene layers or webcam and is not full production recording. Actual audio tracks and playback need real-device validation.
 - **Incremental AVI file publishing**: JPEG video frames are written to a private temporary file instead of accumulating the entire recording in RAM. MooBee finalizes the indexed AVI container, synchronizes it to disk, and only then publishes the `.avi` file in the Clips library. Failed captures remove incomplete output; abrupt process exits may leave hidden `.part` files.
 - **Web Clips → Record shared screen**: browser-native canvas compositing combines an approved screen, optional webcam picture-in-picture and optional microphone/shared audio. The browser records a 1280×720 WebM/MP4 where supported and saves the file locally, without uploading it.
 - Our own local scene management: create/rename/duplicate/delete scenes, select program/preview scenes, enable Studio Mode, take transitions, add/remove display sources, and control source visibility.
@@ -67,7 +68,7 @@ Open **Clips** on an installed Mac/Windows build and select the desktop display.
 | Backend | MooBee Node API and event stream, later accounts/permissions/DB |
 | Web/mobile | Creator management clients, separate device-capability implementations |
 
-See `docs/PRODUCTION_READINESS.md` for the **P0 production go/no-go criteria** and `docs/ROADMAP.md` for the implementation plan and `docs/TAURI.md` for release/OS readiness. Existing GitHub Actions targets macOS Apple Silicon and Intel, Windows x64, Linux x64, Android ARM64, and web. **Build success is not media-functionality acceptance.**
+See `docs/MACOS_MP4_ACCEPTANCE.md` for the macOS MP4 manual test matrix and `docs/PRODUCTION_READINESS.md` for the **P0 production go/no-go criteria** and `docs/ROADMAP.md` for the implementation plan and `docs/TAURI.md` for release/OS readiness. Existing GitHub Actions targets macOS Apple Silicon and Intel, Windows x64, Linux x64, Android ARM64, and web. **Build success is not media-functionality acceptance.**
 
 ## Licensing
 
