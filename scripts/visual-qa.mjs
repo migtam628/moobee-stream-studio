@@ -8,7 +8,7 @@ const root = new URL('../', import.meta.url);
 const port = '18887';
 const server = spawn(process.execPath, ['apps/api/server.mjs'], {
   cwd: root.pathname,
-  env: { ...process.env, API_HOST: '127.0.0.1', API_PORT: port, OBS_WS_URL: 'ws://127.0.0.1:4455' },
+  env: { ...process.env, API_HOST: '127.0.0.1', API_PORT: port },
   stdio: 'ignore'
 });
 let browser;
