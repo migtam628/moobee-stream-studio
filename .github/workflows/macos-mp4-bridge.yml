@@ -1,0 +1,48 @@
+name: Compile native macOS ScreenCaptureKit MP4 adapter
+
+on:
+  pull_request:
+  push:
+    branches: [main, 'release/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  screen-recording:
+    name: ScreenCaptureKit Swift ABI — ${{ matrix.label }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+            label: Apple Silicon
+            swift_target: arm64-apple-macos15.0
+          - runner: macos-15-intel
+            label: Intel
+            swift_target: x86_64-apple-macos15.0
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Swift type correctness against the macOS 15+ SDK
+        run: |
+          SDK="$(xcrun --sdk macosx --show-sdk-path)"
+          xcrun swiftc -swift-version 5 -parse-as-library -typecheck \
+            -target "${{ matrix.swift_target }}" -sdk "$SDK" \
+            apps/desktop/src-tauri/swift/MooBeeScreenRecording.swift
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+      - run: npm ci
+      - name: Compile native Rust-Tauri and linked Swift recorder
+        run: |
+          npm run build
+          cd apps/desktop/src-tauri
+          cargo check
