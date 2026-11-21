@@ -91,7 +91,7 @@ function ScenePreview({ status, label, previewScene }: { status: StudioStatus; l
 }
 
 function ScenesPanel({ status, perform, pending }: { status: StudioStatus; perform: (path: string, body: object) => Promise<boolean>; pending: boolean }) {
-  return <Panel title="Scenes" icon={Layers} action={<button disabled={pending} className="secondary-button" onClick={() => { const name = window.prompt('New scene name'); if (name?.trim()) void perform('/studio/action', { action: 'addScene', sceneName: name.trim() }) }}>+ Add Scene</button>}>
+  return <Panel title="Scenes" icon={Layers} action={<button disabled={pending || isStaticPreview} className="secondary-button" onClick={() => { const name = window.prompt('New scene name'); if (name?.trim()) void perform('/studio/action', { action: 'addScene', sceneName: name.trim() }) }}>+ Add Scene</button>}>
     <div className="rows-scroll">{status.scenes.length ? status.scenes.map((scene) => <button disabled={pending} key={scene} className={`scene-row ${scene === (status.studioMode ? status.previewScene : status.currentScene) ? 'selected' : ''}`} onClick={() => void perform('/studio/action', { action: 'scene', sceneName: scene })}>
       <span className="scene-thumbnail"><Monitor size={18}/></span><span className="truncate">{scene}</span>{scene === status.currentScene && <span className="scene-on-air">ON AIR</span>}{scene === status.previewScene && status.studioMode && <Check size={15}/>}</button>) : <div className="empty-list">No scenes yet. Create one to get started.</div>}</div>
   </Panel>
@@ -188,9 +188,9 @@ function FeatureBullet({ title, detail, ready = false }: { title: string; detail
 }
 
 const moduleDetails: Record<'Multistream' | 'AI Sidekick' | 'Clips' | 'Chatbot' | 'Analytics', { lead: string; features: string[] }> = {
-  Multistream: { lead: 'One incoming stream, multiple outgoing destinations through a managed relay.', features: ['MediaMTX RTMP relay and destination manager', 'Twitch, YouTube, Kick and custom RTMP destinations', 'Per-destination stream health and reconnects', 'Secure platform OAuth and encrypted stream credentials'] },
-  'AI Sidekick': { lead: 'An optional local-first co-producer for live broadcasting.', features: ['Automation triggers and scene switching', 'Ollama provider and optional GPU acceleration', 'Chat-aware co-host and content suggestions', 'Stream event detection with human approval controls'] },
-  Clips: { lead: 'Turn broadcasts and recordings into polished short-form content.', features: ['MooBee native replay buffer and recording ingest', 'ClipForge integration and automatic highlight detection', 'Vertical reframing, subtitles, and video editor', 'Export and publish workflows'] },
+  Multistream: { lead: 'One incoming stream, multiple outgoing destinations through a managed relay.', features: ['MooBee-native RTMP relay and destination manager', 'Twitch, YouTube, Kick and custom RTMP destinations', 'Per-destination stream health and reconnects', 'Secure platform OAuth and encrypted stream credentials'] },
+  'AI Sidekick': { lead: 'An optional local-first co-producer for live broadcasting.', features: ['Automation triggers and scene switching', 'Locally managed model runtime with optional GPU acceleration', 'Chat-aware co-host and content suggestions', 'Stream event detection with human approval controls'] },
+  Clips: { lead: 'Turn broadcasts and recordings into polished short-form content.', features: ['MooBee native replay buffer and recording ingest', 'Built-in highlight detection, replay clipper and timeline editor', 'Vertical reframing, subtitles, and video editor', 'Export and publish workflows'] },
   Chatbot: { lead: 'Moderate and engage viewers across connected streaming channels.', features: ['Platform chat connectors and role permissions', 'Commands, timers, loyalty, giveaways', 'Custom named bot with moderation rules', 'Shared activity feed and audit logs'] },
   Analytics: { lead: 'A consolidated view of broadcast performance and creator growth.', features: ['MooBee native encoder and capture health', 'Destination stream diagnostics', 'Audience, engagement, and alert histories', 'Historical reports and exports'] }
 }
