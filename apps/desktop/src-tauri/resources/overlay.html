@@ -23,6 +23,7 @@
   <div id="root"><section id="alert" aria-live="polite"><div id="symbol">✦</div><div id="kind"></div><h1 id="name"></h1><p id="message"></p></section></div>
   <script>
     const stream = new EventSource('/api/events');
+    stream.addEventListener('open', () => { document.documentElement.dataset.overlayConnected = 'true'; });
     const container = document.getElementById('alert');
     let timer;
     stream.addEventListener('alert', function (event) {
