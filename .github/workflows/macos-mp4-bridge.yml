@@ -9,6 +9,12 @@ on:
 permissions:
   contents: read
 
+# Keep only the latest PR's native macOS compile; older Swift/Rust builds can
+# otherwise queue behind a newer patch and waste platform CI minutes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   screen-recording:
     name: ScreenCaptureKit Swift ABI — ${{ matrix.label }}
