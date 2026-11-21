@@ -1,32 +1,33 @@
-# MooBee Stream Studio v0.3.1-alpha.1 — Scene Workspace
+# MooBee Stream Studio v0.3.2-alpha.1 — Native Test Clip Lab
 
-**Experimental standalone prerelease, not yet a live video broadcaster.** No OBS or Streamlabs installation or integration is required.
+**Experimental standalone prerelease, not a complete live-broadcast application.**
+No OBS Studio, Streamlabs, external encoder executable or external capture API is required.
 
-## New in 0.3.1
+## New in Alpha 0.3.2
 
-- Rename, duplicate and delete scenes, with preview/program selection preserved when scenes are renamed.
-- Remove individual sources, while retaining source visibility controls.
-- Choose a specific native display on Windows or macOS rather than always adding the first detected monitor.
-- Versioned JSON scene collection export/import in the Settings panel, with validation and confirmation before replacement.
-- Local Node web/API edition saves scene collections atomically in a private data folder; Docker Compose persists its scene files in `./data`.
-- Added regression tests for import rejection, scene transitions, source IDs, backup/export and deletions.
+- Built-in first-party capture-to-file vertical slice on macOS/Windows.
+- Select any detected display in the **Clips** workspace and capture a **2, 4, 6, or 10 second silent animated GIF**.
+- Rust XCap screenshot sampling at approximately **2 frames per second**, GIF encoding via the embedded Rust `image` crate, automatic output under MooBee's app-data `test-clips` folder.
+- Animated preview, recent local clip listing, saved file path and clipboard-copy action.
+- bounded capture duration, output size checks (32 MB), single-capture concurrency guard, UUID-only local clip access.
+- Browser/API capability gates: no fake remote capture, encoding, or Go Live state.
 
-## Retained from 0.3.0
+This work exercises successive native acquisition, image encoding and file persistence, and is **not** equivalent to full-frame-rate MP4/MKV recording or a production replay buffer. Actual FPS may vary with capture performance and operating-system permissions.
 
-- Tauri 2 desktop and native display screenshot capture on macOS/Windows (requires system screen recording permission).
-- Scene control state, independent local API, preview/program selections and local alert previews.
-- GitHub Actions installers for macOS Intel/Apple Silicon, Windows, Linux, Android test APK and self-hosted web archive.
+## Retained capabilities
+
+- Standalone Tauri 2 application, macOS/Windows single-frame capture, scene management, display selection, preview/program state.
+- Local API, versioned scene collections, JSON backup/restore, test alerts and local overlays.
+- Experimental Mac Intel/Apple Silicon, Windows, Linux, Android ARM64 and self-hosted web distributions.
 
 ## Still unavailable
 
-- Recording files, GPU video compositing, realtime full-framerate capture, audio capture/mixing, hardware encoding and broadcasting to streaming destinations. **Record / Go Live remain disabled.**
-- Android and Linux screen capture, public API authorization, production signatures/notarization, live chat/platform integrations.
+- Microphone/desktop audio, real-time multi-source GPU composition, 1080p60 capture, hardware video encoding, playable MP4/MKV videos, RTMP/RTMPS broadcasting, reconnect/multistreaming.
+- Main Record and Go Live remain disabled. Android and Linux cannot capture local test clips in this alpha.
+- Signed/notarized production installers and remote-user authenticated API.
 
-## Installation and caution
+## Testing
 
-- macOS: choose arm64 (Apple Silicon) or x64 (Intel) DMG, unsigned experimental build.
-- Windows: x64 setup EXE, unsigned experimental build.
-- Linux / Android: build artifacts are experimental UI/controller packages without native display capture.
-- Web: local API and browser UI. Never expose the loopback control API directly to the public internet.
+On macOS or Windows: install this alpha, grant Screen Recording permission as needed, open **Clips**, select a display, choose 4 seconds and **Capture Silent GIF**. Verify that the saved file is playable and the local preview animates. The resulting file is private to your device. Repeat with another display, and verify errors when permission is denied.
 
-An installer building successfully does not establish screen recording permission, camera/microphone functionality, or streaming capability. Validate local scenes and display snapshots on a test computer. Report issues in [GitHub](https://github.com/migtam628/moobee-stream-studio/issues).
+The platform builds validate compilation, not actual devices, audio/video fidelity, streaming, or performance. Report issues in the [GitHub repository](https://github.com/migtam628/moobee-stream-studio/issues).

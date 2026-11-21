@@ -37,6 +37,13 @@ try {
   await page.getByRole('button', { name: 'Send Test Alert' }).click();
   await overlay.getByText('ViceCityViewer').waitFor();
   await overlay.screenshot({ path: new URL('overlay.png', dir).pathname });
+  await page.getByRole('button', { name: 'Clips' }).first().click();
+  await page.getByRole('heading', { name: 'Clips' }).waitFor();
+  await page.getByText('Native test capture is only available in the installed Windows/macOS app', { exact: false }).waitFor();
+  if (await page.getByRole('button', { name: 'Capture Silent GIF' }).isEnabled()) {
+    throw new Error('Native device capture must remain disabled in the browser edition');
+  }
+  await page.screenshot({ path: new URL('clips.png', dir).pathname, fullPage: true });
   const mobile = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
   await mobile.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'domcontentloaded' });
   await mobile.getByRole('heading', { name: 'Studio' }).waitFor();

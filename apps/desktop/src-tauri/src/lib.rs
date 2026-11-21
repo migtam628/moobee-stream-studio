@@ -1,3 +1,5 @@
+mod clip;
+
 use axum::{
     extract::State,
     response::{sse::{Event, KeepAlive, Sse}, Html},
@@ -66,7 +68,7 @@ fn emit_test_alert(state: tauri::State<'_, OverlayState>, alert: AlertInput) -> 
         message,
         time,
     };
-    // Sending is best-effort: the overlay may not yet be open in OBS.
+    // Sending is best-effort: the local overlay may not be open.
     let _ = state.sender.send(event.clone());
     Ok(event)
 }
@@ -177,7 +179,7 @@ pub fn run() {
             tauri::async_runtime::spawn(serve_overlays(runner_state));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![emit_test_alert, list_displays, capture_display])
+        .invoke_handler(tauri::generate_handler![emit_test_alert, list_displays, capture_display, clip::capture_test_clip, clip::list_test_clips, clip::read_test_clip])
         .run(tauri::generate_context!())
         .expect("failed to run MooBee Live desktop");
 }

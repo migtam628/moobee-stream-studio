@@ -117,6 +117,16 @@ app.get('/api/studio/snapshot', (_req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   res.json({ image: null, available: false, reason: 'Display capture requires the native desktop app' });
 });
+// Media capture is device-local and not exposed by the browser control API.
+app.get('/api/clips', (_req, res) => res.json({
+  available: false, clips: [], reason: 'GIF test clips are available in the installed macOS/Windows desktop app'
+}));
+app.post('/api/clips/capture', (_req, res) => res.status(501).json({
+  error: 'Install MooBee Studio for local test capture. Browser and cloud capture are not available.'
+}));
+app.get('/api/clips/preview', (_req, res) => res.status(501).json({
+  error: 'Test clips are private files on the installed desktop app'
+}));
 app.get('/api/capture/displays', (_req, res) => res.json({ displays: [], available: false, reason: 'Screen access is only available in the installed desktop app' }));
 app.get('/api/activity', (_req, res) => res.json(history));
 app.get('/api/events', (req, res) => {
