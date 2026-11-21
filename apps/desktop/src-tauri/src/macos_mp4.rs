@@ -42,7 +42,7 @@ fn validate(seconds: u32, display_id: usize) -> Result<(), String> {
 unsafe extern "C" {
     fn moobee_macos_record_mp4(
         output_path: *const c_char,
-        display_index: c_int,
+        display_id: u32,
         duration_seconds: c_int,
         system_audio: c_int,
         microphone: c_int,
@@ -68,12 +68,25 @@ fn record_mp4_to_private_folder(
         .map_err(|_| "Invalid native MP4 destination path".to_owned())?;
     let mut error = [0 as c_char; 512];
 
+    // The UI stores an XCap monitor-list index. Resolve to macOS CGDirectDisplayID
+    // before invoking ScreenCaptureKit; their enumeration orders may differ.
+    let monitor = xcap::Monitor::all()
+        .map_err(|error| format!("Could not enumerate macOS displays: {error}"))?
+        .into_iter()
+        .nth(display_id)
+        .ok_or_else(|| "Selected display is no longer connected".to_owned())?;
+    let mac_display_id = monitor.id()
+        .map_err(|error| format!("Could not read macOS display identity: {error}"))?;
+    if mac_display_id == 0 {
+        return Err("Selected monitor has no valid macOS display identity".into());
+    }
+
     // This synchronous FFI call is always executed via spawn_blocking, not the
     // Tauri GUI thread; ScreenCaptureKit executes its async task on MainActor.
     let result = unsafe {
         moobee_macos_record_mp4(
             path.as_ptr(),
-            display_id as c_int,
+            mac_display_id,
             seconds as c_int,
             i32::from(system_audio),
             i32::from(microphone),
