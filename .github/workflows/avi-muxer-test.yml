@@ -23,6 +23,10 @@ jobs:
           "$RUNNER_TEMP/avi-tests" --nocapture
       - name: Generate a known-good JPEG fixture
         run: |
+          if ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq ffmpeg
+          fi
           command -v ffmpeg
           command -v ffprobe
           ffmpeg -hide_banner -loglevel error -f lavfi -i color=c=blue:s=640x360:r=1 -frames:v 1 -q:v 3 -y "$RUNNER_TEMP/source.jpg"
