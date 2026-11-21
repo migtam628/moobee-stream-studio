@@ -68,3 +68,7 @@ Do not assume embedded capture/encoding components are free of redistribution ob
 ## Alpha 0.3.2 progress
 
 The Clips laboratory now captures a short sequence of sampled desktop frames and encodes a local animated GIF, without installing external broadcast software. This is a deliberately small media-output milestone and does not qualify the primary Record/Go Live controls for activation. Next priority: high-frame-rate frame acquisition and timestamping, audio, GPU compositing, and then MP4/MKV muxing plus RTMP output.
+
+## Browser-native 0.3.2+ prototype
+
+Where the browser supports `getDisplayMedia` plus `MediaRecorder`, the Clips page can produce a local, user-consented silent WebM/MP4 clip without an external broadcasting application or server upload. This is separate from desktop Tauri GIF capture and not a production audio/video compositor, replay buffer, or livestream. Browser compatibility, permissions, resource limits and real video playback must be tested on target browsers.
