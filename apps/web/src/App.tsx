@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { isStaticPreview, request, runningInTauri, subscribeEvents } from './api'
+import BrowserRecorder from './BrowserRecorder'
 import { offline, type Activity as ActivityItem, type Alert, type StudioStatus } from './types'
 
 type Tab = 'Studio' | 'Scenes' | 'Overlays' | 'Alerts' | 'Multistream' | 'AI Sidekick' | 'Clips' | 'Chatbot' | 'Analytics' | 'Settings'
@@ -320,7 +321,8 @@ function ClipLab() {
     } finally { setWorking(false) }
   }
   const selected = clips.find(item => item.id === selectedClip)
-  return <><div className="workspace-heading"><div><h1>Clips</h1><p>A first native capture-to-file test, running entirely on your own computer.</p></div><span className="status-pill">Silent GIF prototype · 2 fps</span></div>
+  return <><div className="workspace-heading"><div><h1>Clips</h1><p>Local recording experiments using native desktop capture or browser screen sharing.</p></div><span className="status-pill">Silent GIF prototype · 2 fps</span></div>
+    {!desktop && <BrowserRecorder/>}
     <div className="settings-layout clip-lab-grid">
       <Panel title="Capture a test clip" icon={Clapperboard}>
         <div className="clip-form">
