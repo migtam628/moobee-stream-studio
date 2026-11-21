@@ -195,6 +195,14 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
     const dataUrl = await invoke<string>('read_test_clip', { clipId })
     return { dataUrl }
   }
+  if (path === '/capture/probe') {
+    if (typeof body.displayId !== 'number' || !Number.isSafeInteger(body.displayId) ||
+        typeof body.seconds !== 'number' || !Number.isInteger(body.seconds) ||
+        body.seconds < 2 || body.seconds > 5) {
+      throw new Error('Select a valid display and a 2–5 second capture diagnostic')
+    }
+    return await invoke('probe_native_capture', { displayId: body.displayId, seconds: body.seconds })
+  }
   if (path === '/capture/displays') {
     await refresh()
     return { displays, available: displays.length > 0 }

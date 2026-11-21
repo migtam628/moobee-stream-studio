@@ -11,11 +11,11 @@ use std::{
 };
 
 #[cfg(any(target_os = "windows", target_os = "macos"))]
-static CAPTURE_BUSY: AtomicBool = AtomicBool::new(false);
+pub(crate) static CAPTURE_BUSY: AtomicBool = AtomicBool::new(false);
 const MAX_CLIP_BYTES: u64 = 32 * 1024 * 1024;
 
 #[cfg(any(target_os = "windows", target_os = "macos"))]
-struct CaptureLock;
+pub(crate) struct CaptureLock;
 
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 impl Drop for CaptureLock {

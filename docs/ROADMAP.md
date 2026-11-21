@@ -76,3 +76,7 @@ Where the browser supports `getDisplayMedia` plus `MediaRecorder`, the Clips pag
 ## Alpha 0.3.4 — Composited browser recording
 
 The browser Clips workspace now uses a 1280×720 canvas capture pipeline (target up to 30 fps) with optional webcam picture-in-picture and Web Audio mixing of the user-approved microphone and/or available shared-tab/system audio. A local MediaRecorder exports a short WebM/MP4 file where supported. This is a separate web-browser media experiment, **not** the native Tauri desktop GPU/encoder implementation, and does not activate the main Record or Go Live controls. Automated checks exercise a synthetic video stream; physical camera, permissions, audio-sync and actual media decoding remain hardware QA requirements.
+
+## Alpha 0.3.5 — Native frame source measurement
+
+A Mac/Windows Rust capture diagnostic calls the bundled XCap continuous `Monitor::video_recorder()` API for a bounded 3-second sample and reports incoming raw frames, observed FPS, dimensions and timing gaps. It shares the exclusive capture guard with local GIF capture, retaining no raw frame images. These are **source performance numbers**, not encoded video or audio recording capabilities. Actual native capture must be evaluated on real macOS/Windows hardware before building the GPU compositor and hardware encoder. The primary Record/Go Live controls remain disabled.

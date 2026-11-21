@@ -127,6 +127,9 @@ app.post('/api/clips/capture', (_req, res) => res.status(501).json({
 app.get('/api/clips/preview', (_req, res) => res.status(501).json({
   error: 'Test clips are private files on the installed desktop app'
 }));
+app.post('/api/capture/probe', (_req, res) => res.status(501).json({
+  error: 'Continuous native frame diagnostics require the installed Windows or macOS app'
+}));
 app.get('/api/capture/displays', (_req, res) => res.json({ displays: [], available: false, reason: 'Screen access is only available in the installed desktop app' }));
 app.get('/api/activity', (_req, res) => res.json(history));
 app.get('/api/events', (req, res) => {
