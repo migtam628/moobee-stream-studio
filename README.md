@@ -1,6 +1,6 @@
 # MooBee Stream Studio
 
-**Standalone Alpha 0.3 (development branch)** — a new native streaming studio foundation, independent of OBS Studio and Streamlabs. The old 0.2 installers are legacy OBS-controller builds and are **not** standalone.
+**Standalone Alpha 0.3.1 (scene-workspace update)** — a native streaming studio foundation, independent of OBS Studio and Streamlabs. The old 0.2 installers are legacy OBS-controller builds and are **not** standalone.
 
 ![Early visual direction](docs/design-reference.webp)
 
@@ -8,9 +8,9 @@
 
 - Tauri 2 desktop application and original React creator control center.
 - Native display enumeration and screenshot previews on macOS and Windows, using the bundled Rust XCap library. Screen Recording permission is required on macOS.
-- Our own local scene management: create scenes, select program/preview scenes, enable Studio Mode, take transitions, add display sources, show/hide sources.
-- Per-device local scene draft persistence within Tauri's webview storage.
-- Independent Node local-only API with `/api/studio/status`, `/api/studio/action`, `/api/capture/displays`, SSE events, and alert-testing endpoints.
+- Our own local scene management: create/rename/duplicate/delete scenes, select program/preview scenes, enable Studio Mode, take transitions, add/remove display sources, and control source visibility.
+- Native scene drafts persist in Tauri's local storage; the web/API edition now saves scene collections atomically on disk, with Docker volume persistence.
+- Independent Node local-only API with `/api/studio/status`, `/api/studio/action`, `/api/studio/collection`, `/api/capture/displays`, SSE events, and alert-testing endpoints.
 - Rust local alert service, animated overlay test page, and local web edition.
 - No OBS WebSocket connection, OBS installer, OBS credentials, or Streamlabs dependency.
 
@@ -27,9 +27,11 @@ npm run build
 npm run desktop:dev
 ```
 
-Open **Studio → Add Scene** to create a scene. In the installed Mac/Windows desktop edition choose **Add Display**; enable Screen Recording permission where prompted. The preview updates roughly every five seconds with a single captured frame. Use **Studio Mode → select scene → Take** to change the program selection (this is state only, not yet a live encoded broadcast).
+Open **Studio → Add Scene** to create a scene. Each row can be renamed, duplicated or deleted. In the installed Mac/Windows desktop edition select a specific screen in **Sources** and choose **Add**; enable Screen Recording permission where prompted. The preview updates roughly every five seconds with a single captured frame. Use **Studio Mode → select scene → Take** to change the program selection (this is state only, not yet a live encoded broadcast).
 
-The standalone local web/API edition runs with `npm run dev`; see `docs/TAURI.md`. Its local API binds to 127.0.0.1 by default and has no remote authentication. **Never expose it directly to the internet.**
+Scene collection backup: open **Settings → Scene Collection Backup** to export or import `moobee-studio-scenes.json`. The format is versioned (`version: 1`), constrained to 40 scenes/30 display sources per scene, and validated before replacement. Export a backup before importing. Old native Alpha 0.3 drafts are migrated automatically when valid.
+
+The standalone local web/API edition runs with `npm run dev`; see `docs/TAURI.md`. Its API persists to `~/.moobee-stream-studio/scenes.v1.json`, or the `MOOBEE_DATA_DIR` override. Docker Compose binds `./data` to the internal state folder. Restrict access to this private data and back it up. The API binds to 127.0.0.1 by default and has no remote authentication. **Never expose it directly to the internet.**
 
 ## Architecture
 
