@@ -40,12 +40,12 @@ fn check_duration(seconds: u32) -> Result<(), String> {
 }
 
 #[cfg(any(target_os = "windows", target_os = "macos"))]
-fn jpg_from_frame(frame: xcap::Frame) -> Result<Vec<u8>, String> {
+fn jpg_from_frame(frame: &xcap::Frame) -> Result<Vec<u8>, String> {
     use image::{
         codecs::jpeg::JpegEncoder, imageops::{overlay, FilterType},
         DynamicImage, Rgb, RgbImage, RgbaImage,
     };
-    let raw = RgbaImage::from_raw(frame.width, frame.height, frame.raw)
+    let raw = RgbaImage::from_raw(frame.width, frame.height, frame.raw.clone())
         .ok_or_else(|| "Unexpected native RGBA frame layout".to_owned())?;
     let scaled = DynamicImage::ImageRgba8(raw)
         .resize(AVI_WIDTH, AVI_HEIGHT, FilterType::Triangle)
@@ -125,11 +125,7 @@ fn capture_silent_avi_to_dir(
         }
         // XCap's raw frame buffer is RGBA. Encode this sample at a fixed 640x360 target.
         // Duplicating the previous capture if input stalls maintains AVI timing.
-        sampled.push(jpg_from_frame(xcap::Frame {
-            width: newest.width,
-            height: newest.height,
-            raw: newest.raw.clone(),
-        })?);
+        sampled.push(jpg_from_frame(&newest)?);
     }
     let _observed_elapsed = started.elapsed();
     let avi = crate::avi::encode_silent_mjpeg_avi(
