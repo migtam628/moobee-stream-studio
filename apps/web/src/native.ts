@@ -179,6 +179,22 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
   if (path === '/studio/status') return refresh()
   if (path === '/studio/collection') return Object.keys(body).length ? replaceCollection(body) : collection()
   if (path === '/studio/action') return perform(body)
+  if (path === '/clips') {
+    const clips = await invoke<{ id: string; path: string; bytes: number }[]>('list_test_clips')
+    return { available: true, clips }
+  }
+  if (path === '/clips/capture') {
+    if (typeof body.displayId !== 'number' || !Number.isSafeInteger(body.displayId) ||
+        typeof body.seconds !== 'number' || !Number.isInteger(body.seconds) ||
+        body.seconds < 2 || body.seconds > 10) throw new Error('Invalid test clip request')
+    return await invoke('capture_test_clip', { displayId: body.displayId, seconds: body.seconds })
+  }
+  if (path.startsWith('/clips/preview')) {
+    const clipId = new URL(path, 'http://localhost').searchParams.get('id')
+    if (!clipId) throw new Error('Choose a saved test clip')
+    const dataUrl = await invoke<string>('read_test_clip', { clipId })
+    return { dataUrl }
+  }
   if (path === '/capture/displays') {
     await refresh()
     return { displays, available: displays.length > 0 }
