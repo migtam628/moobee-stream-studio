@@ -39,6 +39,8 @@ try {
   await overlay.screenshot({ path: new URL('overlay.png', dir).pathname });
   await page.getByRole('button', { name: 'Clips' }).first().click();
   await page.getByRole('heading', { name: 'Clips' }).waitFor();
+  await page.getByRole('heading', { name: 'Browser screen recording' }).waitFor();
+  await page.getByRole('button', { name: 'Record shared screen' }).waitFor();
   await page.getByText('Native test capture is only available in the installed Windows/macOS app', { exact: false }).waitFor();
   if (await page.getByRole('button', { name: 'Capture Silent GIF' }).isEnabled()) {
     throw new Error('Native device capture must remain disabled in the browser edition');
