@@ -38,3 +38,4 @@ jobs:
           path: .qa/*.png
           if-no-files-found: ignore
           retention-days: 14
+          include-hidden-files: true
