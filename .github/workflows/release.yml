@@ -149,7 +149,7 @@ jobs:
 
   publish:
     name: Publish alpha prerelease
-    if: startsWith(github.ref, 'refs/heads/release/')
+    if: ${{ always() && startsWith(github.ref, 'refs/heads/release/') && needs.verify.result == 'success' && needs.web.result == 'success' && needs.desktop.result == 'success' }}
     needs: [verify, web, desktop, android]
     runs-on: ubuntu-24.04
     permissions:
@@ -159,7 +159,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: release-assets
-      - name: Publish only when every platform built successfully
+      - name: Publish desktop and web prerelease even if Android fails
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
