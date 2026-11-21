@@ -15,7 +15,7 @@ MooBee must operate as its own installation and service. It may **bundle properl
 | Standalone installers | Tauri CI builds macOS ARM64/x64, Windows x64, Linux DEB, Android debug APK and a self-hosted web bundle | Signed/notarized production distribution, secure updates, supported OS hardware acceptance |
 | Scene editing and backup | Local scene state, basic source selection and validated JSON collections | Actual GPU-composited program/preview output |
 | Mac/Windows display capture | Screenshot, bounded GIF experiment and XCap continuous raw-frame diagnostic | OS permissions, capture cadence/latency, multiple displays, hotplug, protected content handling |
-| Native video-file experiment | Short silent 640x360 10fps MJPEG AVI; bounded disk-streaming AVI writer with atomic publish | Capture playback on real macOS/Windows, no audio, no production codec/container |
+| Native video-file experiment | Short silent 640x360 10fps MJPEG AVI on Mac/Windows; experimental macOS 15+ H.264 MP4 via ScreenCaptureKit | Hardware permission, real video/audio playback and sync, Windows MP4 parity, real scene composition and long-running recovery remain unverified |
 | Browser-local recording | Browser canvas + screen, optional PiP webcam/audio via MediaRecorder | Real-browser permission/AV-sync tests; separate from installed native broadcaster |
 | API | Loopback Node control API, events and local persistence | Remote authentication/authorization, TLS, threat model, audit logging, recovery plans |
 | Alerts | Local preview/SSE overlay | Inclusion in actual broadcast-encoded pixels |
@@ -81,3 +81,12 @@ MooBee must operate as its own installation and service. It may **bundle properl
 3. Next: verified native scene compositor with camera and overlays, synchronized audio and real start/stop recording control.
 4. Next: first RTMP/RTMPS stream with safe credential handling and test-ingress validation.
 5. Next: signing, installer/updater hardening, sustained device QA, external security/licensing review and stable promotion.
+
+### 0.3.8 Mac native H.264 MP4 experiment
+
+- [x] Implemented scoped macOS 15+ ScreenCaptureKit video-to-MP4 recording bridge with selectable raw display identity, optional system/mic audio requests and a private atomic clip publish path.
+- [ ] Verify Apple Silicon and Intel Swift ABI linking, full Tauri installers and `Info.plist` microphone/screen permissions in CI.
+- [ ] Hardware-test video duration, H.264, selected display identity, optional audio tracks and A/V sync on supported machines, including permission refusal.
+- [ ] Windows native H.264/AAC/MP4 output and actual program scene composition remain P0 blockers.
+
+See `docs/MACOS_MP4_ACCEPTANCE.md` and Issue #15. No record/broadcast capability flags are enabled.
