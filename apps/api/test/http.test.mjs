@@ -95,3 +95,13 @@ test('web control API never pretends to have device-level clip capture', async (
   const requestPreview = await fetch(`${root}/api/clips/preview?id=not-a-real-clip`);
   assert.equal(requestPreview.status, 501);
 });
+
+test('browser control API cannot fake native continuous frame diagnostics', async () => {
+  const response = await fetch(root + '/api/capture/probe', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ displayId: 0, seconds: 3 })
+  });
+  assert.equal(response.status, 501);
+  const payload = await response.json();
+  assert.match(payload.error, /installed Windows or macOS app/);
+});
