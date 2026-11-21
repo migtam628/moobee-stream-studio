@@ -69,3 +69,14 @@ test('invalid collection imports return 400 without replacing current state', as
   assert.equal(response.status, 400);
   assert.deepEqual(await (await fetch(`${root}/api/studio/collection`)).json(), original);
 });
+
+test('local API rejects cross-origin browser writes before reaching the scene controller', async () => {
+  const response = await fetch(`${root}/api/studio/action`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: 'https://untrusted.example' },
+    body: JSON.stringify({ action: 'addScene', sceneName: 'Untrusted' })
+  });
+  assert.equal(response.status, 403);
+  const scenes = await (await fetch(`${root}/api/studio/status`)).json();
+  assert.ok(!scenes.scenes.includes('Untrusted'));
+});
