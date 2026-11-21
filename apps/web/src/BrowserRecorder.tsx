@@ -115,6 +115,8 @@ export default function BrowserRecorder() {
   const clockRef = useRef<number | null>(null)
   const urlRef = useRef<string | null>(null)
   const mountedRef = useRef(true)
+  const startingRef = useRef(false)
+  const [preparing, setPreparing] = useState(false)
 
   function clearTimers() {
     if (timerRef.current !== null) window.clearTimeout(timerRef.current)
@@ -155,7 +157,9 @@ export default function BrowserRecorder() {
   }
 
   async function startRecording() {
-    if (!supported || sessionRef.current || isRecording || !canvasRef.current) return
+    if (!supported || sessionRef.current || startingRef.current || isRecording || !canvasRef.current) return
+    startingRef.current = true
+    setPreparing(true)
     setError('')
     setNotice('')
     setElapsed(0)
@@ -172,6 +176,7 @@ export default function BrowserRecorder() {
         audio: sharedAudio
       })
       streams.push(screen)
+      if (!mountedRef.current) throw new Error('The recording workspace was closed.')
       if (!screen.getVideoTracks().length) throw new Error('Screen sharing returned no video track.')
 
       if (cameraEnabled || micEnabled) {
@@ -181,6 +186,7 @@ export default function BrowserRecorder() {
           audio: micEnabled
         })
         streams.push(devices)
+        if (!mountedRef.current) throw new Error('The recording workspace was closed.')
         if (cameraEnabled && !devices.getVideoTracks().length) throw new Error('No webcam track was received.')
         if (micEnabled && !devices.getAudioTracks().length) throw new Error('No microphone track was received.')
         if (cameraEnabled) cameraVideo = attachMutedVideo(devices)
@@ -200,6 +206,7 @@ export default function BrowserRecorder() {
       const canvasStream = canvas.captureStream(VIDEO_FPS)
       const audio = await mixAudio(streams)
       context = audio.context
+      if (!mountedRef.current) throw new Error('The recording workspace was closed.')
       encodedStream = new MediaStream([...canvasStream.getVideoTracks(), ...audio.tracks])
 
       const mime = MIME_TYPES.find(type => MediaRecorder.isTypeSupported(type))
@@ -271,6 +278,8 @@ export default function BrowserRecorder() {
       }
       screen.getVideoTracks()[0].addEventListener('ended', stopRecording, { once: true })
       recorder.start(1000)
+      startingRef.current = false
+      setPreparing(false)
       setIsRecording(true)
       if (sharedAudio && !screen.getAudioTracks().length) {
         setNotice('The browser provided no shared-screen audio. The video will use microphone audio if enabled.')
@@ -289,7 +298,9 @@ export default function BrowserRecorder() {
         if (screenVideo) screenVideo.srcObject = null
         if (cameraVideo) cameraVideo.srcObject = null
       }
+      startingRef.current = false
       if (!mountedRef.current) return
+      setPreparing(false)
       setIsRecording(false)
       const err = cause as Error
       setError(err.name === 'NotAllowedError' ? 'Screen, camera, or microphone permission was denied.'
@@ -307,12 +318,12 @@ export default function BrowserRecorder() {
     <div className="browser-recorder-form">
       <div className="browser-recorder-options">
         <label>Maximum duration
-          <select value={duration} disabled={!supported || isRecording} onChange={e => setDuration(Number(e.target.value))}>
+          <select value={duration} disabled={!supported || isRecording || preparing} onChange={e => setDuration(Number(e.target.value))}>
             {[5, 10, 30].map(seconds => <option key={seconds} value={seconds}>{seconds} seconds</option>)}
           </select>
         </label>
         <label>Camera position
-          <select value={cameraPosition} disabled={!supported || isRecording || !cameraEnabled}
+          <select value={cameraPosition} disabled={!supported || isRecording || preparing || !cameraEnabled}
             onChange={e => setCameraPosition(e.target.value as 'left' | 'right')}>
             <option value="right">Bottom right</option><option value="left">Bottom left</option>
           </select>
@@ -336,8 +347,8 @@ export default function BrowserRecorder() {
         {isRecording && <span className="browser-composition-live">REC · {elapsed}s</span>}
       </div>
       <div className="browser-recorder-actions">
-        {!isRecording ? <button type="button" onClick={() => void startRecording()} disabled={!supported}>
-          <Video size={17}/>Record shared screen</button>
+        {!isRecording ? <button type="button" onClick={() => void startRecording()} disabled={!supported || preparing}>
+          <Video size={17}/>{preparing ? 'Requesting permissions…' : 'Record shared screen'}</button>
           : <button type="button" className="stop" onClick={stopRecording}><Square size={16}/>Stop · {elapsed}s</button>}
         <small>{supported ? 'Your browser asks permission to share your screen and any selected devices.'
           : 'This browser does not support screen sharing, canvas capture, and MediaRecorder together. Try a compatible desktop browser over HTTPS.'}</small>
