@@ -1,6 +1,6 @@
 # MooBee Stream Studio
 
-**Standalone Alpha 0.3.2 (native test-clip milestone)** — a native streaming studio foundation, independent of OBS Studio and Streamlabs. The old 0.2 installers are legacy OBS-controller builds and are **not** standalone.
+**Standalone Alpha 0.3.3 (desktop and browser capture prototypes)** — a native streaming studio foundation, independent of OBS Studio and Streamlabs. The old 0.2 installers are legacy OBS-controller builds and are **not** standalone.
 
 ![Early visual direction](docs/design-reference.webp)
 
