@@ -367,7 +367,20 @@ function ClipLab() {
           {lastCapture && <div className="clip-result"><CheckCircle2 size={18}/><div><strong>Saved {lastCapture.frameCount} frames</strong><small>{lastCapture.durationSeconds}s · {lastCapture.width}×{lastCapture.height} GIF · {(lastCapture.bytes / (1024 * 1024)).toFixed(2)} MB</small><code>{lastCapture.path}</code><button className="secondary-button" onClick={() => void navigator.clipboard.writeText(lastCapture.path)}><Copy size={15}/>Copy file path</button></div></div>}
         </div>
       </Panel>
-      {desktop && <Panel title="Native Capture Input Diagnostic" icon={Activity}>
+      <Panel title="Local test clips" icon={Film}>
+        <div className="clip-preview">
+          {previewUrl ? <img src={previewUrl} alt="Animated local test capture preview"/> :
+            <div className="preview-empty"><Film size={32}/><strong>No clip selected</strong><span>Capture a test GIF or select one from the local list</span></div>}
+        </div>
+        <div className="clip-list">
+          {clips.length ? clips.map((clip, index) => <button key={clip.id} className={`clip-list-row ${selectedClip === clip.id ? 'active' : ''}`} disabled={working} onClick={() => void selectClip(clip.id)}>
+            <Film size={16}/><span className="truncate">Test clip {clips.length - index}</span><small>{(clip.bytes / (1024 * 1024)).toFixed(2)} MB</small>
+          </button>) : <p className="empty-list">No test clips have been saved on this device.</p>}
+        </div>
+        {selected && <div className="clip-path"><span>Saved locally</span><code>{selected.path}</code><button className="secondary-button" onClick={() => void navigator.clipboard.writeText(selected.path)}><Copy size={15}/>Copy path</button></div>}
+      </Panel>
+    </div>
+    {desktop && <Panel title="Native Capture Input Diagnostic" icon={Activity}>
         <div className="capture-diagnostic">
           <p>Measure frames arriving from the independent native screen-capture source, without saving video. This is not an encoder or a Go Live test.</p>
           <button className="secondary-button" disabled={!displayId || working || probing} onClick={() => void measureCapture()}>
@@ -382,19 +395,6 @@ function ClipLab() {
           </div>}
         </div>
       </Panel>}
-      <Panel title="Local test clips" icon={Film}>
-        <div className="clip-preview">
-          {previewUrl ? <img src={previewUrl} alt="Animated local test capture preview"/> :
-            <div className="preview-empty"><Film size={32}/><strong>No clip selected</strong><span>Capture a test GIF or select one from the local list</span></div>}
-        </div>
-        <div className="clip-list">
-          {clips.length ? clips.map((clip, index) => <button key={clip.id} className={`clip-list-row ${selectedClip === clip.id ? 'active' : ''}`} disabled={working} onClick={() => void selectClip(clip.id)}>
-            <Film size={16}/><span className="truncate">Test clip {clips.length - index}</span><small>{(clip.bytes / (1024 * 1024)).toFixed(2)} MB</small>
-          </button>) : <p className="empty-list">No test clips have been saved on this device.</p>}
-        </div>
-        {selected && <div className="clip-path"><span>Saved locally</span><code>{selected.path}</code><button className="secondary-button" onClick={() => void navigator.clipboard.writeText(selected.path)}><Copy size={15}/>Copy path</button></div>}
-      </Panel>
-    </div>
     <div className="clip-roadmap"><strong>Still to build:</strong> continuous high-frame-rate capture, the GPU compositor, microphone and system audio, hardware video encoding, recoverable MP4/MKV recordings, and RTMP/RTMPS streaming. The main Record and Go Live controls remain disabled until those features are tested.</div>
   </>
 }
