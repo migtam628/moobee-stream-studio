@@ -91,22 +91,62 @@ function ScenePreview({ status, label, previewScene }: { status: StudioStatus; l
 }
 
 function ScenesPanel({ status, perform, pending }: { status: StudioStatus; perform: (path: string, body: object) => Promise<boolean>; pending: boolean }) {
-  return <Panel title="Scenes" icon={Layers} action={<button disabled={pending || isStaticPreview} className="secondary-button" onClick={() => { const name = window.prompt('New scene name'); if (name?.trim()) void perform('/studio/action', { action: 'addScene', sceneName: name.trim() }) }}>+ Add Scene</button>}>
-    <div className="rows-scroll">{status.scenes.length ? status.scenes.map((scene) => <button disabled={pending} key={scene} className={`scene-row ${scene === (status.studioMode ? status.previewScene : status.currentScene) ? 'selected' : ''}`} onClick={() => void perform('/studio/action', { action: 'scene', sceneName: scene })}>
-      <span className="scene-thumbnail"><Monitor size={18}/></span><span className="truncate">{scene}</span>{scene === status.currentScene && <span className="scene-on-air">ON AIR</span>}{scene === status.previewScene && status.studioMode && <Check size={15}/>}</button>) : <div className="empty-list">No scenes yet. Create one to get started.</div>}</div>
+  const selected = status.studioMode ? status.previewScene : status.currentScene
+  return <Panel title="Scenes" icon={Layers} action={<button disabled={pending || isStaticPreview} className="secondary-button" onClick={() => {
+    const name = window.prompt('New scene name')
+    if (name?.trim()) void perform('/studio/action', { action: 'addScene', sceneName: name.trim() })
+  }}>+ Add Scene</button>}>
+    <div className="rows-scroll">{status.scenes.length ? status.scenes.map(scene => <div className="scene-item" key={scene}>
+      <button disabled={pending || isStaticPreview} className={`scene-row ${scene === selected ? 'selected' : ''}`} onClick={() => void perform('/studio/action', { action: 'scene', sceneName: scene })}>
+        <span className="scene-thumbnail"><Monitor size={18}/></span><span className="truncate">{scene}</span>
+        {scene === status.currentScene && <span className="scene-on-air">PROGRAM</span>}
+        {scene === status.previewScene && status.studioMode && <Check size={15}/>}
+      </button>
+      <div className="scene-actions">
+        <button className="icon-button" title={`Duplicate ${scene}`} aria-label={`Duplicate ${scene}`} disabled={pending || isStaticPreview || status.scenes.length >= 40} onClick={() => void perform('/studio/action', { action: 'duplicateScene', sceneName: scene })}><Copy size={15}/></button>
+        <button className="icon-button" title={`Rename ${scene}`} aria-label={`Rename ${scene}`} disabled={pending || isStaticPreview} onClick={() => {
+          const name = window.prompt('Rename scene', scene)
+          if (name?.trim() && name.trim() !== scene) void perform('/studio/action', { action: 'renameScene', sceneName: scene, newName: name.trim() })
+        }}><Settings2 size={15}/></button>
+        <button className="icon-button" title={`Delete ${scene}`} aria-label={`Delete ${scene}`} disabled={pending || isStaticPreview || status.scenes.length < 2} onClick={() => {
+          if (window.confirm(`Delete scene "${scene}" and its sources?`)) void perform('/studio/action', { action: 'deleteScene', sceneName: scene })
+        }}><X size={15}/></button>
+      </div>
+    </div>) : <div className="empty-list">Create a scene to get started.</div>}</div>
   </Panel>
 }
 
 function SourcesPanel({ status, perform, pending }: { status: StudioStatus; perform: (path: string, body: object) => Promise<boolean>; pending: boolean }) {
-  return <Panel title="Sources" icon={ListVideo} action={<button disabled={pending || !status.captureAvailable || !runningInTauri()} title={runningInTauri() ? 'Add the primary desktop display' : 'Native display sources require the desktop app'} className="secondary-button" onClick={() => { void (async () => {
-      const result = await request<{ displays: { id: number; name: string }[] }>('/capture/displays')
-      const display = result.displays[0]
-      if (!display) throw new Error('No display is available. Check screen recording permission.')
-      await perform('/studio/action', { action: 'addSource', kind: 'display', deviceId: String(display.id), name: display.name })
-    })().catch(error => window.alert((error as Error).message)) }}>+ Add Display</button>}>
-    <div className="rows-scroll">{status.sources.length ? status.sources.map((source) => <div className="source-row" key={source.id}>
-      <Video size={16}/><span className="truncate">{source.name}</span><button disabled={pending} title={source.enabled ? 'Hide source' : 'Show source'} className="icon-button" onClick={() => void perform('/studio/action', { action: 'source', sceneItemId: source.id, enabled: !source.enabled })}>{source.enabled ? <Eye size={18}/> : <EyeOff size={18}/>}</button>
-    </div>) : <div className="empty-list">Add a display source in the desktop app to begin capturing.</div>}</div>
+  const [displays, setDisplays] = useState<{ id: number; name: string; width: number; height: number }[]>([])
+  const [selected, setSelected] = useState('')
+  useEffect(() => {
+    if (!runningInTauri()) return
+    let active = true
+    void request<{ displays: typeof displays }>('/capture/displays').then(result => {
+      if (!active) return
+      setDisplays(result.displays)
+      setSelected(value => result.displays.some(display => String(display.id) === value) ? value : String(result.displays[0]?.id ?? ''))
+    }).catch(() => {})
+    return () => { active = false }
+  }, [status.connected])
+  const addSource = async () => {
+    const display = displays.find(item => String(item.id) === selected)
+    if (!display) return
+    await perform('/studio/action', { action: 'addSource', kind: 'display', deviceId: String(display.id), name: display.name })
+  }
+  return <Panel title="Sources" icon={ListVideo} action={<div className="source-picker">
+    <select aria-label="Choose display to capture" title="Choose desktop display" value={selected} disabled={pending || !runningInTauri() || displays.length === 0} onChange={event => setSelected(event.target.value)}>
+      {displays.length ? displays.map(display => <option key={display.id} value={display.id}>{display.name} ({display.width}×{display.height})</option>) : <option value="">No displays</option>}
+    </select>
+    <button className="secondary-button" disabled={pending || !status.captureAvailable || !selected || !runningInTauri()} title="Add selected display to the selected scene" onClick={() => void addSource()}>+ Add</button>
+  </div>}>
+    <div className="rows-scroll">{status.sources.length ? status.sources.map(source => <div className="source-row" key={source.id}>
+      <Video size={16}/><span className="truncate">{source.name}</span>
+      <button disabled={pending || isStaticPreview} title={source.enabled ? 'Hide source' : 'Show source'} className="icon-button" onClick={() => void perform('/studio/action', { action: 'source', sceneItemId: source.id, enabled: !source.enabled })}>{source.enabled ? <Eye size={18}/> : <EyeOff size={18}/>}</button>
+      <button disabled={pending || isStaticPreview} title={`Remove ${source.name}`} aria-label={`Remove ${source.name}`} className="icon-button" onClick={() => {
+        if (window.confirm(`Remove source "${source.name}" from this scene?`)) void perform('/studio/action', { action: 'removeSource', sceneItemId: source.id })
+      }}><X size={17}/></button>
+    </div>) : <div className="empty-list">Choose a screen in the desktop edition and add it to your scene.</div>}</div>
   </Panel>
 }
 
