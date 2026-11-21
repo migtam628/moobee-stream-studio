@@ -2,7 +2,7 @@
 //! NOT the production recorder. No audio, arbitrary scene composition, or streaming.
 use serde::Serialize;
 use tauri::Manager;
-use std::{fs, path::PathBuf};
+use std::{fs::{self, OpenOptions}, path::PathBuf};
 
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 use std::{
@@ -91,61 +91,82 @@ fn capture_silent_avi_to_dir(
     if newest.width == 0 || newest.height == 0 || newest.raw.is_empty() {
         return Err("Native capture delivered an invalid initial frame".into());
     }
-    let started = Instant::now();
-    let frame_count = AVI_FPS * seconds;
-    let mut sampled = Vec::with_capacity(frame_count as usize);
-    let mut source_frame_count = 1u32;
-
-    for i in 0..frame_count {
-        let target = started + Duration::from_millis(u64::from(i) * 1000 / u64::from(AVI_FPS));
-        // Keep just the most recently received raw frame, avoiding unbounded video buffers.
-        while Instant::now() < target {
-            let remaining = target.saturating_duration_since(Instant::now());
-            let wait = remaining.min(Duration::from_millis(30));
-            match frames.recv_timeout(wait) {
-                Ok(frame) if frame.width > 0 && frame.height > 0 && !frame.raw.is_empty() => {
-                    newest = frame;
-                    source_frame_count += 1;
-                }
-                Err(RecvTimeoutError::Disconnected) => {
-                    return Err("Continuous capture source disconnected before completion".into());
-                }
-                _ => {}
-            }
-        }
-        // Drain at most 64 ready frames to use the freshest without blocking indefinitely.
-        for _ in 0..64 {
-            match frames.try_recv() {
-                Ok(frame) if frame.width > 0 && frame.height > 0 && !frame.raw.is_empty() => {
-                    newest = frame;
-                    source_frame_count += 1;
-                }
-                _ => break,
-            }
-        }
-        // XCap's raw frame buffer is RGBA. Encode this sample at a fixed 640x360 target.
-        // Duplicating the previous capture if input stalls maintains AVI timing.
-        sampled.push(jpg_from_frame(&newest)?);
-    }
-    let _observed_elapsed = started.elapsed();
-    let avi = crate::avi::encode_silent_mjpeg_avi(
-        &sampled, AVI_WIDTH, AVI_HEIGHT, AVI_FPS
-    )?;
-
+    // Create a uniquely named file with create_new. Never expose a partially
+    // finalized AVI to the Clips library; only .avi files after atomic rename.
     fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
     let id = uuid::Uuid::new_v4().to_string();
     let dest = directory.join(format!("clip-{id}.avi"));
     let tmp = directory.join(format!(".clip-{id}.avi.part"));
-    fs::write(&tmp, &avi).map_err(|error| error.to_string())?;
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&tmp)
+        .map_err(|error| format!("Could not create private capture file: {error}"))?;
+
+    let started = Instant::now();
+    let frame_count = AVI_FPS * seconds;
+    let mut source_frame_count = 1u32;
+    // Incremental write: JPEG frames go straight to disk; only one raw source
+    // frame, one JPEG, and the compact frame index stay in memory at once.
+    let recording = (|| -> Result<u64, String> {
+        let mut writer = crate::avi::AviWriter::new(&mut file, AVI_WIDTH, AVI_HEIGHT, AVI_FPS)?;
+        for i in 0..frame_count {
+            let target = started + Duration::from_millis(u64::from(i) * 1000 / u64::from(AVI_FPS));
+            while Instant::now() < target {
+                let remaining = target.saturating_duration_since(Instant::now());
+                let wait = remaining.min(Duration::from_millis(30));
+                match frames.recv_timeout(wait) {
+                    Ok(frame) if frame.width > 0 && frame.height > 0 && !frame.raw.is_empty() => {
+                        newest = frame;
+                        source_frame_count += 1;
+                    }
+                    Err(RecvTimeoutError::Disconnected) => {
+                        return Err("Continuous capture source disconnected before completion".into());
+                    }
+                    _ => {}
+                }
+            }
+            // Drain no more than 64 ready frames, preventing an unbounded queue walk.
+            for _ in 0..64 {
+                match frames.try_recv() {
+                    Ok(frame) if frame.width > 0 && frame.height > 0 && !frame.raw.is_empty() => {
+                        newest = frame;
+                        source_frame_count += 1;
+                    }
+                    _ => break,
+                }
+            }
+            // If incoming capture stalls, the last frame repeats to preserve
+            // the fixed-rate AVI timeline; never invent additional timestamps.
+            let jpeg = jpg_from_frame(&newest)?;
+            writer.write_frame(&jpeg)?;
+        }
+        writer.finish()
+    })();
+
+    let bytes = match recording {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            drop(file);
+            let _ = fs::remove_file(&tmp);
+            return Err(error);
+        }
+    };
+    if let Err(error) = file.sync_all() {
+        drop(file);
+        let _ = fs::remove_file(&tmp);
+        return Err(format!("Could not synchronize recorded video to disk: {error}"));
+    }
+    drop(file);
     if let Err(error) = fs::rename(&tmp, &dest) {
         let _ = fs::remove_file(&tmp);
-        return Err(format!("Saving local AVI failed: {error}"));
+        return Err(format!("Publishing finalized recording failed: {error}"));
     }
     Ok(AviCaptureReport {
         id,
         path: dest.to_string_lossy().to_string(),
         format: "avi",
-        bytes: avi.len() as u64,
+        bytes,
         duration_seconds: seconds,
         frame_count,
         source_frame_count,
