@@ -40,7 +40,7 @@ function activity(type: string, message: string) {
   notify('activity', item)
 }
 function snapshot(): StudioStatus {
-  const active = draft.scenes.find(scene => scene.name === draft.currentScene)
+  const active = draft.scenes.find(scene => scene.name === (draft.studioMode ? draft.previewScene : draft.currentScene))
   return {
     ...offline,
     connected: true, address: 'local', engine: 'moobee-native-alpha',
