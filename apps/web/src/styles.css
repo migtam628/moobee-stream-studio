@@ -35,3 +35,29 @@
 .collection-actions{display:flex;gap:8px;flex-wrap:wrap}
 .collection-feedback{font-size:12px;color:#d2bee9;margin:0;overflow-wrap:anywhere}
 @media(max-width:700px){.source-picker select{max-width:130px}.scene-actions .icon-button{padding:8px}}
+
+/* Native capture-to-GIF lab, intentionally separate from the future real video recorder */
+.clip-lab-grid{max-width:1250px;grid-template-columns:minmax(300px,.85fr) minmax(320px,1.15fr)}
+.clip-form{padding:19px;display:flex;flex-direction:column;gap:17px}
+.clip-form>p{font-size:12px;line-height:1.65;color:#aba5bd;margin:0}
+.clip-form>p strong{color:#ede5ff}
+.clip-form label{display:flex;flex-direction:column;gap:7px;color:#d0c9e5;font-size:12px;font-weight:700}
+.clip-form select{background:#16161d;border:1px solid #50445f;border-radius:7px;color:#f3ebff;padding:10px;max-width:100%}
+.clip-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.clip-error{color:#ffb3bd;background:#44202c;border:1px solid #8d4859;border-radius:7px;padding:12px}
+.clip-result{border:1px solid #265b53;background:#182b29;border-radius:8px;display:flex;gap:9px;padding:14px;color:#b6fbe8}
+.clip-result>div{min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:8px}
+.clip-result small{color:#9ac2bd}
+.clip-result code,.clip-path code{font-size:11px;color:#c5b5db;overflow-wrap:anywhere;word-break:break-word}
+.clip-preview{aspect-ratio:16/9;margin:15px;background:#111019;display:grid;place-items:center;border-radius:7px;overflow:hidden}
+.clip-preview img{width:100%;height:100%;object-fit:contain}
+.clip-list{max-height:220px;overflow:auto;margin:0 15px 15px;border:1px solid #393246;border-radius:7px}
+.clip-list-row{background:transparent;border:0;color:#e7dffc;border-bottom:1px solid #312b40;padding:11px 13px;width:100%;display:flex;align-items:center;gap:8px;font-size:12px;text-align:left}
+.clip-list-row:last-child{border:0}
+.clip-list-row.active,.clip-list-row:hover{background:#392c4c}
+.clip-list-row small{color:#b6acc5;white-space:nowrap}
+.clip-path{display:flex;flex-direction:column;align-items:flex-start;gap:7px;border-top:1px solid #393244;padding:15px}
+.clip-path span{font-size:11px;color:#aba1bb}
+.clip-roadmap{color:#a69eb6;background:#22202d;border:1px solid #393245;border-radius:9px;margin-top:16px;padding:16px;font-size:12px;line-height:1.6}
+.clip-roadmap strong{color:#e6dff3}
+@media(max-width:900px){.clip-lab-grid{grid-template-columns:1fr}}
