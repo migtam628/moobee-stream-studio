@@ -1,36 +1,36 @@
-# MooBee Stream Studio v0.3.6-alpha.1 — Native Video File Experiment
+# MooBee Stream Studio v0.3.7-alpha.1 — Recording Reliability
 
-**Experimental standalone media milestone, not yet a production recording or livestreaming application.** No OBS/Streamlabs installation is required.
+**Standalone alpha — not a production broadcaster.** This release strengthens experimental video-file integrity and release verification. It does not enable Go Live or the primary Record control.
 
-## New in 0.3.6
-- **Mac/Windows Clips → Capture Video AVI** saves a 2–8 second local silent video from the continuous XCap capture source.
-- The source delivers raw RGBA video; MooBee letterboxes frames to 640×360 and encodes them as individual Motion JPEG images with the Rust `image` crate.
-- MooBee's own Rust RIFF AVI muxer writes a seekable, indexed `MJPG` AVI container at 10 fps. JPEG frames are duplicated to maintain AVI timing if the source capture stalls.
-- Self-contained: no FFmpeg command, OBS process, Streamlabs connection, external capture program, network transfer or cloud encoding requirement.
-- Duration, frame count, memory/output-size cap (64 MiB), exclusive capture guard and UUID-only app-data storage.
-- The Clips library lists GIF and AVI formats. AVI files must be played in an external compatible media player (VLC is a good test player); the built-in webview does not decode AVI.
-- The browser control API returns HTTP 501 for native AVI capture and never simulates video production.
+## What changed
 
-## Retained
-- Native short GIF recording tests and continuous frame-rate diagnostics on Windows/macOS.
-- Browser-local screen/webcam picture-in-picture composition with optional microphone/shared-tab audio and MediaRecorder WebM/MP4 output, where supported.
-- Scene and display management, alerts/overlays, local API, scene backups and cross-platform alpha packaging.
+- Replaced whole-video in-memory AVI muxing with a first-party **incremental RIFF AVI writer** that writes one JPEG frame at a time to a stream.
+- During native short AVI capture on Windows/macOS, MooBee writes to a UUID-named private `.avi.part` file. A successful capture finalizes RIFF/movi lengths and the AVI index, flushes and synchronizes the file, closes it, and renames it to `.avi`. Failed captures remove the partial file.
+- Memory usage in the container writer is bounded to the current frame plus a compact index rather than the full video.
+- Added Rust AVI unit tests for incremental writes, invalid inputs, double-finalization rejection and indexed playback.
+- Added release verification: **FFprobe metadata and full FFmpeg decode**, not just container headers. FFmpeg is used only in CI runners, not required by MooBee.
+- Release CI gates publication on muxer tests, npm/Tauri/Cargo version alignment, and successful packaging for macOS Intel/Apple Silicon, Windows, Linux, Android test APK and web.
+- The desktop app and local health API now report the correct package version.
+- Added `docs/PRODUCTION_READINESS.md` with P0 audio/video, RTMP, signing, security, hardware QA and promotion criteria.
 
-## Important limitations
-- **AVI is silent, limited to 640×360 / 10 fps / 8 seconds.** It is meant to verify raw capture → JPEG encoding → video-file muxing and playback, not to replace full-quality recording.
-- Actual input frame availability, camera/system/microphone audio capture, A/V sync, real-time GPU composition, hardware encoders, MP4/MKV muxing, RTMP/RTMPS streaming, multistreaming and reconnect are **not yet implemented in the native desktop engine**.
-- The main **Record** and **Go Live** controls remain disabled. Linux/Android native media capture is not supported.
-- No built-in AVI player is provided. Playback depends on availability of external MJPEG AVI support. The Chrome/WebView embedded preview is GIF-only.
-- Continuous XCap capture is WIP; compilation alone does not validate capture timing, permissions or playback on a user's actual display.
-- Alpha installers are unsigned.
+## Retained capabilities
 
-## Validation steps
-1. Install the Mac or Windows alpha without OBS/Streamlabs.
-2. In **Clips**, select a display, 4 seconds, and choose **Capture Video AVI**.
-3. Copy the saved file path and open the AVI externally using VLC or another MJPEG AVI-capable media player.
-4. Confirm a 640×360, 10 fps silent video lasting approximately 4 seconds; inspect moving screen content, crop/letterbox, and any stalls.
-5. Repeat on another monitor and after changing screen-recording permission. Test GIF mode and the 3-second frame diagnostic for regressions.
+- Native Mac/Windows short **silent AVI** experiment (640×360, 10 fps, 2–8 seconds), silent GIF test capture and continuous raw-frame performance diagnostic.
+- Browser-only 1280×720 canvas screen/webcam recording with optional audio through user-approved MediaRecorder where supported.
+- Scene editing, collection backup/restore, local alerts and the creator interface.
 
-The AVI container structure was independently sanity-tested with FFprobe using sample MJPEG frames; **real native capture and file playback still require device tests**.
+## Not yet implemented
 
-Track the real-time audio/video/broadcast engine in [Issue #2](https://github.com/migtam628/moobee-stream-studio/issues/2).
+The native broadcaster still needs a real-time scene compositor, synchronized microphone and system audio, hardware H.264 encoding, reliable MP4/MKV recording, RTMP/RTMPS output and reconnect handling. Main **Record** and **Go Live** remain disabled. Android is a debug-signed UI build without native capture; Linux screen capture remains unimplemented. Mac/Windows alpha installers are unsigned.
+
+**Do not present this release as production-ready.** Real-device capture, playable AV output, permissions, AV sync, endurance, public API authentication, signed installers, update integrity and licensing audits remain mandatory acceptance gates.
+
+## Manual verification
+
+1. Install the Windows or macOS alpha in a test environment; grant Screen Recording permission.
+2. In Clips, select a display and a four-second duration, then choose Capture Video AVI.
+3. Open the `.avi` file in VLC or another MJPEG-compatible player. Verify four seconds of visible movement, timing and dimensions.
+4. Repeat on another monitor and with screen permission denied. Check failed capture does not appear as a completed file.
+5. Abrupt termination may leave a hidden `.avi.part` file; automatic recovery of partial videos is not implemented.
+
+Production gates: [Production Readiness](https://github.com/migtam628/moobee-stream-studio/blob/main/docs/PRODUCTION_READINESS.md). Native engine: [Issue #2](https://github.com/migtam628/moobee-stream-studio/issues/2).
