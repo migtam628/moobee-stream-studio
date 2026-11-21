@@ -72,3 +72,7 @@ The Clips laboratory now captures a short sequence of sampled desktop frames and
 ## Browser-native 0.3.2+ prototype
 
 Where the browser supports `getDisplayMedia` plus `MediaRecorder`, the Clips page can produce a local, user-consented silent WebM/MP4 clip without an external broadcasting application or server upload. This is separate from desktop Tauri GIF capture and not a production audio/video compositor, replay buffer, or livestream. Browser compatibility, permissions, resource limits and real video playback must be tested on target browsers.
+
+## Alpha 0.3.4 — Composited browser recording
+
+The browser Clips workspace now uses a 1280×720 canvas capture pipeline (target up to 30 fps) with optional webcam picture-in-picture and Web Audio mixing of the user-approved microphone and/or available shared-tab/system audio. A local MediaRecorder exports a short WebM/MP4 file where supported. This is a separate web-browser media experiment, **not** the native Tauri desktop GPU/encoder implementation, and does not activate the main Record or Go Live controls. Automated checks exercise a synthetic video stream; physical camera, permissions, audio-sync and actual media decoding remain hardware QA requirements.
