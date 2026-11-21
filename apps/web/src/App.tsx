@@ -265,8 +265,8 @@ function Overlays({ setTab }: { setTab: (tab: Tab) => void }) {
 
 function HeartIcon() { return <Gift size={28}/> }
 
-type LocalClip = { id: string; path: string; bytes: number }
-type CapturedClip = LocalClip & { format: string; durationSeconds: number; frameCount: number; width: number; height: number }
+type LocalClip = { id: string; path: string; bytes: number; format?: string }
+type CapturedClip = LocalClip & { format: string; durationSeconds: number; frameCount: number; width: number; height: number; sourceFrameCount?: number; fps?: number }
 type Screen = { id: number; name: string; width: number; height: number }
 type CaptureProbe = { displayId: number; durationMs: number; frameCount: number; width: number; height: number; averageFps: number; firstFrameMs: number | null; longestFrameGapMs: number | null; meanFrameGapMs: number | null }
 
@@ -299,10 +299,11 @@ function ClipLab() {
   }, [desktop])
   useEffect(() => { void reload() }, [reload])
 
-  async function selectClip(id: string) {
+  async function selectClip(id: string, format: string = 'gif') {
     setError('')
     setSelectedClip(id)
     setPreviewUrl('')
+    if (format === 'avi') return
     try {
       const data = await request<{ dataUrl: string }>(`/clips/preview?id=${encodeURIComponent(id)}`)
       setPreviewUrl(data.dataUrl)
@@ -323,6 +324,23 @@ function ClipLab() {
       setError((cause as Error).message)
     } finally { setWorking(false) }
   }
+  async function captureAvi() {
+    if (!desktop || !displayId || probing || working || seconds > 8) return
+    setWorking(true)
+    setError('')
+    setProbeResult(null)
+    try {
+      const clip = await request<CapturedClip>('/clips/capture-avi', {
+        displayId: Number(displayId), seconds
+      })
+      setLastCapture(clip)
+      setSelectedClip(clip.id)
+      setPreviewUrl('')
+      await reload()
+    } catch (cause) {
+      setError('Native AVI recording failed: ' + (cause as Error).message)
+    } finally { setWorking(false) }
+  }
   async function measureCapture() {
     if (!desktop || !displayId || working || probing) return
     setProbing(true)
@@ -340,12 +358,12 @@ function ClipLab() {
     }
   }
   const selected = clips.find(item => item.id === selectedClip)
-  return <><div className="workspace-heading"><div><h1>Clips</h1><p>Local capture tools: short desktop GIFs or composited browser video with optional webcam and audio.</p></div><span className="status-pill">Silent GIF prototype · 2 fps</span></div>
+  return <><div className="workspace-heading"><div><h1>Clips</h1><p>Local recording: native GIF or AVI test files, plus browser-composited video with optional webcam and audio.</p></div><span className="status-pill">Native AVI test · 10 fps</span></div>
     {!desktop && <BrowserRecorder/>}
     <div className="settings-layout clip-lab-grid">
       <Panel title="Capture a test clip" icon={Clapperboard}>
         <div className="clip-form">
-          <p>This experimental tool captures consecutive still frames from a selected display and saves a playable <strong>silent GIF</strong>. It does not encode MP4, capture audio, or broadcast.</p>
+          <p>Create a silent GIF from sampled screenshots, or a short <strong>MJPEG AVI</strong> video from consecutive native frames. AVI is limited to 640×360 at 10 fps. Neither mode records audio or streams live.</p>
           <label>Display
             <select value={displayId} disabled={!desktop || working || screens.length === 0} onChange={event => setDisplayId(event.target.value)}>
               {screens.length ? screens.map(item => <option key={item.id} value={item.id}>{item.name} · {item.width}×{item.height}</option>) : <option value="">No supported desktop display</option>}
@@ -353,28 +371,32 @@ function ClipLab() {
           </label>
           <label>Clip length
             <select value={seconds} disabled={!desktop || working} onChange={event => setSeconds(Number(event.target.value))}>
-              {[2, 4, 6, 10].map(value => <option key={value} value={value}>{value} seconds</option>)}
+              {[2, 4, 6, 8, 10].map(value => <option key={value} value={value}>{value} seconds</option>)}
             </select>
           </label>
           <div className="clip-actions">
             <button className="primary-button" disabled={!desktop || !displayId || working || probing} onClick={() => void capture()}>
               <Film size={17}/>{working ? 'Capturing frames…' : 'Capture Silent GIF'}
             </button>
+            <button className="secondary-button" disabled={!desktop || !displayId || working || probing || seconds > 8} onClick={() => void captureAvi()} title={seconds > 8 ? 'AVI test recording supports 2–8 seconds' : 'Save a silent MJPEG AVI video'}>
+              <Video size={17}/>Capture Video AVI
+            </button>
             <button className="secondary-button" disabled={!desktop || working} onClick={() => void reload()}><RefreshCcw size={16}/>Refresh</button>
           </div>
-          <p className="help-text">{desktop ? 'The capture stays on this computer. Grant Screen Recording permission on macOS if prompted.' : 'Native test capture is only available in the installed Windows/macOS app. The web and Android editions cannot capture a GIF yet.'}</p>
+          <p className="help-text">{desktop ? 'All files stay on your computer. Grant Screen Recording permission on macOS if prompted. AVI playback is available in external players such as VLC.' : 'Native test capture is only available in the installed Windows/macOS app. Web and Android editions cannot use native GIF/AVI capture.'}</p>
           {error && <p role="alert" className="clip-error">{error}</p>}
-          {lastCapture && <div className="clip-result"><CheckCircle2 size={18}/><div><strong>Saved {lastCapture.frameCount} frames</strong><small>{lastCapture.durationSeconds}s · {lastCapture.width}×{lastCapture.height} GIF · {(lastCapture.bytes / (1024 * 1024)).toFixed(2)} MB</small><code>{lastCapture.path}</code><button className="secondary-button" onClick={() => void navigator.clipboard.writeText(lastCapture.path)}><Copy size={15}/>Copy file path</button></div></div>}
+          {lastCapture && <div className="clip-result"><CheckCircle2 size={18}/><div><strong>Saved {lastCapture.frameCount} frames · {lastCapture.format.toUpperCase()}</strong><small>{lastCapture.durationSeconds}s · {lastCapture.width}×{lastCapture.height}{lastCapture.fps ? ` · ${lastCapture.fps} fps` : ''} · {(lastCapture.bytes / (1024 * 1024)).toFixed(2)} MB</small><code>{lastCapture.path}</code><button className="secondary-button" onClick={() => void navigator.clipboard.writeText(lastCapture.path)}><Copy size={15}/>Copy file path</button></div></div>}
         </div>
       </Panel>
       <Panel title="Local test clips" icon={Film}>
         <div className="clip-preview">
-          {previewUrl ? <img src={previewUrl} alt="Animated local test capture preview"/> :
-            <div className="preview-empty"><Film size={32}/><strong>No clip selected</strong><span>Capture a test GIF or select one from the local list</span></div>}
+          {selected?.format === 'avi' ? <div className="preview-empty"><Film size={32}/><strong>AVI video saved</strong><span>Use the saved path below to open the file in VLC or another MJPEG AVI-capable player.</span></div> :
+            previewUrl ? <img src={previewUrl} alt="Animated local test capture preview"/> :
+            <div className="preview-empty"><Film size={32}/><strong>No clip selected</strong><span>Capture a GIF or AVI test clip and select it from the list</span></div>}
         </div>
         <div className="clip-list">
-          {clips.length ? clips.map((clip, index) => <button key={clip.id} className={`clip-list-row ${selectedClip === clip.id ? 'active' : ''}`} disabled={working} onClick={() => void selectClip(clip.id)}>
-            <Film size={16}/><span className="truncate">Test clip {clips.length - index}</span><small>{(clip.bytes / (1024 * 1024)).toFixed(2)} MB</small>
+          {clips.length ? clips.map((clip, index) => <button key={clip.id} className={`clip-list-row ${selectedClip === clip.id ? 'active' : ''}`} disabled={working} onClick={() => void selectClip(clip.id, clip.format)}>
+            <Film size={16}/><span className="truncate">Test clip {clips.length - index} · {(clip.format ?? 'gif').toUpperCase()}</span><small>{(clip.bytes / (1024 * 1024)).toFixed(2)} MB</small>
           </button>) : <p className="empty-list">No test clips have been saved on this device.</p>}
         </div>
         {selected && <div className="clip-path"><span>Saved locally</span><code>{selected.path}</code><button className="secondary-button" onClick={() => void navigator.clipboard.writeText(selected.path)}><Copy size={15}/>Copy path</button></div>}
