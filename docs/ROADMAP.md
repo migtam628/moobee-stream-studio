@@ -15,7 +15,7 @@ MooBee is a separate broadcasting product. Users should install MooBee, sign in 
 | Single-frame capture | Rust screenshot command via XCap on macOS/Windows | Live hardware QA, performance and permission acceptance |
 | Preview | Still screenshot approximately every 5 seconds | Replace with synchronized low latency continuous frames |
 | Audio mixer | Not implemented | Actual capture, level meters, mute, mixing, sync |
-| MP4/MKV recording | Not implemented; experimental silent GIF test export only | Implement real-time video/audio encoding, crash-safe muxing and playable seekable files |
+| MP4/MKV recording | Not implemented; native GIF and 10fps silent MJPEG AVI test outputs exist | Implement timestamped real-time video/audio encoding, crash-safe MP4/MKV muxing and playable seekable files |
 | Streaming | Not implemented | Encode and RTMP/SRT push to test endpoint; confirm receiving side |
 | Alerts | Local test overlay service | Composite into actual video output |
 | Web/API | Local scene control, SSE, atomic file persistence and JSON backup/restore | Auth, RBAC, remote TLS, audited endpoints and durable multiuser database |
@@ -59,7 +59,7 @@ MooBee is a separate broadcasting product. Users should install MooBee, sign in 
 
 ## Release policy
 
-Keep legacy v0.2 installers separate. Use feature branch `feature/standalone-broadcast-core` for current migration, then ship v0.3.0-alpha only after native CI and manual Mac/Windows capture testing. Package installers unsigned until signing/notarization are configured. Alpha 0.3 does **not** promise broadcasting.
+Keep legacy v0.2 OBS-controller installers separate from independent v0.3+ alpha builds. Use feature branches, passing checks and verified release branches. Stable promotion requires every P0 gate in `docs/PRODUCTION_READINESS.md` plus signed/notarized production installers and real-device video/audio/RTMP acceptance. Alpha builds do **not** promise broadcasting.
 
 ## Compliance
 
@@ -84,3 +84,7 @@ A Mac/Windows Rust capture diagnostic calls the bundled XCap continuous `Monitor
 ## Alpha 0.3.6 — First independent native video container experiment
 
 On macOS and Windows, a bounded capture-to-file test uses XCap's continuous RGBA frames, performs 640×360 letterbox and JPEG encoding with a bundled Rust library, then writes a seekable indexed MJPEG/RIFF AVI video (2–8 seconds, 10 fps, silent) through MooBee's own AVI writer. A source frame may be repeated when capture runs behind; this is not a synchronized A/V engine or GPU-encoded program output. Input capture, encoding, and playback must be verified on actual target devices. Next steps: full-frame-rate hardware-accelerated native capture/composition, synchronized microphone/system audio, MP4/MKV muxing, RTMP/RTMPS transport and live health/reconnect.
+
+## Alpha 0.3.7 — Native recording reliability and promotion gates
+
+Replace the in-memory RIFF AVI muxer with a bounded `Write + Seek` streaming writer. Frames go directly to a UUID-named private `.avi.part` file; the file is indexed/finalized, flushed and synced before same-directory rename into the Clips library. A failed capture must not be listed as a completed video. The writer's unit tests, FFprobe metadata check and **complete FFmpeg decode** now gate prerelease verification. Release branches must match npm/Tauri/Cargo versions and provide the requested Android and web assets. App and API report the same package version. This improves reliability but does not implement real-time synchronized MP4/MKV capture or RTMP.
