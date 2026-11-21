@@ -264,6 +264,105 @@ function Overlays({ setTab }: { setTab: (tab: Tab) => void }) {
 
 function HeartIcon() { return <Gift size={28}/> }
 
+type LocalClip = { id: string; path: string; bytes: number }
+type CapturedClip = LocalClip & { format: string; durationSeconds: number; frameCount: number; width: number; height: number }
+type Screen = { id: number; name: string; width: number; height: number }
+
+function ClipLab() {
+  const [screens, setScreens] = useState<Screen[]>([])
+  const [displayId, setDisplayId] = useState('')
+  const [seconds, setSeconds] = useState(4)
+  const [clips, setClips] = useState<LocalClip[]>([])
+  const [selectedClip, setSelectedClip] = useState('')
+  const [previewUrl, setPreviewUrl] = useState('')
+  const [lastCapture, setLastCapture] = useState<CapturedClip | null>(null)
+  const [working, setWorking] = useState(false)
+  const [error, setError] = useState('')
+  const desktop = runningInTauri()
+
+  const reload = useCallback(async () => {
+    if (!desktop) return
+    try {
+      const [screenData, clipData] = await Promise.all([
+        request<{ displays: Screen[] }>('/capture/displays'),
+        request<{ clips: LocalClip[] }>('/clips')
+      ])
+      setScreens(screenData.displays)
+      setDisplayId(previous => screenData.displays.some(item => String(item.id) === previous)
+        ? previous : String(screenData.displays[0]?.id ?? ''))
+      setClips(clipData.clips)
+    } catch (cause) { setError((cause as Error).message) }
+  }, [desktop])
+  useEffect(() => { void reload() }, [reload])
+
+  async function selectClip(id: string) {
+    setError('')
+    setSelectedClip(id)
+    setPreviewUrl('')
+    try {
+      const data = await request<{ dataUrl: string }>(`/clips/preview?id=${encodeURIComponent(id)}`)
+      setPreviewUrl(data.dataUrl)
+    } catch (cause) { setError((cause as Error).message) }
+  }
+  async function capture() {
+    if (!desktop || !displayId) return
+    setWorking(true)
+    setError('')
+    try {
+      const clip = await request<CapturedClip>('/clips/capture', {
+        displayId: Number(displayId), seconds
+      })
+      setLastCapture(clip)
+      await reload()
+      await selectClip(clip.id)
+    } catch (cause) {
+      setError((cause as Error).message)
+    } finally { setWorking(false) }
+  }
+  const selected = clips.find(item => item.id === selectedClip)
+  return <><div className="workspace-heading"><div><h1>Clips</h1><p>A first native capture-to-file test, running entirely on your own computer.</p></div><span className="status-pill">Silent GIF prototype · 2 fps</span></div>
+    <div className="settings-layout clip-lab-grid">
+      <Panel title="Capture a test clip" icon={Clapperboard}>
+        <div className="clip-form">
+          <p>This experimental tool captures consecutive still frames from a selected display and saves a playable <strong>silent GIF</strong>. It does not encode MP4, capture audio, or broadcast.</p>
+          <label>Display
+            <select value={displayId} disabled={!desktop || working || screens.length === 0} onChange={event => setDisplayId(event.target.value)}>
+              {screens.length ? screens.map(item => <option key={item.id} value={item.id}>{item.name} · {item.width}×{item.height}</option>) : <option value="">No supported desktop display</option>}
+            </select>
+          </label>
+          <label>Clip length
+            <select value={seconds} disabled={!desktop || working} onChange={event => setSeconds(Number(event.target.value))}>
+              {[2, 4, 6, 10].map(value => <option key={value} value={value}>{value} seconds</option>)}
+            </select>
+          </label>
+          <div className="clip-actions">
+            <button className="primary-button" disabled={!desktop || !displayId || working} onClick={() => void capture()}>
+              <Film size={17}/>{working ? 'Capturing frames…' : 'Capture Silent GIF'}
+            </button>
+            <button className="secondary-button" disabled={!desktop || working} onClick={() => void reload()}><RefreshCcw size={16}/>Refresh</button>
+          </div>
+          <p className="help-text">{desktop ? 'The capture stays on this computer. Grant Screen Recording permission on macOS if prompted.' : 'Native test capture is only available in the installed Windows/macOS app. The web and Android editions cannot capture a GIF yet.'}</p>
+          {error && <p role="alert" className="clip-error">{error}</p>}
+          {lastCapture && <div className="clip-result"><CheckCircle2 size={18}/><div><strong>Saved {lastCapture.frameCount} frames</strong><small>{lastCapture.durationSeconds}s · {lastCapture.width}×{lastCapture.height} GIF · {(lastCapture.bytes / (1024 * 1024)).toFixed(2)} MB</small><code>{lastCapture.path}</code><button className="secondary-button" onClick={() => void navigator.clipboard.writeText(lastCapture.path)}><Copy size={15}/>Copy file path</button></div></div>}
+        </div>
+      </Panel>
+      <Panel title="Local test clips" icon={Film}>
+        <div className="clip-preview">
+          {previewUrl ? <img src={previewUrl} alt="Animated local test capture preview"/> :
+            <div className="preview-empty"><Film size={32}/><strong>No clip selected</strong><span>Capture a test GIF or select one from the local list</span></div>}
+        </div>
+        <div className="clip-list">
+          {clips.length ? clips.map((clip, index) => <button key={clip.id} className={`clip-list-row ${selectedClip === clip.id ? 'active' : ''}`} disabled={working} onClick={() => void selectClip(clip.id)}>
+            <Film size={16}/><span className="truncate">Test clip {clips.length - index}</span><small>{(clip.bytes / (1024 * 1024)).toFixed(2)} MB</small>
+          </button>) : <p className="empty-list">No test clips have been saved on this device.</p>}
+        </div>
+        {selected && <div className="clip-path"><span>Saved locally</span><code>{selected.path}</code><button className="secondary-button" onClick={() => void navigator.clipboard.writeText(selected.path)}><Copy size={15}/>Copy path</button></div>}
+      </Panel>
+    </div>
+    <div className="clip-roadmap"><strong>Still to build:</strong> continuous high-frame-rate capture, the GPU compositor, microphone and system audio, hardware video encoding, recoverable MP4/MKV recordings, and RTMP/RTMPS streaming. The main Record and Go Live controls remain disabled until those features are tested.</div>
+  </>
+}
+
 function FeatureBullet({ title, detail, ready = false }: { title: string; detail: string; ready?: boolean }) {
   return <div className="feature-bullet"><span className={ready ? 'feature-icon-ready' : 'feature-icon-planned'}>{ready ? <Check size={16}/> : <MoreHorizontal size={16}/>}</span><div><strong>{title}</strong><p>{detail}</p></div><span className="feature-status">{ready ? 'Available' : 'Planned'}</span></div>
 }
@@ -290,18 +389,19 @@ export default function App() {
   const go = (target: Tab) => { setTab(target); setDrawerOpen(false) }
   return <div className="app-shell">
     <header className="app-topbar"><div className="brand"><RadioTower size={27}/><span>MooBee <em>Studio</em></span></div><div className="top-divider"/><div className="project-select"><span>Workspace</span><strong>My Studio</strong></div><div className="top-spacer"/><div className="destination-pills"><span className="dest-label">Destinations</span><span className="destination"><span className="dest-icon twitch">T</span>Twitch <small>Not linked</small></span><span className="destination"><span className="dest-icon youtube">▶</span>YouTube <small>Not linked</small></span><span className="destination"><span className="dest-icon kick">K</span>Kick <small>Not linked</small></span></div><div className="top-divider"/><span className="profile">MT</span><button className="mobile-menu" onClick={() => setDrawerOpen(!drawerOpen)}><LayoutGrid size={22}/></button></header>
-    <aside className={`sidebar ${drawerOpen ? 'drawer-open' : ''}`}><nav>{navigation.map(({ label, icon: Icon }) => <button key={label} className={`nav-item ${tab === label ? 'active' : ''}`} onClick={() => go(label)}><Icon size={19}/><span>{label}</span></button>)}</nav><div className="sidebar-bottom"><div className="release-label">ALPHA 0.3 (DEV)</div><button onClick={() => go('Settings')}><CircleHelp size={16}/>Engine guide</button></div></aside>
+    <aside className={`sidebar ${drawerOpen ? 'drawer-open' : ''}`}><nav>{navigation.map(({ label, icon: Icon }) => <button key={label} className={`nav-item ${tab === label ? 'active' : ''}`} onClick={() => go(label)}><Icon size={19}/><span>{label}</span></button>)}</nav><div className="sidebar-bottom"><div className="release-label">ALPHA 0.3.2 (DEV)</div><button onClick={() => go('Settings')}><CircleHelp size={16}/>Engine guide</button></div></aside>
     <main className="workspace">
       {error && <div className="error-banner" role="alert"><span>{error}</span><button onClick={() => setError('')}><X size={17}/></button></div>}
       {(tab === 'Studio' || tab === 'Scenes') && <Studio status={status} perform={perform} pending={pending} setTab={go}/>}
       {tab === 'Settings' && <Settings status={status}/>}
       {tab === 'Alerts' && <Alerts perform={perform}/>}
       {tab === 'Overlays' && <Overlays setTab={go}/>}
-      {(tab === 'Multistream' || tab === 'AI Sidekick' || tab === 'Clips' || tab === 'Chatbot' || tab === 'Analytics') && <PlannedModule tab={tab}/>}
+      {tab === 'Clips' && <ClipLab/>}
+      {(tab === 'Multistream' || tab === 'AI Sidekick' || tab === 'Chatbot' || tab === 'Analytics') && <PlannedModule tab={tab}/>}
     </main>
     <aside className="right-rail"><div className="rail-tabs"><span><Activity size={16}/> Activity</span><span className="live-marker"/></div><div className="assistant-summary"><div><Sparkles size={21}/><strong>AI Sidekick</strong><span className="small-tag">Coming soon</span></div><p>Scene automations and an optional local AI co-host are planned for a later milestone.</p></div>
       <Panel title="Stream Activity" icon={Activity} action={<button className="icon-button" onClick={() => void refresh()} title="Refresh"><RefreshCcw size={15}/></button>}><div className="activity-list">{activity.length ? activity.slice(0, 14).map((item) => <div className="activity-item" key={item.id}><span className="activity-dot"/><div><p>{item.message}</p><small>{new Date(item.time).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</small></div></div>) : <div className="empty-list">Local scene changes and test alerts will appear here.</div>}</div></Panel>
-      <Panel title="Quick Actions" icon={SlidersHorizontal}><div className="quick-actions"><button onClick={() => go('Alerts')}><Bell size={17}/>Test an alert</button><button onClick={() => go('Overlays')}><LayoutGrid size={17}/>Browser overlay</button><button onClick={() => go('Settings')}><Terminal size={17}/>Native engine settings</button></div></Panel>
+      <Panel title="Quick Actions" icon={SlidersHorizontal}><div className="quick-actions"><button onClick={() => go('Alerts')}><Bell size={17}/>Test an alert</button><button onClick={() => go('Overlays')}><LayoutGrid size={17}/>Browser overlay</button><button onClick={() => go('Clips')}><Film size={17}/>Capture a test GIF</button><button onClick={() => go('Settings')}><Terminal size={17}/>Native engine settings</button></div></Panel>
       {alert && <div className="recent-test"><Bell size={18}/>Last test: {alert.name}</div>}
     </aside>
     <footer className="status-footer"><div className={`health ${status.connected ? 'healthy' : ''}`}><span className="status-dot"/>{status.connected ? (status.streaming ? 'Live Broadcast' : 'Studio Ready (No Output)') : 'Local engine offline'}</div><div className="footer-data"><span>Encoder <b>In development</b></span><span>Bitrate <b>{status.bitrateKbps === null ? '—' : `${status.bitrateKbps} kbps`}</b></span><span>Uptime <b>{formatElapsed(status.streamSeconds)}</b></span><span>Dropped <b>{status.droppedFrames === null ? '—' : status.droppedFrames}</b></span></div><button className={`go-live ${status.streaming ? 'stop-live' : ''}`} disabled={!status.broadcastAvailable || pending} title="The native streaming encoder is not implemented yet" onClick={() => void perform('/studio/action', { action: 'stream' })}>{status.streaming ? <Square size={18}/> : <Radio size={20}/>} {status.streaming ? 'End Stream' : 'Go Live (planned)'}</button></footer>
