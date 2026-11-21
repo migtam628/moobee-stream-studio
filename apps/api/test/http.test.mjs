@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 process.env.NODE_ENV = 'test';
 const { app } = await import('../server.mjs');
@@ -6,26 +6,40 @@ const server = await new Promise(resolve => {
   const running = app.listen(0, '127.0.0.1', () => resolve(running));
 });
 const root = `http://127.0.0.1:${server.address().port}`;
+after(async () => { await new Promise(resolve => server.close(resolve)); });
 
-test('API reports the version', async () => {
-  const response = await fetch(`${root}/api/health`);
+test('standalone API health and studio status', async () => {
+  const health = await (await fetch(`${root}/api/health`)).json();
+  assert.equal(health.engine, 'in-house');
+  const response = await fetch(`${root}/api/studio/status`);
   assert.equal(response.status, 200);
-  assert.equal((await response.json()).version, '0.2.0');
+  const studio = await response.json();
+  assert.equal(studio.connected, true);
+  assert.equal(studio.recordAvailable, false);
+  assert.equal(studio.broadcastAvailable, false);
+  assert.ok(studio.scenes.length);
 });
-test('remote OBS connection is rejected by default', async () => {
-  const response = await fetch(`${root}/api/obs/connect`, {
+test('scene action is controlled by MooBee, not a third-party studio', async () => {
+  const response = await fetch(`${root}/api/studio/action`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ address: 'ws://untrusted.example:4455', password: 'foo' })
+    body: JSON.stringify({ action: 'addScene', sceneName: 'Community' })
   });
-  assert.equal(response.status, 400);
+  const data = await response.json();
+  assert.equal(response.status, 200);
+  assert.ok(data.status.scenes.includes('Community'));
 });
-test('a test alert is published without needing OBS', async () => {
+test('broadcast remains unavailable until implemented', async () => {
+  const response = await fetch(`${root}/api/studio/action`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'stream' })
+  });
+  assert.equal(response.status, 501);
+});
+test('local API test alerts need no external streaming software', async () => {
   const response = await fetch(`${root}/api/alerts/test`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ type: 'follow', name: 'Mig', message: 'Hello!' })
   });
-  const data = await response.json();
   assert.equal(response.status, 200);
-  assert.equal(data.alert.name, 'Mig');
+  assert.equal((await response.json()).alert.name, 'Mig');
 });
-test('close HTTP test listener', async () => { await new Promise(resolve => server.close(resolve)); });
