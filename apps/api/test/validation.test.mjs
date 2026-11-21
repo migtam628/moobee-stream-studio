@@ -44,3 +44,68 @@ test('source input is constrained to valid display sources', () => {
   engine.perform({ action: 'source', sceneItemId: engine.status().sources[0].id, enabled: false });
   assert.equal(engine.status().sources[0].enabled, false);
 });
+
+test('scene rename updates preview and program references without changing unrelated scenes', () => {
+  const studio = createStudio();
+  studio.perform({ action: 'studioMode', studioModeEnabled: true });
+  studio.perform({ action: 'scene', sceneName: 'Gameplay' });
+  studio.perform({ action: 'renameScene', sceneName: 'Gameplay', newName: 'Gameplay Live' });
+  assert.equal(studio.status().previewScene, 'Gameplay Live');
+  assert.equal(studio.status().currentScene, 'Starting Soon');
+  studio.perform({ action: 'renameScene', sceneName: 'Starting Soon', newName: 'Lobby' });
+  assert.equal(studio.status().currentScene, 'Lobby');
+  assert.throws(() => studio.perform({ action: 'renameScene', sceneName: 'Lobby', newName: 'ENDING' }), /already exists/);
+});
+
+test('duplicated scenes use independent source IDs; source deletion preserves the original', () => {
+  const studio = createStudio();
+  studio.perform({ action: 'addSource', kind: 'display', deviceId: '0', name: 'Monitor' });
+  const originalId = studio.status().sources[0].id;
+  studio.perform({ action: 'duplicateScene', sceneName: 'Starting Soon' });
+  studio.perform({ action: 'scene', sceneName: 'Starting Soon Copy' });
+  const copyId = studio.status().sources[0].id;
+  assert.notEqual(copyId, originalId);
+  studio.perform({ action: 'removeSource', sceneItemId: copyId });
+  assert.equal(studio.status().sources.length, 0);
+  studio.perform({ action: 'scene', sceneName: 'Starting Soon' });
+  assert.equal(studio.status().sources[0].id, originalId);
+});
+
+test('deleting selected scenes updates program/preview and prevents deleting the final scene', () => {
+  const studio = createStudio();
+  studio.perform({ action: 'scene', sceneName: 'Gameplay' });
+  studio.perform({ action: 'deleteScene', sceneName: 'Gameplay' });
+  assert.equal(studio.status().currentScene, 'Starting Soon');
+  const left = studio.status().scenes;
+  for (const scene of left.slice(1)) studio.perform({ action: 'deleteScene', sceneName: scene });
+  assert.throws(() => studio.perform({ action: 'deleteScene', sceneName: left[0] }), /last scene/);
+});
+
+test('scene collection export and import round trip retains sources and studio mode', () => {
+  const first = createStudio();
+  first.perform({ action: 'addSource', kind: 'display', deviceId: '0', name: 'Left Display' });
+  first.perform({ action: 'studioMode', studioModeEnabled: true });
+  first.perform({ action: 'scene', sceneName: 'Gameplay' });
+  const collection = first.collection();
+  assert.equal(collection.version, 1);
+  const second = createStudio({ initial: collection });
+  assert.deepEqual(second.collection(), collection);
+  second.perform({ action: 'transition' });
+  assert.equal(second.status().currentScene, 'Gameplay');
+});
+
+test('invalid scene imports leave existing collection unchanged', () => {
+  const studio = createStudio();
+  const original = studio.collection();
+  const invalids = [
+    { ...original, version: 999 },
+    { ...original, scenes: [] },
+    { ...original, currentScene: 'missing' },
+    { ...original, scenes: [...original.scenes, original.scenes[0]] },
+    { ...original, scenes: [{ ...original.scenes[0], sources: [{ id: 1, kind: 'url', name: 'Injected', enabled: true }] }, ...original.scenes.slice(1)] }
+  ];
+  for (const value of invalids) {
+    assert.throws(() => studio.replaceCollection(value), StudioError);
+    assert.deepEqual(studio.collection(), original);
+  }
+});
