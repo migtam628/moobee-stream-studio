@@ -72,3 +72,13 @@
 .capture-diagnostic-results strong{font-size:18px;color:#ede4fc;font-variant-numeric:tabular-nums}
 .capture-diagnostic-results p{grid-column:1/-1;font-size:11px;color:#b6adc5;margin:0}
 @media(max-width:700px){.capture-diagnostic-results{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* macOS system encoder experiment — explicit permission and device caveats */
+.clip-mp4-options{display:flex;flex-direction:column;gap:10px;border:1px solid #65517e;border-radius:10px;padding:16px;background:linear-gradient(115deg,#28203b,#1b1a27);max-width:670px}
+.clip-mp4-options p{font-size:12px;line-height:1.6;color:#c9c2d8;margin:0}
+.clip-mp4-options strong{color:#eee6ff}
+.clip-mp4-options label{display:flex;align-items:center;gap:10px;font-size:12px;color:#e0d6ee;cursor:pointer}
+.clip-mp4-options input{width:16px;height:16px;accent-color:#af93eb}
+.clip-mp4-options label:has(input:disabled){opacity:.55;cursor:not-allowed}
+.clip-mp4-options small{color:#ada0c1;font-size:11px;line-height:1.5}
+@media(max-width:700px){.clip-mp4-options{padding:12px}}
