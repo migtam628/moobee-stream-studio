@@ -11,7 +11,7 @@ export function createStudio({ onChange = () => {} } = {}) {
   let studioMode = false;
   let nextSourceId = 1;
   function status() {
-    const scene = scenes.find(item => item.name === currentScene);
+    const scene = scenes.find(item => item.name === (studioMode ? previewScene : currentScene));
     return {
       connected: true, address: 'local', engine: 'moobee-native-alpha',
       captureAvailable: false, recordAvailable: false, broadcastAvailable: false,
@@ -25,7 +25,7 @@ export function createStudio({ onChange = () => {} } = {}) {
   function perform(body) {
     if (!body || typeof body !== 'object') throw new StudioError('Action must be an object');
     const { action, sceneName } = body;
-    const active = scenes.find(item => item.name === currentScene);
+    const active = scenes.find(item => item.name === (studioMode ? previewScene : currentScene));
     if (action === 'addScene') {
       if (!validName(sceneName)) throw new StudioError('Scene name must be 1–64 characters');
       if (scenes.some(item => item.name.toLowerCase() === sceneName.trim().toLowerCase())) throw new StudioError('Scene name already exists', 409);
