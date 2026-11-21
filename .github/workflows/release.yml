@@ -9,6 +9,11 @@ on:
 permissions:
   contents: read
 
+# Avoid rebuilding stale pull-request commits on all five platforms.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   verify:
     name: Test and compile web app
