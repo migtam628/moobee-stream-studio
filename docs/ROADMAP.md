@@ -11,10 +11,11 @@ MooBee is a separate broadcasting product. Users should install MooBee, sign in 
 | Scene data model | Versioned portable collection JSON, rename/duplicate/delete, validated import/export on both clients | Consolidate native and API validators into a single shared schema + migrations |
 | Preview/program scene selection | Implemented as state | Verify GPU compositor shows accurate preview and program pixels |
 | Add screen source | Native display picker and scene source removal on Mac/Windows | Permission flow, hotplug and multi-display hardware testing |
+| Native capture test clip | 2–10 second silent 2 fps GIF built from Rust XCap frames on macOS/Windows | Native hardware validation, permission handling, measurable sampling timing; not a production recorder |
 | Single-frame capture | Rust screenshot command via XCap on macOS/Windows | Live hardware QA, performance and permission acceptance |
 | Preview | Still screenshot approximately every 5 seconds | Replace with synchronized low latency continuous frames |
 | Audio mixer | Not implemented | Actual capture, level meters, mute, mixing, sync |
-| Recording | Not implemented | Produce playable files, crash-safe muxing, seek/test across OS |
+| MP4/MKV recording | Not implemented; experimental silent GIF test export only | Implement real-time video/audio encoding, crash-safe muxing and playable seekable files |
 | Streaming | Not implemented | Encode and RTMP/SRT push to test endpoint; confirm receiving side |
 | Alerts | Local test overlay service | Composite into actual video output |
 | Web/API | Local scene control, SSE, atomic file persistence and JSON backup/restore | Auth, RBAC, remote TLS, audited endpoints and durable multiuser database |
@@ -63,3 +64,11 @@ Keep legacy v0.2 installers separate. Use feature branch `feature/standalone-bro
 ## Compliance
 
 Do not assume embedded capture/encoding components are free of redistribution obligations. Verify every dependency and codec/SDK license, distribute notices and required source where applicable, and track third-party code provenance.
+
+## Alpha 0.3.2 progress
+
+The Clips laboratory now captures a short sequence of sampled desktop frames and encodes a local animated GIF, without installing external broadcast software. This is a deliberately small media-output milestone and does not qualify the primary Record/Go Live controls for activation. Next priority: high-frame-rate frame acquisition and timestamping, audio, GPU compositing, and then MP4/MKV muxing plus RTMP output.
+
+## Browser-native 0.3.2+ prototype
+
+Where the browser supports `getDisplayMedia` plus `MediaRecorder`, the Clips page can produce a local, user-consented silent WebM/MP4 clip without an external broadcasting application or server upload. This is separate from desktop Tauri GIF capture and not a production audio/video compositor, replay buffer, or livestream. Browser compatibility, permissions, resource limits and real video playback must be tested on target browsers.
