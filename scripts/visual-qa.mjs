@@ -46,6 +46,43 @@ try {
     throw new Error('Native device capture must remain disabled in the browser edition');
   }
   await page.screenshot({ path: new URL('clips.png', dir).pathname, fullPage: true });
+  // Simulated browser stream tests UI wiring without attempting permissionless real capture.
+  const recordingPage = await browser.newPage({ viewport: { width: 1200, height: 800 } });
+  await recordingPage.addInitScript(() => {
+    const fakeTrack = { addEventListener() {}, stop() {} };
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getDisplayMedia: async () => ({
+        getTracks: () => [fakeTrack],
+        getVideoTracks: () => [fakeTrack]
+      }) }
+    });
+    class FakeRecorder {
+      static isTypeSupported(type) { return type.startsWith('video/webm'); }
+      state = 'inactive';
+      mimeType = 'video/webm';
+      ondataavailable = null;
+      onstop = null;
+      onerror = null;
+      start() { this.state = 'recording'; }
+      stop() {
+        if (this.state === 'inactive') return;
+        this.state = 'inactive';
+        this.ondataavailable?.({ data: new Blob(['sample-webm'], { type: 'video/webm' }) });
+        this.onstop?.();
+      }
+    }
+    Object.defineProperty(window, 'MediaRecorder', { configurable: true, value: FakeRecorder });
+  });
+  await recordingPage.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'domcontentloaded' });
+  await recordingPage.getByRole('button', { name: 'Clips' }).first().click();
+  await recordingPage.getByRole('button', { name: 'Record shared screen' }).click();
+  await recordingPage.getByRole('button', { name: /Stop ·/ }).click();
+  await recordingPage.getByText('Local recording ready').waitFor({ timeout: 5000 });
+  const saveLink = recordingPage.getByRole('link', { name: 'Save recording' });
+  const filename = await saveLink.getAttribute('download');
+  if (!filename?.endsWith('.webm')) throw new Error('Browser recorder did not expose a WebM download');
+  await recordingPage.screenshot({ path: new URL('browser-recorder.png', dir).pathname, fullPage: true });
   const mobile = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
   await mobile.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'domcontentloaded' });
   await mobile.getByRole('heading', { name: 'Studio' }).waitFor();
