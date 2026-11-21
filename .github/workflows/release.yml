@@ -58,7 +58,7 @@ jobs:
 
   desktop:
     name: Desktop — ${{ matrix.label }}
-    if: startsWith(github.ref, 'refs/heads/release/') || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
+    if: startsWith(github.ref, 'refs/heads/release/') || github.event_name == 'workflow_dispatch'
     needs: verify
     strategy:
       fail-fast: false
@@ -114,7 +114,7 @@ jobs:
 
   android:
     name: Android ARM64 test APK
-    if: startsWith(github.ref, 'refs/heads/release/') || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
+    if: startsWith(github.ref, 'refs/heads/release/') || github.event_name == 'workflow_dispatch'
     needs: verify
     runs-on: ubuntu-24.04
     steps:
