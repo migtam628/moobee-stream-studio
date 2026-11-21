@@ -1,0 +1,23 @@
+.browser-recorder{background:#20202c;border:1px solid #3b364b;border-radius:10px;margin-top:15px;overflow:hidden;max-width:1240px}
+.browser-recorder-head{display:flex;gap:12px;padding:17px 20px;border-bottom:1px solid #3a3645;background:linear-gradient(110deg,#2b2440,#20202c);align-items:flex-start}
+.browser-recorder-head>svg{color:#b19afa;flex:none;margin-top:2px}
+.browser-recorder-head h2{color:#f1ecfd;font-size:15px;margin:0 0 5px}
+.browser-recorder-head p{color:#b5acc8;font-size:12px;line-height:1.55;margin:0}
+.browser-recorder-form{padding:19px;display:flex;flex-direction:column;gap:14px}
+.browser-recorder-form>label{display:flex;flex-direction:column;gap:8px;color:#cbc4da;font-size:12px;font-weight:700;max-width:300px}
+.browser-recorder-form select{border:1px solid #5b506a;background:#191922;color:#f4edf8;border-radius:7px;padding:10px}
+.browser-recorder-actions{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.browser-recorder-actions>button,.browser-recorder-download{background:#b5a0f5;color:#1e172e;border:0;border-radius:7px;padding:11px 16px;font-size:12px;font-weight:800;display:inline-flex;align-items:center;gap:8px;text-decoration:none}
+.browser-recorder-actions>button.stop{background:#b65067;color:#fff}
+.browser-recorder-actions>button:disabled{opacity:.45;cursor:not-allowed}
+.browser-recorder-actions small{color:#a9a0b7;font-size:11px}
+.browser-recorder-error{color:#ffd5d9;background:#572837;border:1px solid #824355;border-radius:7px;padding:10px;font-size:12px}
+.browser-recorder-result{display:flex;flex-direction:column;align-items:flex-start;gap:14px;border:1px solid #395849;background:#172a29;border-radius:9px;padding:14px}
+.browser-recorder-saved{display:flex;align-items:flex-start;gap:10px;color:#bcfae7}
+.browser-recorder-saved>div{display:flex;flex-direction:column;gap:5px}
+.browser-recorder-saved strong{font-size:13px}
+.browser-recorder-saved small{font-size:11px;color:#a9cac4}
+.browser-recorder-result video{width:100%;max-width:640px;aspect-ratio:16/9;background:#0b0b10;border-radius:8px}
+.browser-recorder-download{margin-bottom:1px}
+.browser-recorder-note{color:#a59ab7;border-top:1px solid #353144;line-height:1.6;font-size:11px;padding:13px 20px;margin:0}
+@media(max-width:700px){.browser-recorder{margin-top:12px}.browser-recorder-head{padding:15px}.browser-recorder-form{padding:14px}.browser-recorder-actions{align-items:flex-start;flex-direction:column}}
