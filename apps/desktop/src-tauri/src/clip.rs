@@ -30,6 +30,7 @@ pub struct ClipInfo {
     id: String,
     path: String,
     bytes: u64,
+    modified_ms: u128,
 }
 
 #[derive(Serialize)]
@@ -180,16 +181,22 @@ pub fn list_test_clips(app: tauri::AppHandle) -> Result<Vec<ClipInfo>, String> {
             if uuid::Uuid::parse_str(id).is_ok_and(|uuid| uuid.to_string() == id) {
                 let meta = entry.metadata().map_err(|error| error.to_string())?;
                 if meta.is_file() && meta.len() <= MAX_CLIP_BYTES {
+                    let modified_ms = meta
+                        .modified()
+                        .ok()
+                        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map_or(0, |duration| duration.as_millis());
                     clips.push(ClipInfo {
                         id: id.to_owned(),
                         path: entry.path().to_string_lossy().into_owned(),
                         bytes: meta.len(),
+                        modified_ms,
                     });
                 }
             }
         }
     }
-    clips.sort_by(|a, b| b.id.cmp(&a.id));
+    clips.sort_by(|a, b| b.modified_ms.cmp(&a.modified_ms).then_with(|| b.id.cmp(&a.id)));
     clips.truncate(50);
     Ok(clips)
 }
