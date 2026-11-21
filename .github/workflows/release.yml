@@ -144,7 +144,7 @@ jobs:
         run: |
           mkdir -p release-assets
           find apps/desktop/src-tauri/gen/android/app/build/outputs/apk -type f -name '*.apk' -exec cp '{}' release-assets/moobee-stream-studio-android-arm64-debug.apk \;
-          test -s release-assets/moobee-live-android-arm64-debug.apk
+          test -s release-assets/moobee-stream-studio-android-arm64-debug.apk
       - uses: actions/upload-artifact@v4
         with:
           name: android-arm64-debug
@@ -177,9 +177,15 @@ jobs:
           while IFS= read -r -d '' file; do
             ( cd "$(dirname "$file")" && sha256sum "$(basename "$file")" )
           done < <(find release-assets -type f -print0 | sort -z) > SHA256SUMS.txt
-          gh release create "$TAG" "${FILES[@]}" SHA256SUMS.txt \
-            --target "$GITHUB_SHA" \
-            --title "MooBee Stream Studio $TAG — Standalone Capture Alpha" \
-            --notes-file docs/RELEASE_NOTES.md \
-            --prerelease
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Refreshing existing prerelease assets for $TAG"
+            gh release upload "$TAG" "${FILES[@]}" SHA256SUMS.txt --clobber
+            gh release edit "$TAG" --title "MooBee Stream Studio $TAG — Standalone Capture Alpha" --notes-file docs/RELEASE_NOTES.md --prerelease
+          else
+            gh release create "$TAG" "${FILES[@]}" SHA256SUMS.txt \
+              --target "$GITHUB_SHA" \
+              --title "MooBee Stream Studio $TAG — Standalone Capture Alpha" \
+              --notes-file docs/RELEASE_NOTES.md \
+              --prerelease
+          fi
 
