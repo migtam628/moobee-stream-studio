@@ -283,7 +283,12 @@ function ClipLab() {
   const [probing, setProbing] = useState(false)
   const [probeResult, setProbeResult] = useState<CaptureProbe | null>(null)
   const [error, setError] = useState('')
+  const [macMp4Working, setMacMp4Working] = useState(false)
+  const [captureSystemAudio, setCaptureSystemAudio] = useState(true)
+  const [captureMicrophone, setCaptureMicrophone] = useState(false)
+  const [macMp4Result, setMacMp4Result] = useState<{ path: string; bytes: number; durationSeconds: number; audioTrackVerified: boolean } | null>(null)
   const desktop = runningInTauri()
+  const isMacDesktop = desktop && /Macintosh|Mac OS X/i.test(navigator.userAgent)
 
   const reload = useCallback(async () => {
     if (!desktop) return
@@ -342,6 +347,26 @@ function ClipLab() {
       setError('Native AVI recording failed: ' + (cause as Error).message)
     } finally { setWorking(false) }
   }
+  async function captureMacMP4() {
+    if (!isMacDesktop || !displayId || working || probing || macMp4Working || seconds < 3 || seconds > 15) return
+    setMacMp4Working(true)
+    setMacMp4Result(null)
+    setError('')
+    try {
+      const result = await request<{ id: string; path: string; bytes: number; durationSeconds: number; audioTrackVerified: boolean }>('/clips/capture-mp4', {
+        displayId: Number(displayId),
+        seconds, systemAudio: captureSystemAudio, microphone: captureMicrophone
+      })
+      setMacMp4Result(result)
+      setSelectedClip(result.id)
+      setPreviewUrl('')
+      await reload()
+    } catch (cause) {
+      setError('Native macOS MP4 capture failed: ' + (cause as Error).message)
+    } finally {
+      setMacMp4Working(false)
+    }
+  }
   async function measureCapture() {
     if (!desktop || !displayId || working || probing) return
     setProbing(true)
@@ -375,6 +400,14 @@ function ClipLab() {
               {[2, 4, 6, 8, 10].map(value => <option key={value} value={value}>{value} seconds</option>)}
             </select>
           </label>
+          {isMacDesktop && <div className="clip-mp4-options">
+            <p><strong>Experimental native H.264 MP4 (macOS 15+)</strong> — display capture using ScreenCaptureKit. It does not yet capture MooBee’s saved scenes, webcam overlay, or provide streaming.</p>
+            <label><input type="checkbox" checked={captureSystemAudio} disabled={working || probing || macMp4Working}
+              onChange={event => setCaptureSystemAudio(event.target.checked)}/> Include system audio when available</label>
+            <label><input type="checkbox" checked={captureMicrophone} disabled={working || probing || macMp4Working}
+              onChange={event => setCaptureMicrophone(event.target.checked)}/> Request microphone audio (experimental)</label>
+            <small>Mac screen and microphone permissions may be required. Requesting audio does not guarantee an audio track; check the saved file independently.</small>
+          </div>}
           <div className="clip-actions">
             <button className="primary-button" disabled={!desktop || !displayId || working || probing} onClick={() => void capture()}>
               <Film size={17}/>{working ? 'Capturing frames…' : 'Capture Silent GIF'}
@@ -382,16 +415,28 @@ function ClipLab() {
             <button className="secondary-button" disabled={!desktop || !displayId || working || probing || seconds > 8} onClick={() => void captureAvi()} title={seconds > 8 ? 'AVI test recording supports 2–8 seconds' : 'Save a silent MJPEG AVI video'}>
               <Video size={17}/>Capture Video AVI
             </button>
+            {isMacDesktop && <button className="secondary-button" disabled={!displayId || working || probing || macMp4Working || seconds < 3 || seconds > 15}
+              onClick={() => void captureMacMP4()} title={seconds < 3 ? 'Select 4–10 seconds' : 'Native ScreenCaptureKit H.264 MP4 test'}>
+              <Video size={17}/>{macMp4Working ? 'Capturing native MP4…' : 'Capture MP4 (macOS test)'}
+            </button>}
             <button className="secondary-button" disabled={!desktop || working} onClick={() => void reload()}><RefreshCcw size={16}/>Refresh</button>
           </div>
           <p className="help-text">{desktop ? 'All files stay on your computer. Grant Screen Recording permission on macOS if prompted. AVI playback is available in external players such as VLC.' : 'Native test capture is only available in the installed Windows/macOS app. Web and Android editions cannot use native GIF/AVI capture.'}</p>
           {error && <p role="alert" className="clip-error">{error}</p>}
+          {macMp4Result && <div className="clip-result" role="status"><CheckCircle2 size={18}/><div>
+            <strong>MP4 file saved — playback/audio unverified</strong>
+            <small>{macMp4Result.durationSeconds}s requested · {(macMp4Result.bytes / (1024 * 1024)).toFixed(2)} MB · H.264 test</small>
+            <code>{macMp4Result.path}</code>
+            <button className="secondary-button" onClick={() => void navigator.clipboard.writeText(macMp4Result.path)}>
+              <Copy size={15}/>Copy file path</button>
+            <p>Open the MP4 in QuickTime or VLC to verify duration, image, and audio tracks. MooBee has not yet verified the encoded audio.</p>
+          </div></div>}
           {lastCapture && <div className="clip-result"><CheckCircle2 size={18}/><div><strong>Saved {lastCapture.frameCount} frames · {lastCapture.format.toUpperCase()}</strong><small>{lastCapture.durationSeconds}s · {lastCapture.width}×{lastCapture.height}{lastCapture.fps ? ` · ${lastCapture.fps} fps` : ''} · {(lastCapture.bytes / (1024 * 1024)).toFixed(2)} MB</small><code>{lastCapture.path}</code><button className="secondary-button" onClick={() => void navigator.clipboard.writeText(lastCapture.path)}><Copy size={15}/>Copy file path</button></div></div>}
         </div>
       </Panel>
       <Panel title="Local test clips" icon={Film}>
         <div className="clip-preview">
-          {selected?.format === 'avi' ? <div className="preview-empty"><Film size={32}/><strong>AVI video saved</strong><span>Use the saved path below to open the file in VLC or another MJPEG AVI-capable player.</span></div> :
+          {(selected?.format === 'avi' || selected?.format === 'mp4') ? <div className="preview-empty"><Film size={32}/><strong>Video file saved</strong><span>Use the local path below to open AVI in VLC or MP4 in QuickTime/VLC for playback and audio checks.</span></div> :
             previewUrl ? <img src={previewUrl} alt="Animated local test capture preview"/> :
             <div className="preview-empty"><Film size={32}/><strong>No clip selected</strong><span>Capture a GIF or AVI test clip and select it from the list</span></div>}
         </div>
@@ -418,7 +463,7 @@ function ClipLab() {
           </div>}
         </div>
       </Panel>}
-    <div className="clip-roadmap"><strong>Still to build:</strong> continuous high-frame-rate capture, the GPU compositor, microphone and system audio, hardware video encoding, recoverable MP4/MKV recordings, and RTMP/RTMPS streaming. The main Record and Go Live controls remain disabled until those features are tested.</div>
+    <div className="clip-roadmap"><strong>Still to build:</strong> independent Windows MP4/audio recording, cross-platform synchronized A/V and webcam scene composition, sustained capture, recoverable containers, and RTMP/RTMPS livestreaming. The main Record and Go Live controls remain disabled until those features are tested.</div>
   </>
 }
 
