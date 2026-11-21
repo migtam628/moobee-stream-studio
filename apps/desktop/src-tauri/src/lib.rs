@@ -1,5 +1,7 @@
 mod clip;
 mod capture_probe;
+mod avi;
+mod native_avi;
 
 use axum::{
     extract::State,
@@ -180,7 +182,7 @@ pub fn run() {
             tauri::async_runtime::spawn(serve_overlays(runner_state));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![emit_test_alert, list_displays, capture_display, clip::capture_test_clip, clip::list_test_clips, clip::read_test_clip, capture_probe::probe_native_capture])
+        .invoke_handler(tauri::generate_handler![emit_test_alert, list_displays, capture_display, clip::capture_test_clip, clip::list_test_clips, clip::read_test_clip, capture_probe::probe_native_capture, native_avi::capture_silent_avi])
         .run(tauri::generate_context!())
         .expect("failed to run MooBee Live desktop");
 }
