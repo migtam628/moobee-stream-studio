@@ -61,3 +61,14 @@
 .clip-roadmap{color:#a69eb6;background:#22202d;border:1px solid #393245;border-radius:9px;margin-top:16px;padding:16px;font-size:12px;line-height:1.6}
 .clip-roadmap strong{color:#e6dff3}
 @media(max-width:900px){.clip-lab-grid{grid-template-columns:1fr}}
+
+/* Native input frame diagnostics — separate from encoded output status */
+.capture-diagnostic{padding:17px;display:flex;flex-direction:column;gap:12px}
+.capture-diagnostic>p{font-size:12px;color:#afa7bc;line-height:1.6;max-width:680px;margin:0}
+.capture-diagnostic .secondary-button{align-self:flex-start;display:inline-flex;align-items:center;gap:8px}
+.capture-diagnostic-results{display:grid;grid-template-columns:repeat(4,minmax(100px,1fr));gap:11px;max-width:790px}
+.capture-diagnostic-results>div{border:1px solid #4d4064;background:#211b31;border-radius:9px;padding:13px;display:flex;flex-direction:column;gap:8px}
+.capture-diagnostic-results span{font-size:11px;color:#ad9dc1}
+.capture-diagnostic-results strong{font-size:18px;color:#ede4fc;font-variant-numeric:tabular-nums}
+.capture-diagnostic-results p{grid-column:1/-1;font-size:11px;color:#b6adc5;margin:0}
+@media(max-width:700px){.capture-diagnostic-results{grid-template-columns:repeat(2,minmax(0,1fr))}}
