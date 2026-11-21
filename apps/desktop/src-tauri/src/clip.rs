@@ -7,7 +7,7 @@ use tauri::Manager;
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 use std::{
     sync::atomic::{AtomicBool, Ordering},
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
 
 #[cfg(any(target_os = "windows", target_os = "macos"))]
@@ -105,9 +105,6 @@ fn capture_gif(directory: PathBuf, display_id: usize, seconds: u32) -> Result<Cl
         let mut encoder = GifEncoder::new_with_speed(&mut encoded, 10);
         for frame in frames {
             encoder.encode_frame(frame).map_err(|error| format!("GIF encoding failed: {error}"))?;
-            if encoded.len() as u64 > MAX_CLIP_BYTES {
-                return Err("Test clip exceeds the 32 MB size cap".into());
-            }
         }
     }
     if encoded.is_empty() || encoded.len() as u64 > MAX_CLIP_BYTES {
