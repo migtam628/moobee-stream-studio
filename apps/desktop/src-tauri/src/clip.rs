@@ -178,12 +178,13 @@ pub fn list_test_clips(app: tauri::AppHandle) -> Result<Vec<ClipInfo>, String> {
     for item in fs::read_dir(directory).map_err(|error| error.to_string())? {
         let entry = item.map_err(|error| error.to_string())?;
         let name = entry.file_name().to_string_lossy().into_owned();
-        // Both capture experiments stay under the private UUID-only clip directory.
+        // Native capture experiments stay under a private UUID-only clips folder.
         let parsed = name
             .strip_prefix("clip-")
             .and_then(|filename| {
                 filename.strip_suffix(".gif").map(|id| (id, "gif", MAX_CLIP_BYTES))
                     .or_else(|| filename.strip_suffix(".avi").map(|id| (id, "avi", 64 * 1024 * 1024)))
+                    .or_else(|| filename.strip_suffix(".mp4").map(|id| (id, "mp4", 256 * 1024 * 1024)))
             });
         if let Some((id, format, max_size)) = parsed {
             if uuid::Uuid::parse_str(id).is_ok_and(|uuid| uuid.to_string() == id) {
