@@ -8,6 +8,7 @@ import { createStudio, StudioError } from './studio.mjs';
 
 const app = express();
 const root = dirname(fileURLToPath(import.meta.url));
+const appVersion = JSON.parse(readFileSync(join(root, '..', '..', 'package.json'), 'utf8')).version;
 const webDist = join(root, '..', 'web', 'dist');
 const overlayFile = join(root, '..', 'desktop', 'src-tauri', 'resources', 'overlay.html');
 const host = process.env.API_HOST || '127.0.0.1';
@@ -89,7 +90,7 @@ app.use((_req, res, next) => {
   res.setHeader('Referrer-Policy', 'no-referrer');
   next();
 });
-app.get('/api/health', (_req, res) => res.json({ ok: true, name: 'MooBee Studio', version: '0.3.0-alpha', engine: 'in-house' }));
+app.get('/api/health', (_req, res) => res.json({ ok: true, name: 'MooBee Studio', version: appVersion, engine: 'in-house' }));
 app.get('/api/studio/status', (_req, res) => res.json(studio.status()));
 app.get('/api/studio/collection', (_req, res) => {
   res.setHeader('Cache-Control', 'no-store');
