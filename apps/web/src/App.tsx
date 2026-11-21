@@ -84,7 +84,7 @@ function ScenePreview({ status, label, previewScene }: { status: StudioStatus; l
   return <div className="preview-block">
     <div className="preview-heading"><span><Monitor size={15}/>{label}</span><span>{status.connected ? 'Native screenshot · every 5 sec' : 'Local studio offline'}</span></div>
     <div className="preview-canvas">
-      {image ? <img src={image} alt={`OBS scene: ${previewScene}`} /> : <div className="preview-empty"><Radio size={34}/><strong>{status.connected ? 'No preview available' : 'Your stream starts here'}</strong><span>{status.connected ? 'Add or enable a display source in this scene' : 'Add a native display source to preview this scene'}</span></div>}
+      {image ? <img src={image} alt={`MooBee scene: ${previewScene}`} /> : <div className="preview-empty"><Radio size={34}/><strong>{status.connected ? 'No preview available' : 'Your stream starts here'}</strong><span>{status.connected ? 'Add or enable a display source in this scene' : 'Add a native display source to preview this scene'}</span></div>}
       {status.streaming && <span className="live-flag">LIVE</span>}
     </div>
   </div>
