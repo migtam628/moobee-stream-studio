@@ -80,3 +80,18 @@ test('local API rejects cross-origin browser writes before reaching the scene co
   const scenes = await (await fetch(`${root}/api/studio/status`)).json();
   assert.ok(!scenes.scenes.includes('Untrusted'));
 });
+
+test('web control API never pretends to have device-level clip capture', async () => {
+  const list = await fetch(`${root}/api/clips`);
+  assert.equal(list.status, 200);
+  const clips = await list.json();
+  assert.equal(clips.available, false);
+  assert.deepEqual(clips.clips, []);
+  const requestCapture = await fetch(`${root}/api/clips/capture`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ displayId: 0, seconds: 4 })
+  });
+  assert.equal(requestCapture.status, 501);
+  const requestPreview = await fetch(`${root}/api/clips/preview?id=not-a-real-clip`);
+  assert.equal(requestPreview.status, 501);
+});
