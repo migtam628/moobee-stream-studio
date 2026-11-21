@@ -19,9 +19,9 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
+base64 = "0.22"
 
 # Desktop capture is packaged with MooBee. No OBS/Streamlabs process or API.
 [target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
 xcap = "0.9.10"
 image = { version = "0.25", default-features = false, features = ["png", "gif"] }
-base64 = "0.22"
