@@ -1,33 +1,28 @@
-# MooBee Stream Studio v0.3.2-alpha.1 — Native Test Clip Lab
+# MooBee Stream Studio v0.3.3-alpha.1 — Browser-Native Local Recording
 
-**Experimental standalone prerelease, not a complete live-broadcast application.**
-No OBS Studio, Streamlabs, external encoder executable or external capture API is required.
+**Experimental alpha: not yet a complete broadcaster.** Neither the desktop nor the browser edition needs OBS or Streamlabs.
 
-## New in Alpha 0.3.2
+## New in 0.3.3
+- Web **Clips → Browser screen recording** uses browser-native `getDisplayMedia` and `MediaRecorder`, with explicit screen-sharing approval.
+- User-selectable 5, 10, or 30 seconds of silent local screen/window/tab capture where supported.
+- Downloadable WebM or MP4 depending on browser encoder capabilities; local playback preview in the Clips page.
+- Video blobs stay on the user's device and are not uploaded to a server.
+- Automatic cleanup on stop/share-ended, a conservative 64 MB in-memory limit, and capability/error messages on unsupported browsers.
+- Browser UI smoke checks cover recorder affordances and synthetic capture/download state. Real screen sharing still requires human browser permission testing.
 
-- Built-in first-party capture-to-file vertical slice on macOS/Windows.
-- Select any detected display in the **Clips** workspace and capture a **2, 4, 6, or 10 second silent animated GIF**.
-- Rust XCap screenshot sampling at approximately **2 frames per second**, GIF encoding via the embedded Rust `image` crate, automatic output under MooBee's app-data `test-clips` folder.
-- Animated preview, recent local clip listing, saved file path and clipboard-copy action.
-- bounded capture duration, output size checks (32 MB), single-capture concurrency guard, UUID-only local clip access.
-- Browser/API capability gates: no fake remote capture, encoding, or Go Live state.
+## Retained from 0.3.2
+- macOS/Windows native Tauri test-clip experiment: bounded 2–10-second **silent GIF** from XCap frames.
+- Scene management, preview/program state, sources, test alerts, JSON scene import/export, persistent local control API and private clip storage.
+- Builds for Mac Apple Silicon / Intel, Windows, Linux, Android and self-hosted web.
 
-This work exercises successive native acquisition, image encoding and file persistence, and is **not** equivalent to full-frame-rate MP4/MKV recording or a production replay buffer. Actual FPS may vary with capture performance and operating-system permissions.
+## Limitations / important safety
+- The **browser recorder** only records the screen/window/tab a user explicitly selects. It has no mic/system audio mixing, MooBee scene composition, remote storage or livestream output.
+- Web APIs require a secure origin (HTTPS or localhost) and browser/platform support. Mobile browsers commonly lack `getDisplayMedia`.
+- The native **desktop recorder** remains a very low-rate GIF proof of concept, not MP4/MKV recording.
+- Both the main **Record** and **Go Live** controls remain disabled. A true broadcasting engine, synchronized audio, hardware encoding, real-time GPU compositor, RTMP/RTMPS, multistreaming and production authentication are **not implemented**.
+- Linux/Android experimental binaries do not provide native desktop capture; unsigned installers require testing and production signing.
 
-## Retained capabilities
+## Verification
+Node API tests, React/TypeScript build and simulated browser UI tests must pass. GitHub Actions then builds installer packages. **Native hardware capture, browser screen-share permissions, actual media playback and platform compatibility require device testing** and are not established by compilation alone.
 
-- Standalone Tauri 2 application, macOS/Windows single-frame capture, scene management, display selection, preview/program state.
-- Local API, versioned scene collections, JSON backup/restore, test alerts and local overlays.
-- Experimental Mac Intel/Apple Silicon, Windows, Linux, Android ARM64 and self-hosted web distributions.
-
-## Still unavailable
-
-- Microphone/desktop audio, real-time multi-source GPU composition, 1080p60 capture, hardware video encoding, playable MP4/MKV videos, RTMP/RTMPS broadcasting, reconnect/multistreaming.
-- Main Record and Go Live remain disabled. Android and Linux cannot capture local test clips in this alpha.
-- Signed/notarized production installers and remote-user authenticated API.
-
-## Testing
-
-On macOS or Windows: install this alpha, grant Screen Recording permission as needed, open **Clips**, select a display, choose 4 seconds and **Capture Silent GIF**. Verify that the saved file is playable and the local preview animates. The resulting file is private to your device. Repeat with another display, and verify errors when permission is denied.
-
-The platform builds validate compilation, not actual devices, audio/video fidelity, streaming, or performance. Report issues in the [GitHub repository](https://github.com/migtam628/moobee-stream-studio/issues).
+See [Native media milestone #2](https://github.com/migtam628/moobee-stream-studio/issues/2) for the next real video/audio pipeline work.
