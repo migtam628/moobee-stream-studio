@@ -33,6 +33,7 @@ try {
   await page.getByText('Last test: ViceCityViewer').waitFor({ state: 'visible', timeout: 8000 });
   const overlay = await browser.newPage({ viewport: { width: 1280, height: 720 } });
   await overlay.goto(`http://127.0.0.1:${port}/overlay/alerts`);
+  await overlay.locator('html[data-overlay-connected="true"]').waitFor({ state: 'attached', timeout: 8000 });
   await page.getByRole('button', { name: 'Send Test Alert' }).click();
   await overlay.getByText('ViceCityViewer').waitFor();
   await overlay.screenshot({ path: new URL('overlay.png', dir).pathname });
