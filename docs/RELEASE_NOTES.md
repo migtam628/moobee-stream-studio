@@ -1,26 +1,32 @@
-# MooBee Stream Studio v0.3.0-alpha.1 — Standalone Capture Foundation
+# MooBee Stream Studio v0.3.1-alpha.1 — Scene Workspace
 
-**Experimental prerelease, not a functional live-streaming application yet.** This is the first new build line that no longer depends on OBS Studio, OBS WebSocket or Streamlabs.
+**Experimental standalone prerelease, not yet a live video broadcaster.** No OBS or Streamlabs installation or integration is required.
 
-## Included
-- Tauri 2 native Windows and macOS desktop builds with a first-party Rust capture command for display enumeration and single-frame screenshot previews (hardware access needs OS permissions).
-- In-house scene controller with scene creation, preview/program selection, Studio Mode transition state, and display-source visibility.
-- Local test-alert overlay and event endpoints.
-- Independent local-only Node API with scene/alert endpoints, plus a self-hosted web control-panel distribution.
-- Linux and Android test packages compile but do **not** provide native display capture yet.
-- GitHub Actions builds for macOS ARM64 and Intel, Windows x64, Linux x64, Android ARM64 and web.
+## New in 0.3.1
 
-## Not yet available
-- Actual live video encoding and broadcast; **Go Live is disabled**.
-- Playable video recording, full frame rate capture, synchronized audio, live GPU compositing and multistreaming.
-- Live platform event integrations, production user authentication, signed/notarized production installers.
-- Android and Linux native capture.
+- Rename, duplicate and delete scenes, with preview/program selection preserved when scenes are renamed.
+- Remove individual sources, while retaining source visibility controls.
+- Choose a specific native display on Windows or macOS rather than always adding the first detected monitor.
+- Versioned JSON scene collection export/import in the Settings panel, with validation and confirmation before replacement.
+- Local Node web/API edition saves scene collections atomically in a private data folder; Docker Compose persists its scene files in `./data`.
+- Added regression tests for import rejection, scene transitions, source IDs, backup/export and deletions.
 
-## Installing
-- macOS: download the matching `macos-arm64-*.dmg` for Apple Silicon or `macos-x64-*.dmg` for Intel. Gatekeeper may warn because the build is unsigned.
-- Windows: download `windows-x64-*-setup.exe`; Windows SmartScreen may warn because this alpha is unsigned.
-- Linux: experimental `.deb`.
-- Android: experimental debug-signed ARM64 `.apk`; no video capture yet.
-- Web: local web/API tarball, **not a browser-based capture engine**. Do not expose the local control API directly to the public internet.
+## Retained from 0.3.0
 
-The native Mac/Windows build compilation has been verified by GitHub Actions. Real on-device capture permissions, source previews and all media-pipeline functionality still require device testing. Feedback and issues belong in the [repository](https://github.com/migtam628/moobee-stream-studio/issues).
+- Tauri 2 desktop and native display screenshot capture on macOS/Windows (requires system screen recording permission).
+- Scene control state, independent local API, preview/program selections and local alert previews.
+- GitHub Actions installers for macOS Intel/Apple Silicon, Windows, Linux, Android test APK and self-hosted web archive.
+
+## Still unavailable
+
+- Recording files, GPU video compositing, realtime full-framerate capture, audio capture/mixing, hardware encoding and broadcasting to streaming destinations. **Record / Go Live remain disabled.**
+- Android and Linux screen capture, public API authorization, production signatures/notarization, live chat/platform integrations.
+
+## Installation and caution
+
+- macOS: choose arm64 (Apple Silicon) or x64 (Intel) DMG, unsigned experimental build.
+- Windows: x64 setup EXE, unsigned experimental build.
+- Linux / Android: build artifacts are experimental UI/controller packages without native display capture.
+- Web: local API and browser UI. Never expose the loopback control API directly to the public internet.
+
+An installer building successfully does not establish screen recording permission, camera/microphone functionality, or streaming capability. Validate local scenes and display snapshots on a test computer. Report issues in [GitHub](https://github.com/migtam628/moobee-stream-studio/issues).
