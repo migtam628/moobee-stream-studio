@@ -268,6 +268,7 @@ function HeartIcon() { return <Gift size={28}/> }
 type LocalClip = { id: string; path: string; bytes: number }
 type CapturedClip = LocalClip & { format: string; durationSeconds: number; frameCount: number; width: number; height: number }
 type Screen = { id: number; name: string; width: number; height: number }
+type CaptureProbe = { displayId: number; durationMs: number; frameCount: number; width: number; height: number; averageFps: number; firstFrameMs: number | null; longestFrameGapMs: number | null; meanFrameGapMs: number | null }
 
 function ClipLab() {
   const [screens, setScreens] = useState<Screen[]>([])
@@ -278,6 +279,8 @@ function ClipLab() {
   const [previewUrl, setPreviewUrl] = useState('')
   const [lastCapture, setLastCapture] = useState<CapturedClip | null>(null)
   const [working, setWorking] = useState(false)
+  const [probing, setProbing] = useState(false)
+  const [probeResult, setProbeResult] = useState<CaptureProbe | null>(null)
   const [error, setError] = useState('')
   const desktop = runningInTauri()
 
@@ -306,7 +309,7 @@ function ClipLab() {
     } catch (cause) { setError((cause as Error).message) }
   }
   async function capture() {
-    if (!desktop || !displayId) return
+    if (!desktop || !displayId || probing) return
     setWorking(true)
     setError('')
     try {
@@ -319,6 +322,22 @@ function ClipLab() {
     } catch (cause) {
       setError((cause as Error).message)
     } finally { setWorking(false) }
+  }
+  async function measureCapture() {
+    if (!desktop || !displayId || working || probing) return
+    setProbing(true)
+    setProbeResult(null)
+    setError('')
+    try {
+      const report = await request<CaptureProbe>('/capture/probe', {
+        displayId: Number(displayId), seconds: 3
+      })
+      setProbeResult(report)
+    } catch (cause) {
+      setError('Native frame diagnostic failed: ' + (cause as Error).message)
+    } finally {
+      setProbing(false)
+    }
   }
   const selected = clips.find(item => item.id === selectedClip)
   return <><div className="workspace-heading"><div><h1>Clips</h1><p>Local capture tools: short desktop GIFs or composited browser video with optional webcam and audio.</p></div><span className="status-pill">Silent GIF prototype · 2 fps</span></div>
@@ -338,7 +357,7 @@ function ClipLab() {
             </select>
           </label>
           <div className="clip-actions">
-            <button className="primary-button" disabled={!desktop || !displayId || working} onClick={() => void capture()}>
+            <button className="primary-button" disabled={!desktop || !displayId || working || probing} onClick={() => void capture()}>
               <Film size={17}/>{working ? 'Capturing frames…' : 'Capture Silent GIF'}
             </button>
             <button className="secondary-button" disabled={!desktop || working} onClick={() => void reload()}><RefreshCcw size={16}/>Refresh</button>
@@ -348,6 +367,21 @@ function ClipLab() {
           {lastCapture && <div className="clip-result"><CheckCircle2 size={18}/><div><strong>Saved {lastCapture.frameCount} frames</strong><small>{lastCapture.durationSeconds}s · {lastCapture.width}×{lastCapture.height} GIF · {(lastCapture.bytes / (1024 * 1024)).toFixed(2)} MB</small><code>{lastCapture.path}</code><button className="secondary-button" onClick={() => void navigator.clipboard.writeText(lastCapture.path)}><Copy size={15}/>Copy file path</button></div></div>}
         </div>
       </Panel>
+      {desktop && <Panel title="Native Capture Input Diagnostic" icon={Activity}>
+        <div className="capture-diagnostic">
+          <p>Measure frames arriving from the independent native screen-capture source, without saving video. This is not an encoder or a Go Live test.</p>
+          <button className="secondary-button" disabled={!displayId || working || probing} onClick={() => void measureCapture()}>
+            <Activity size={16}/>{probing ? 'Measuring input frames…' : 'Measure 3-second input FPS'}
+          </button>
+          {probeResult && <div className="capture-diagnostic-results" role="status">
+            <div><span>Incoming frames</span><strong>{probeResult.frameCount}</strong></div>
+            <div><span>Measured input FPS</span><strong>{probeResult.averageFps.toFixed(1)}</strong></div>
+            <div><span>Frame size</span><strong>{probeResult.width}×{probeResult.height}</strong></div>
+            <div><span>Longest frame gap</span><strong>{probeResult.longestFrameGapMs === null ? '—' : probeResult.longestFrameGapMs + ' ms'}</strong></div>
+            <p>First frame: {probeResult.firstFrameMs ?? '—'} ms · Observed duration: {(probeResult.durationMs / 1000).toFixed(2)}s. This is a source performance measurement, not encoded output FPS.</p>
+          </div>}
+        </div>
+      </Panel>}
       <Panel title="Local test clips" icon={Film}>
         <div className="clip-preview">
           {previewUrl ? <img src={previewUrl} alt="Animated local test capture preview"/> :
