@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   Activity, AudioLines, Bell, Bot, Check, CheckCircle2, CircleHelp, Clapperboard,
   Copy, Eye, EyeOff, Film, Gift, Layers, LayoutGrid, Link2, ListVideo, Monitor,
@@ -91,22 +91,62 @@ function ScenePreview({ status, label, previewScene }: { status: StudioStatus; l
 }
 
 function ScenesPanel({ status, perform, pending }: { status: StudioStatus; perform: (path: string, body: object) => Promise<boolean>; pending: boolean }) {
-  return <Panel title="Scenes" icon={Layers} action={<button disabled={pending || isStaticPreview} className="secondary-button" onClick={() => { const name = window.prompt('New scene name'); if (name?.trim()) void perform('/studio/action', { action: 'addScene', sceneName: name.trim() }) }}>+ Add Scene</button>}>
-    <div className="rows-scroll">{status.scenes.length ? status.scenes.map((scene) => <button disabled={pending} key={scene} className={`scene-row ${scene === (status.studioMode ? status.previewScene : status.currentScene) ? 'selected' : ''}`} onClick={() => void perform('/studio/action', { action: 'scene', sceneName: scene })}>
-      <span className="scene-thumbnail"><Monitor size={18}/></span><span className="truncate">{scene}</span>{scene === status.currentScene && <span className="scene-on-air">ON AIR</span>}{scene === status.previewScene && status.studioMode && <Check size={15}/>}</button>) : <div className="empty-list">No scenes yet. Create one to get started.</div>}</div>
+  const selected = status.studioMode ? status.previewScene : status.currentScene
+  return <Panel title="Scenes" icon={Layers} action={<button disabled={pending || isStaticPreview} className="secondary-button" onClick={() => {
+    const name = window.prompt('New scene name')
+    if (name?.trim()) void perform('/studio/action', { action: 'addScene', sceneName: name.trim() })
+  }}>+ Add Scene</button>}>
+    <div className="rows-scroll">{status.scenes.length ? status.scenes.map(scene => <div className="scene-item" key={scene}>
+      <button disabled={pending || isStaticPreview} className={`scene-row ${scene === selected ? 'selected' : ''}`} onClick={() => void perform('/studio/action', { action: 'scene', sceneName: scene })}>
+        <span className="scene-thumbnail"><Monitor size={18}/></span><span className="truncate">{scene}</span>
+        {scene === status.currentScene && <span className="scene-on-air">PROGRAM</span>}
+        {scene === status.previewScene && status.studioMode && <Check size={15}/>}
+      </button>
+      <div className="scene-actions">
+        <button className="icon-button" title={`Duplicate ${scene}`} aria-label={`Duplicate ${scene}`} disabled={pending || isStaticPreview || status.scenes.length >= 40} onClick={() => void perform('/studio/action', { action: 'duplicateScene', sceneName: scene })}><Copy size={15}/></button>
+        <button className="icon-button" title={`Rename ${scene}`} aria-label={`Rename ${scene}`} disabled={pending || isStaticPreview} onClick={() => {
+          const name = window.prompt('Rename scene', scene)
+          if (name?.trim() && name.trim() !== scene) void perform('/studio/action', { action: 'renameScene', sceneName: scene, newName: name.trim() })
+        }}><Settings2 size={15}/></button>
+        <button className="icon-button" title={`Delete ${scene}`} aria-label={`Delete ${scene}`} disabled={pending || isStaticPreview || status.scenes.length < 2} onClick={() => {
+          if (window.confirm(`Delete scene "${scene}" and its sources?`)) void perform('/studio/action', { action: 'deleteScene', sceneName: scene })
+        }}><X size={15}/></button>
+      </div>
+    </div>) : <div className="empty-list">Create a scene to get started.</div>}</div>
   </Panel>
 }
 
 function SourcesPanel({ status, perform, pending }: { status: StudioStatus; perform: (path: string, body: object) => Promise<boolean>; pending: boolean }) {
-  return <Panel title="Sources" icon={ListVideo} action={<button disabled={pending || !status.captureAvailable || !runningInTauri()} title={runningInTauri() ? 'Add the primary desktop display' : 'Native display sources require the desktop app'} className="secondary-button" onClick={() => { void (async () => {
-      const result = await request<{ displays: { id: number; name: string }[] }>('/capture/displays')
-      const display = result.displays[0]
-      if (!display) throw new Error('No display is available. Check screen recording permission.')
-      await perform('/studio/action', { action: 'addSource', kind: 'display', deviceId: String(display.id), name: display.name })
-    })().catch(error => window.alert((error as Error).message)) }}>+ Add Display</button>}>
-    <div className="rows-scroll">{status.sources.length ? status.sources.map((source) => <div className="source-row" key={source.id}>
-      <Video size={16}/><span className="truncate">{source.name}</span><button disabled={pending} title={source.enabled ? 'Hide source' : 'Show source'} className="icon-button" onClick={() => void perform('/studio/action', { action: 'source', sceneItemId: source.id, enabled: !source.enabled })}>{source.enabled ? <Eye size={18}/> : <EyeOff size={18}/>}</button>
-    </div>) : <div className="empty-list">Add a display source in the desktop app to begin capturing.</div>}</div>
+  const [displays, setDisplays] = useState<{ id: number; name: string; width: number; height: number }[]>([])
+  const [selected, setSelected] = useState('')
+  useEffect(() => {
+    if (!runningInTauri()) return
+    let active = true
+    void request<{ displays: typeof displays }>('/capture/displays').then(result => {
+      if (!active) return
+      setDisplays(result.displays)
+      setSelected(value => result.displays.some(display => String(display.id) === value) ? value : String(result.displays[0]?.id ?? ''))
+    }).catch(() => {})
+    return () => { active = false }
+  }, [status.connected])
+  const addSource = async () => {
+    const display = displays.find(item => String(item.id) === selected)
+    if (!display) return
+    await perform('/studio/action', { action: 'addSource', kind: 'display', deviceId: String(display.id), name: display.name })
+  }
+  return <Panel title="Sources" icon={ListVideo} action={<div className="source-picker">
+    <select aria-label="Choose display to capture" title="Choose desktop display" value={selected} disabled={pending || !runningInTauri() || displays.length === 0} onChange={event => setSelected(event.target.value)}>
+      {displays.length ? displays.map(display => <option key={display.id} value={display.id}>{display.name} ({display.width}×{display.height})</option>) : <option value="">No displays</option>}
+    </select>
+    <button className="secondary-button" disabled={pending || !status.captureAvailable || !selected || !runningInTauri()} title="Add selected display to the selected scene" onClick={() => void addSource()}>+ Add</button>
+  </div>}>
+    <div className="rows-scroll">{status.sources.length ? status.sources.map(source => <div className="source-row" key={source.id}>
+      <Video size={16}/><span className="truncate">{source.name}</span>
+      <button disabled={pending || isStaticPreview} title={source.enabled ? 'Hide source' : 'Show source'} className="icon-button" onClick={() => void perform('/studio/action', { action: 'source', sceneItemId: source.id, enabled: !source.enabled })}>{source.enabled ? <Eye size={18}/> : <EyeOff size={18}/>}</button>
+      <button disabled={pending || isStaticPreview} title={`Remove ${source.name}`} aria-label={`Remove ${source.name}`} className="icon-button" onClick={() => {
+        if (window.confirm(`Remove source "${source.name}" from this scene?`)) void perform('/studio/action', { action: 'removeSource', sceneItemId: source.id })
+      }}><X size={17}/></button>
+    </div>) : <div className="empty-list">Choose a screen in the desktop edition and add it to your scene.</div>}</div>
   </Panel>
 }
 
@@ -133,6 +173,33 @@ function Studio({ status, perform, pending, setTab }: { status: StudioStatus; pe
 function Settings({ status }: { status: StudioStatus }) {
   const [displays, setDisplays] = useState<{ id: number; name: string; width: number; height: number }[]>([])
   const [captureError, setCaptureError] = useState('')
+  const [collectionMessage, setCollectionMessage] = useState('')
+  const collectionInput = useRef<HTMLInputElement>(null)
+  async function exportScenes() {
+    try {
+      const data = await request<object>('/studio/collection')
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+      const href = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = href
+      anchor.download = 'moobee-studio-scenes.json'
+      document.body.append(anchor)
+      anchor.click()
+      anchor.remove()
+      setTimeout(() => URL.revokeObjectURL(href), 5000)
+      setCollectionMessage('Scene collection exported.')
+    } catch (error) { setCollectionMessage(`Export failed: ${(error as Error).message}`) }
+  }
+  async function importScenes(file?: File) {
+    if (!file) return
+    if (file.size > 128 * 1024) { setCollectionMessage('Scene file exceeds the 128 KB safety limit.'); return }
+    if (!window.confirm('Replace all current scenes with this imported collection? Export a backup first.')) return
+    try {
+      const data: unknown = JSON.parse(await file.text())
+      await request('/studio/collection', data as object)
+      setCollectionMessage('Scene collection imported and validated.')
+    } catch (error) { setCollectionMessage(`Import rejected: ${(error as Error).message}`) }
+  }
   const reload = useCallback(async () => {
     try {
       const result = await request<{ displays: typeof displays }>('/capture/displays')
@@ -151,6 +218,20 @@ function Settings({ status }: { status: StudioStatus }) {
       <div className="info-block"><Link2 size={22}/><div><strong>Local scene API</strong><p>{status.connected ? 'Ready for scene control' : 'Start the desktop app or local API to edit scenes'} — no Native engine settings or third-party service.</p></div></div>
       <div className="info-block"><CircleHelp size={22}/><div><strong>Encoding and streaming</strong><p>Not implemented in this alpha. Recording and Go Live remain disabled until MooBee can produce and verify actual encoded video output.</p></div></div>
       <p className="help-text">The web preview has no local device permission. macOS needs Screen Recording access; Windows may request screen or device permissions.</p>
+    </Panel><Panel title="Scene Collection Backup" icon={Layers}>
+      <div className="collection-backup">
+        <p>Back up, restore or move scenes between MooBee installations. Imports are validated before replacing your current collection.</p>
+        <div className="collection-actions">
+          <button className="secondary-button" disabled={isStaticPreview || !status.connected} onClick={() => void exportScenes()}><Copy size={16}/>Export JSON</button>
+          <button className="secondary-button" disabled={isStaticPreview || !status.connected} onClick={() => collectionInput.current?.click()}><Layers size={16}/>Import JSON</button>
+        </div>
+        <input ref={collectionInput} type="file" accept=".json,application/json" hidden aria-label="Choose scene collection file" onChange={event => {
+          const file = event.currentTarget.files?.[0]
+          event.currentTarget.value = ''
+          void importScenes(file)
+        }}/>
+        {collectionMessage && <p className="collection-feedback" role="status">{collectionMessage}</p>}
+      </div>
     </Panel></div>
   </>
 }

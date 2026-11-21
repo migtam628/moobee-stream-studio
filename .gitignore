@@ -12,3 +12,6 @@ apps/desktop/src-tauri/target/
 apps/desktop/src-tauri/gen/schemas/
 apps/desktop/src-tauri/gen/android/
 apps/desktop/src-tauri/gen/apple/
+
+# Local scene backups (never commit user data)
+data/

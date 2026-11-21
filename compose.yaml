@@ -1,9 +1,12 @@
-# Local-only web/control edition. Native screen capture requires installed Tauri desktop app.
+# Local-only web/control edition. Screen capture requires the installed desktop app.
 services:
   moobee-studio:
     build: .
-    network_mode: host # Linux host networking only; do not expose port 8787 publicly
+    network_mode: host # Linux only; the control API binds to loopback
     environment:
       API_HOST: 127.0.0.1
       API_PORT: '8787'
+      MOOBEE_DATA_DIR: /data
+    volumes:
+      - ./data:/data # Scene collections survive container recreation
     restart: unless-stopped

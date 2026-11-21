@@ -5,26 +5,54 @@ type Body = Record<string, unknown>
 type Source = StudioStatus['sources'][number]
 type Scene = { name: string; sources: Source[] }
 type Display = { id: number; name: string; width: number; height: number }
-type Saved = { scenes: Scene[]; currentScene: string; previewScene: string; studioMode: boolean }
+type Saved = { version: 1; scenes: Scene[]; currentScene: string; previewScene: string; studioMode: boolean }
 const STORAGE_KEY = 'moobee-native-studio.v1'
 const defaults = (): Saved => ({
-  scenes: ['Starting Soon', 'Gameplay', 'Be Right Back', 'Ending'].map(name => ({ name, sources: [] })),
+  version: 1, scenes: ['Starting Soon', 'Gameplay', 'Be Right Back', 'Ending'].map(name => ({ name, sources: [] })),
   currentScene: 'Starting Soon', previewScene: 'Starting Soon', studioMode: false
 })
+function validateCollection(value: unknown): Saved {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid scene collection')
+  const raw = value as Saved
+  if (raw.version !== 1 || !Array.isArray(raw.scenes) || raw.scenes.length < 1 || raw.scenes.length > 40) {
+    throw new Error('Unsupported scene collection version or scene count')
+  }
+  const names = new Set<string>(), ids = new Set<number>()
+  const scenes = raw.scenes.map((scene) => {
+    if (!scene || !validName(scene.name) || !Array.isArray(scene.sources) || scene.sources.length > 30) {
+      throw new Error('Invalid scene in collection')
+    }
+    const name = scene.name.trim()
+    if (names.has(name.toLowerCase())) throw new Error('Duplicate scene name')
+    names.add(name.toLowerCase())
+    const sources = scene.sources.map(source => {
+      if (!source || !Number.isSafeInteger(source.id) || source.id < 1 || source.id > 1_000_000_000 ||
+          ids.has(source.id) || source.kind !== 'display' || typeof source.deviceId !== 'string' ||
+          !/^\d{1,4}$/.test(source.deviceId) || !validName(source.name) || typeof source.enabled !== 'boolean') {
+        throw new Error('Invalid display source in collection')
+      }
+      ids.add(source.id)
+      return { id: source.id, name: source.name.trim(), kind: 'display', deviceId: source.deviceId, enabled: source.enabled }
+    })
+    return { name, sources }
+  })
+  if (!scenes.some(s => s.name === raw.currentScene) || !scenes.some(s => s.name === raw.previewScene) ||
+      typeof raw.studioMode !== 'boolean') throw new Error('Invalid current/preview scene selection')
+  return { version: 1, scenes, currentScene: raw.currentScene,
+    previewScene: raw.studioMode ? raw.previewScene : raw.currentScene, studioMode: raw.studioMode }
+}
 function load(): Saved {
   try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null') as Saved | null
-    if (saved && Array.isArray(saved.scenes) && saved.scenes.length && saved.scenes.length <= 40 &&
-        saved.scenes.every(s => typeof s.name === 'string' && Array.isArray(s.sources)) &&
-        saved.scenes.some(s => s.name === saved.currentScene)) {
-      return {
-        ...saved,
-        previewScene: saved.scenes.some(s => s.name === saved.previewScene) ? saved.previewScene : saved.currentScene,
-        studioMode: Boolean(saved.studioMode)
-      }
-    }
-  } catch { /* Corrupt local draft; start with defaults. */ }
-  return defaults()
+    const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null') as Saved | null
+    if (!raw) return defaults()
+    // Migrate existing Alpha 0.3 scene drafts, which did not include a schema version.
+    return validateCollection(raw.version === undefined ? { ...raw, version: 1 } : raw)
+  } catch {
+    // Keep the original data for recovery if the saved file is unreadable.
+    const backup = localStorage.getItem(STORAGE_KEY)
+    if (backup) localStorage.setItem(`${STORAGE_KEY}.backup`, backup)
+    return defaults()
+  }
 }
 let draft = load()
 let status: StudioStatus = { ...offline, connected: true, address: 'local', engine: 'moobee-native-alpha' }
@@ -63,12 +91,40 @@ function validName(value: unknown): value is string {
 function perform(body: Body) {
   const action = body.action
   const sceneName = body.sceneName
-  const active = draft.scenes.find(scene => scene.name === draft.currentScene)
+  const active = draft.scenes.find(scene => scene.name === (draft.studioMode ? draft.previewScene : draft.currentScene))
   if (action === 'addScene') {
     if (!validName(sceneName)) throw new Error('Scene names must contain 1–64 characters')
     if (draft.scenes.some(s => s.name.toLowerCase() === sceneName.trim().toLowerCase())) throw new Error('Scene already exists')
     if (draft.scenes.length >= 40) throw new Error('Scene limit reached')
     draft.scenes.push({ name: sceneName.trim(), sources: [] })
+  } else if (action === 'renameScene') {
+    const old = sceneName
+    const newName = body.newName
+    const scene = draft.scenes.find(s => s.name === old)
+    if (!scene || !validName(newName)) throw new Error('Invalid scene rename')
+    if (draft.scenes.some(s => s !== scene && s.name.toLowerCase() === newName.trim().toLowerCase())) {
+      throw new Error('Scene name already exists')
+    }
+    scene.name = newName.trim()
+    if (draft.currentScene === old) draft.currentScene = scene.name
+    if (draft.previewScene === old) draft.previewScene = scene.name
+  } else if (action === 'deleteScene') {
+    if (draft.scenes.length < 2) throw new Error('Cannot delete the last scene')
+    const index = draft.scenes.findIndex(s => s.name === sceneName)
+    if (index < 0) throw new Error('Unknown scene')
+    draft.scenes.splice(index, 1)
+    if (draft.currentScene === sceneName) draft.currentScene = draft.scenes[0].name
+    if (draft.previewScene === sceneName) draft.previewScene = draft.currentScene
+  } else if (action === 'duplicateScene') {
+    const scene = draft.scenes.find(s => s.name === sceneName)
+    if (!scene) throw new Error('Unknown scene')
+    if (draft.scenes.length >= 40) throw new Error('Scene limit reached')
+    const base = scene.name.slice(0, 48)
+    let name = `${base} Copy`
+    let n = 2
+    while (draft.scenes.some(s => s.name.toLowerCase() === name.toLowerCase())) name = `${base} Copy ${n++}`
+    let nextId = Math.max(0, ...draft.scenes.flatMap(s => s.sources.map(item => item.id))) + 1
+    draft.scenes.push({ name, sources: scene.sources.map(src => ({ ...src, id: nextId++ })) })
   } else if (action === 'scene') {
     if (typeof sceneName !== 'string' || !draft.scenes.some(s => s.name === sceneName)) throw new Error('Unknown scene')
     if (draft.studioMode) draft.previewScene = sceneName
@@ -91,21 +147,37 @@ function perform(body: Body) {
     const source = active?.sources.find(item => item.id === body.sceneItemId)
     if (!source || typeof body.enabled !== 'boolean') throw new Error('Invalid source')
     source.enabled = body.enabled
+  } else if (action === 'removeSource') {
+    const index = active?.sources.findIndex(s => s.id === body.sceneItemId) ?? -1
+    if (!active || index < 0) throw new Error('Unknown source')
+    active.sources.splice(index, 1)
   } else if (action === 'stream' || action === 'record') {
     throw new Error('Native video encoding and output are not implemented in this alpha')
   } else {
     throw new Error('Unsupported MooBee Studio action')
   }
+  return commit(`Studio: ${String(action)}`)
+}
+function commit(message: string) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(draft))
   status = snapshot()
   notify('status', status)
-  activity('scene', `Studio: ${String(action)}`)
+  activity('scene', message)
   return { ok: true, status }
+}
+function replaceCollection(value: unknown) {
+  const next = validateCollection(value)
+  draft = next
+  return commit('Scene collection imported')
+}
+function collection() {
+  return JSON.parse(JSON.stringify(draft)) as Saved
 }
 export async function nativeRequest(path: string, body: Body = {}): Promise<unknown> {
   if (path === '/health') return { ok: true, name: 'MooBee Studio', version: '0.3.0-alpha', engine: 'in-house' }
   if (path === '/activity') return history
   if (path === '/studio/status') return refresh()
+  if (path === '/studio/collection') return Object.keys(body).length ? replaceCollection(body) : collection()
   if (path === '/studio/action') return perform(body)
   if (path === '/capture/displays') {
     await refresh()
