@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
+import { version as appVersion } from '../../../package.json'
 import { offline, type Activity, type Alert, type StudioStatus } from './types'
 
 type Body = Record<string, unknown>
@@ -174,7 +175,7 @@ function collection() {
   return JSON.parse(JSON.stringify(draft)) as Saved
 }
 export async function nativeRequest(path: string, body: Body = {}): Promise<unknown> {
-  if (path === '/health') return { ok: true, name: 'MooBee Studio', version: '0.3.0-alpha', engine: 'in-house' }
+  if (path === '/health') return { ok: true, name: 'MooBee Studio', version: appVersion, engine: 'in-house' }
   if (path === '/activity') return history
   if (path === '/studio/status') return refresh()
   if (path === '/studio/collection') return Object.keys(body).length ? replaceCollection(body) : collection()
