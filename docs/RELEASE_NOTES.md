@@ -1,31 +1,36 @@
-# MooBee Stream Studio v0.3.5-alpha.1 — Native Frame Source Diagnostics
+# MooBee Stream Studio v0.3.6-alpha.1 — Native Video File Experiment
 
-**Experimental development prerelease, not an operational broadcaster.** No OBS Studio or Streamlabs installation is required.
+**Experimental standalone media milestone, not yet a production recording or livestreaming application.** No OBS/Streamlabs installation is required.
 
-## New in 0.3.5
-- On Mac and Windows, the installed Clips workspace can run a **3-second native raw-video-frame diagnostic** on a selected display.
-- Uses the first-party application's existing XCap 0.9.10 dependency: `Monitor::video_recorder()`, `VideoRecorder::start/stop`, and the incoming raw-frame receiver.
-- Reports incoming frame count, average input FPS, frame dimensions, first-frame latency, and largest frame-to-frame timing gap.
-- Does not save, encode, or upload any of the sampled frames. Does not use a new external process.
-- Shares the capture guard with GIF test clips so overlapping native acquisition tests are rejected.
-- Duration validation (2–5 seconds), no-frame detection, permission/unsupported-platform errors, and Rust unit tests.
-- Browser/API edition returns HTTP 501 for the native-only performance test.
+## New in 0.3.6
+- **Mac/Windows Clips → Capture Video AVI** saves a 2–8 second local silent video from the continuous XCap capture source.
+- The source delivers raw RGBA video; MooBee letterboxes frames to 640×360 and encodes them as individual Motion JPEG images with the Rust `image` crate.
+- MooBee's own Rust RIFF AVI muxer writes a seekable, indexed `MJPG` AVI container at 10 fps. JPEG frames are duplicated to maintain AVI timing if the source capture stalls.
+- Self-contained: no FFmpeg command, OBS process, Streamlabs connection, external capture program, network transfer or cloud encoding requirement.
+- Duration, frame count, memory/output-size cap (64 MiB), exclusive capture guard and UUID-only app-data storage.
+- The Clips library lists GIF and AVI formats. AVI files must be played in an external compatible media player (VLC is a good test player); the built-in webview does not decode AVI.
+- The browser control API returns HTTP 501 for native AVI capture and never simulates video production.
 
-## Retained from 0.3.4
-- Browser screen recording: a 1280×720 canvas composed from a user-approved shared screen and optional webcam PiP, with optional microphone/shared-tab audio and a local WebM/MP4 download where supported.
-- Mac/Windows GIF capture-to-file prototype, scene/source management, test alerts, import/export, local API and platform installers.
+## Retained
+- Native short GIF recording tests and continuous frame-rate diagnostics on Windows/macOS.
+- Browser-local screen/webcam picture-in-picture composition with optional microphone/shared-tab audio and MediaRecorder WebM/MP4 output, where supported.
+- Scene and display management, alerts/overlays, local API, scene backups and cross-platform alpha packaging.
 
 ## Important limitations
-- **Raw input FPS is not an encoded recording or streaming FPS.** This probe is a performance/permissions diagnostic only.
-- XCap continuous video recording is documented upstream as work-in-progress, and requires real-device validation on Windows and macOS. A successful CI compile cannot verify actual raw frames arrive.
-- The main **Record** and **Go Live** controls remain disabled. A native GPU compositor, native synchronized microphone/system audio, hardware video encoder, MP4/MKV muxer, RTMP/RTMPS, multistream and reliable reconnect have not been implemented.
-- Experimental Linux/Android builds do not expose the native capture probe. Installers are unsigned and require OS permission review.
+- **AVI is silent, limited to 640×360 / 10 fps / 8 seconds.** It is meant to verify raw capture → JPEG encoding → video-file muxing and playback, not to replace full-quality recording.
+- Actual input frame availability, camera/system/microphone audio capture, A/V sync, real-time GPU composition, hardware encoders, MP4/MKV muxing, RTMP/RTMPS streaming, multistreaming and reconnect are **not yet implemented in the native desktop engine**.
+- The main **Record** and **Go Live** controls remain disabled. Linux/Android native media capture is not supported.
+- No built-in AVI player is provided. Playback depends on availability of external MJPEG AVI support. The Chrome/WebView embedded preview is GIF-only.
+- Continuous XCap capture is WIP; compilation alone does not validate capture timing, permissions or playback on a user's actual display.
+- Alpha installers are unsigned.
 
-## Manual acceptance checklist
-1. Install Mac or Windows Alpha 0.3.5 on a test machine **without OBS/Streamlabs**.
-2. Grant operating-system screen capture permission. Choose a monitor in **Clips**.
-3. Press **Measure 3-second input FPS**, observe the reported frame count, FPS, dimensions and first-frame latency.
-4. Repeat with moving content, another monitor, and after temporarily denying capture permission to confirm useful failures.
-5. Compare measured FPS with system CPU/GPU/permission status; preserve the results for actual real-time video engine design.
+## Validation steps
+1. Install the Mac or Windows alpha without OBS/Streamlabs.
+2. In **Clips**, select a display, 4 seconds, and choose **Capture Video AVI**.
+3. Copy the saved file path and open the AVI externally using VLC or another MJPEG AVI-capable media player.
+4. Confirm a 640×360, 10 fps silent video lasting approximately 4 seconds; inspect moving screen content, crop/letterbox, and any stalls.
+5. Repeat on another monitor and after changing screen-recording permission. Test GIF mode and the 3-second frame diagnostic for regressions.
 
-Source capture API: [XCap documentation](https://docs.rs/crate/xcap/0.9.10). Ongoing native media build: [GitHub Issue #2](https://github.com/migtam628/moobee-stream-studio/issues/2).
+The AVI container structure was independently sanity-tested with FFprobe using sample MJPEG frames; **real native capture and file playback still require device tests**.
+
+Track the real-time audio/video/broadcast engine in [Issue #2](https://github.com/migtam628/moobee-stream-studio/issues/2).

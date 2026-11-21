@@ -1,6 +1,6 @@
 [package]
 name = "moobee-live-desktop"
-version = "0.3.5"
+version = "0.3.6"
 description = "MooBee Stream Studio standalone native production center"
 edition = "2021"
 
@@ -24,4 +24,4 @@ base64 = "0.22"
 # Desktop capture is packaged with MooBee. No OBS/Streamlabs process or API.
 [target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
 xcap = "0.9.10"
-image = { version = "0.25", default-features = false, features = ["png", "gif"] }
+image = { version = "0.25", default-features = false, features = ["png", "gif", "jpeg"] }

@@ -80,3 +80,7 @@ The browser Clips workspace now uses a 1280×720 canvas capture pipeline (target
 ## Alpha 0.3.5 — Native frame source measurement
 
 A Mac/Windows Rust capture diagnostic calls the bundled XCap continuous `Monitor::video_recorder()` API for a bounded 3-second sample and reports incoming raw frames, observed FPS, dimensions and timing gaps. It shares the exclusive capture guard with local GIF capture, retaining no raw frame images. These are **source performance numbers**, not encoded video or audio recording capabilities. Actual native capture must be evaluated on real macOS/Windows hardware before building the GPU compositor and hardware encoder. The primary Record/Go Live controls remain disabled.
+
+## Alpha 0.3.6 — First independent native video container experiment
+
+On macOS and Windows, a bounded capture-to-file test uses XCap's continuous RGBA frames, performs 640×360 letterbox and JPEG encoding with a bundled Rust library, then writes a seekable indexed MJPEG/RIFF AVI video (2–8 seconds, 10 fps, silent) through MooBee's own AVI writer. A source frame may be repeated when capture runs behind; this is not a synchronized A/V engine or GPU-encoded program output. Input capture, encoding, and playback must be verified on actual target devices. Next steps: full-frame-rate hardware-accelerated native capture/composition, synchronized microphone/system audio, MP4/MKV muxing, RTMP/RTMPS transport and live health/reconnect.

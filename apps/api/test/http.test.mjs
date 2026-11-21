@@ -105,3 +105,13 @@ test('browser control API cannot fake native continuous frame diagnostics', asyn
   const payload = await response.json();
   assert.match(payload.error, /installed Windows or macOS app/);
 });
+
+test('web control endpoint cannot claim native AVI capture', async () => {
+  const response = await fetch(root + '/api/clips/capture-avi', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ displayId: 0, seconds: 4 })
+  });
+  assert.equal(response.status, 501);
+  const payload = await response.json();
+  assert.match(payload.error, /installed Windows\/macOS/);
+});
