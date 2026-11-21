@@ -81,7 +81,9 @@ async fn overlay_events(
     let receiver = state.sender.subscribe();
     let stream = BroadcastStream::new(receiver).filter_map(|result| {
         match result {
-            Ok(alert) => Event::default().event("alert").json_data(alert).ok().map(Ok),
+            Ok(alert) => serde_json::to_string(&alert)
+                .ok()
+                .map(|payload| Ok(Event::default().event("alert").data(payload))),
             Err(_) => None,
         }
     });
