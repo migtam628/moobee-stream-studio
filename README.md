@@ -1,6 +1,6 @@
 # MooBee Stream Studio
 
-**Standalone Alpha 0.3.6 (native MJPEG AVI test video)** — a native streaming studio foundation, independent of OBS Studio and Streamlabs. The old 0.2 installers are legacy OBS-controller builds and are **not** standalone.
+**Standalone Alpha 0.3.7 (native media file reliability)** — a native streaming studio foundation, independent of OBS Studio and Streamlabs. The old 0.2 installers are legacy OBS-controller builds and are **not** standalone.
 
 ![Early visual direction](docs/design-reference.webp)
 
@@ -11,6 +11,7 @@
 - **Clips → Capture Silent GIF**: a first-party 2–10 second, approximately 2 fps local display test clip. The saved GIF can be previewed and the file path copied inside the app.
 - **Native Capture Input Diagnostic**: measure continuous raw frames arriving from the bundled XCap video source on Mac/Windows, with average FPS, resolution, first-frame latency and maximum gap. This is not a recorder or streamer.
 - **Capture Video AVI** (Windows/macOS): record a short 2–8 second, 640×360, 10 fps silent MJPEG AVI video from the continuous native capture stream, encoded/muxed by our own Rust code. It is a video-file output test, not the final audio/video recorder. Play AVI externally in VLC or a compatible media player.
+- **Incremental AVI file publishing**: JPEG video frames are written to a private temporary file instead of accumulating the entire recording in RAM. MooBee finalizes the indexed AVI container, synchronizes it to disk, and only then publishes the `.avi` file in the Clips library. Failed captures remove incomplete output; abrupt process exits may leave hidden `.part` files.
 - **Web Clips → Record shared screen**: browser-native canvas compositing combines an approved screen, optional webcam picture-in-picture and optional microphone/shared audio. The browser records a 1280×720 WebM/MP4 where supported and saves the file locally, without uploading it.
 - Our own local scene management: create/rename/duplicate/delete scenes, select program/preview scenes, enable Studio Mode, take transitions, add/remove display sources, and control source visibility.
 - Native scene drafts persist in Tauri's local storage; the web/API edition now saves scene collections atomically on disk, with Docker volume persistence.
@@ -18,7 +19,7 @@
 - Rust local alert service, animated overlay test page, and local web edition.
 - No OBS WebSocket connection, OBS installer, OBS credentials, or Streamlabs dependency.
 
-**Capture is currently screenshot-based, with a limited 2 fps silent GIF test-clip export, not full-frame-rate video.** Audio mixing, full-frame-rate capture/compositing, MP4/MKV recording/encoding, replay buffers, RTMP/SRT, platform integrations, multistreaming, and genuine Go Live are **not implemented**. Their controls must remain disabled until validated. The web app cannot capture local displays through the Node API; it needs the installed native desktop app.
+**Native capture remains experimental:** 2 fps silent GIF and 10 fps silent AVI test files, plus continuous input diagnostics—not full-frame-rate synchronized recording. Audio mixing, full-frame-rate capture/compositing, MP4/MKV recording/encoding, replay buffers, RTMP/SRT, platform integrations, multistreaming, and genuine Go Live are **not implemented**. Their controls must remain disabled until validated. The web app cannot capture local displays through the Node API; it needs the installed native desktop app.
 
 ## Development
 
@@ -66,7 +67,7 @@ Open **Clips** on an installed Mac/Windows build and select the desktop display.
 | Backend | MooBee Node API and event stream, later accounts/permissions/DB |
 | Web/mobile | Creator management clients, separate device-capability implementations |
 
-See `docs/ROADMAP.md` for objective feature gates and `docs/TAURI.md` for release/OS readiness. Existing GitHub Actions targets macOS Apple Silicon and Intel, Windows x64, Linux x64, Android ARM64, and web. **Build success is not media-functionality acceptance.**
+See `docs/PRODUCTION_READINESS.md` for the **P0 production go/no-go criteria** and `docs/ROADMAP.md` for the implementation plan and `docs/TAURI.md` for release/OS readiness. Existing GitHub Actions targets macOS Apple Silicon and Intel, Windows x64, Linux x64, Android ARM64, and web. **Build success is not media-functionality acceptance.**
 
 ## Licensing
 
