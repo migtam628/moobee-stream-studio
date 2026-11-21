@@ -20,6 +20,16 @@ test('standalone scene engine selects, previews, and transitions', () => {
   engine.perform({ action: 'transition' });
   assert.equal(engine.status().currentScene, 'Game');
 });
+test('preview scene sources can be edited before taking them live', () => {
+  const engine = createStudio();
+  engine.perform({ action: 'addScene', sceneName: 'Live View' });
+  engine.perform({ action: 'studioMode', studioModeEnabled: true });
+  engine.perform({ action: 'scene', sceneName: 'Live View' });
+  engine.perform({ action: 'addSource', kind: 'display', deviceId: '0', name: 'My Display' });
+  assert.equal(engine.status().sources[0].name, 'My Display');
+  engine.perform({ action: 'transition' });
+  assert.equal(engine.status().currentScene, 'Live View');
+});
 test('output controls never fake a recording or live broadcast', () => {
   const engine = createStudio();
   for (const action of ['record', 'stream']) assert.throws(() => engine.perform({ action }), error => error instanceof StudioError && error.statusCode === 501);
