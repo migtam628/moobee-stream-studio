@@ -16,10 +16,11 @@ async function freePort() {
   return port;
 }
 async function startServer(port, directory) {
+  const { NODE_TEST_CONTEXT: _testContext, ...environment } = process.env;
   const child = spawn(process.execPath, [serverFile], {
-    env: { ...process.env, NODE_ENV: 'production', API_HOST: '127.0.0.1',
+    env: { ...environment, NODE_ENV: 'production', API_HOST: '127.0.0.1',
       API_PORT: String(port), MOOBEE_DATA_DIR: directory },
-    stdio: ['ignore', 'pipe', 'pipe']
+    stdio: ['ignore', 'ignore', 'pipe']
   });
   let errors = '';
   child.stderr.on('data', chunk => { errors += String(chunk).slice(0, 4000); });
@@ -36,13 +37,15 @@ async function startServer(port, directory) {
   return { child, root };
 }
 async function stopServer(child) {
-  if (child.exitCode !== null) return;
-  const exit = new Promise(resolve => child.once('exit', resolve));
-  child.kill('SIGTERM');
-  await exit;
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  await new Promise(resolve => {
+    const killer = setTimeout(() => child.kill('SIGKILL'), 4000);
+    child.once('exit', () => { clearTimeout(killer); resolve(); });
+    child.kill('SIGTERM');
+  });
 }
 
-test('local scene collections persist across API restart and invalid files are retained', async () => {
+test('local scene collections persist across API restart and invalid files are retained', { timeout: 60000 }, async () => {
   const folder = mkdtempSync(join(tmpdir(), 'moobee-scene-test-'));
   const port = await freePort();
   let process1, process2, process3;
