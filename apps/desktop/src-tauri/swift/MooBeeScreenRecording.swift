@@ -65,18 +65,18 @@ private final class RecordingCompletion: NSObject, SCRecordingOutputDelegate {
 @available(macOS 15.0, *)
 @MainActor
 private func recordNativeMP4(
-    url: URL, displayIndex: Int, seconds: Int,
+    url: URL, displayID: UInt32, seconds: Int,
     systemAudio: Bool, microphone: Bool
 ) async throws {
     let available = try await SCShareableContent.excludingDesktopWindows(
         false, onScreenWindowsOnly: false
     )
-    guard displayIndex >= 0 && displayIndex < available.displays.count else {
+    // Use the stable CGDirectDisplayID obtained from XCap, never an array index.
+    guard let display = available.displays.first(where: { $0.displayID == displayID }) else {
         throw NSError(domain: "MooBeeRecorder", code: -2,
                       userInfo: [NSLocalizedDescriptionKey:
-                        "Selected macOS display unavailable; refresh capture devices"])
+                        "Selected macOS display ID unavailable; refresh capture devices"])
     }
-    let display = available.displays[displayIndex]
     let filter = SCContentFilter(display: display, excludingWindows: [])
     let config = SCStreamConfiguration()
 
@@ -153,7 +153,7 @@ private func copyError(_ message: String, to buffer: UnsafeMutablePointer<CChar>
 @_cdecl("moobee_macos_record_mp4")
 public func moobee_macos_record_mp4(
     output: UnsafePointer<CChar>?,
-    displayIndex: Int32,
+    displayID: UInt32,
     durationSeconds: Int32,
     systemAudio: Int32,
     microphone: Int32,
@@ -161,7 +161,7 @@ public func moobee_macos_record_mp4(
     errorLength: Int32
 ) -> Int32 {
     guard let output, (3...15).contains(durationSeconds),
-          (0...24).contains(displayIndex) else {
+          displayID != 0 else {
         copyError("Invalid native MP4 capture path, display or duration", to: errorText, size: errorLength)
         return -1
     }
@@ -180,7 +180,7 @@ public func moobee_macos_record_mp4(
         do {
             try await recordNativeMP4(
                 url: URL(fileURLWithPath: filePath),
-                displayIndex: Int(displayIndex),
+                displayID: displayID,
                 seconds: Int(durationSeconds),
                 systemAudio: systemAudio != 0,
                 microphone: microphone != 0
