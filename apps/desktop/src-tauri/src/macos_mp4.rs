@@ -9,6 +9,7 @@ use tauri::Manager;
 use std::{
     ffi::{CStr, CString},
     fs::{self, OpenOptions},
+    io::Read,
     os::raw::{c_char, c_int},
     sync::atomic::Ordering,
 };
@@ -104,13 +105,23 @@ fn record_mp4_to_private_folder(
         return Err(format!("Native macOS recording failed: {message}"));
     }
 
-    let file = OpenOptions::new().read(true).write(true).open(&temporary)
+    let mut file = OpenOptions::new().read(true).write(true).open(&temporary)
         .map_err(|error| format!("Native recorder created no readable/syncable MP4 file: {error}"))?;
     let len = file.metadata().map_err(|error| error.to_string())?.len();
     if !(4096..=256 * 1024 * 1024).contains(&len) {
         drop(file);
         let _ = fs::remove_file(&temporary);
         return Err("MP4 file is empty, incomplete, or exceeds the 256 MiB test limit".into());
+    }
+    let mut header = [0u8; 12];
+    file.read_exact(&mut header)
+        .map_err(|error| format!("Could not verify recorded MP4 header: {error}"))?;
+    // A successful native delegate callback is not sufficient evidence of an
+    // MP4; reject files with missing ISO BMFF 'ftyp' headers.
+    if &header[4..8] != b"ftyp" {
+        drop(file);
+        let _ = fs::remove_file(&temporary);
+        return Err("Native recording did not produce an ISO BMFF MP4 header".into());
     }
     file.sync_all().map_err(|error| format!("Could not synchronize recorded MP4: {error}"))?;
     drop(file);
