@@ -184,6 +184,18 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
     const clips = await invoke<{ id: string; path: string; bytes: number }[]>('list_test_clips')
     return { available: true, clips }
   }
+  if (path === '/clips/capture-mp4') {
+    if (typeof body.displayId !== 'number' || !Number.isSafeInteger(body.displayId) ||
+        typeof body.seconds !== 'number' || !Number.isInteger(body.seconds) ||
+        body.seconds < 3 || body.seconds > 15 ||
+        typeof body.systemAudio !== 'boolean' || typeof body.microphone !== 'boolean') {
+      throw new Error('Choose a valid 3–15-second native MP4 capture and audio options')
+    }
+    return await invoke('capture_macos_mp4', {
+      displayId: body.displayId, seconds: body.seconds,
+      systemAudio: body.systemAudio, microphone: body.microphone
+    })
+  }
   if (path === '/clips/capture-avi') {
     if (typeof body.displayId !== 'number' || !Number.isSafeInteger(body.displayId) ||
         typeof body.seconds !== 'number' || !Number.isInteger(body.seconds) ||
