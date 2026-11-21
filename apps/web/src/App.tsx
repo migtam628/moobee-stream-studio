@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   Activity, AudioLines, Bell, Bot, Check, CheckCircle2, CircleHelp, Clapperboard,
   Copy, Eye, EyeOff, Film, Gift, Layers, LayoutGrid, Link2, ListVideo, Monitor,
@@ -173,6 +173,33 @@ function Studio({ status, perform, pending, setTab }: { status: StudioStatus; pe
 function Settings({ status }: { status: StudioStatus }) {
   const [displays, setDisplays] = useState<{ id: number; name: string; width: number; height: number }[]>([])
   const [captureError, setCaptureError] = useState('')
+  const [collectionMessage, setCollectionMessage] = useState('')
+  const collectionInput = useRef<HTMLInputElement>(null)
+  async function exportScenes() {
+    try {
+      const data = await request<object>('/studio/collection')
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+      const href = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = href
+      anchor.download = 'moobee-studio-scenes.json'
+      document.body.append(anchor)
+      anchor.click()
+      anchor.remove()
+      setTimeout(() => URL.revokeObjectURL(href), 5000)
+      setCollectionMessage('Scene collection exported.')
+    } catch (error) { setCollectionMessage(`Export failed: ${(error as Error).message}`) }
+  }
+  async function importScenes(file?: File) {
+    if (!file) return
+    if (file.size > 128 * 1024) { setCollectionMessage('Scene file exceeds the 128 KB safety limit.'); return }
+    if (!window.confirm('Replace all current scenes with this imported collection? Export a backup first.')) return
+    try {
+      const data: unknown = JSON.parse(await file.text())
+      await request('/studio/collection', data as object)
+      setCollectionMessage('Scene collection imported and validated.')
+    } catch (error) { setCollectionMessage(`Import rejected: ${(error as Error).message}`) }
+  }
   const reload = useCallback(async () => {
     try {
       const result = await request<{ displays: typeof displays }>('/capture/displays')
@@ -191,6 +218,20 @@ function Settings({ status }: { status: StudioStatus }) {
       <div className="info-block"><Link2 size={22}/><div><strong>Local scene API</strong><p>{status.connected ? 'Ready for scene control' : 'Start the desktop app or local API to edit scenes'} — no Native engine settings or third-party service.</p></div></div>
       <div className="info-block"><CircleHelp size={22}/><div><strong>Encoding and streaming</strong><p>Not implemented in this alpha. Recording and Go Live remain disabled until MooBee can produce and verify actual encoded video output.</p></div></div>
       <p className="help-text">The web preview has no local device permission. macOS needs Screen Recording access; Windows may request screen or device permissions.</p>
+    </Panel><Panel title="Scene Collection Backup" icon={Layers}>
+      <div className="collection-backup">
+        <p>Back up, restore or move scenes between MooBee installations. Imports are validated before replacing your current collection.</p>
+        <div className="collection-actions">
+          <button className="secondary-button" disabled={isStaticPreview || !status.connected} onClick={() => void exportScenes()}><Copy size={16}/>Export JSON</button>
+          <button className="secondary-button" disabled={isStaticPreview || !status.connected} onClick={() => collectionInput.current?.click()}><Layers size={16}/>Import JSON</button>
+        </div>
+        <input ref={collectionInput} type="file" accept=".json,application/json" hidden aria-label="Choose scene collection file" onChange={event => {
+          const file = event.currentTarget.files?.[0]
+          event.currentTarget.value = ''
+          void importScenes(file)
+        }}/>
+        {collectionMessage && <p className="collection-feedback" role="status">{collectionMessage}</p>}
+      </div>
     </Panel></div>
   </>
 }
