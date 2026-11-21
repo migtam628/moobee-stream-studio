@@ -11,60 +11,17 @@ permissions:
 
 jobs:
   avi:
-    name: Rust AVI writer and FFprobe compatibility
+    name: Rust AVI writer and full FFmpeg decode
     runs-on: ubuntu-24.04
-    timeout-minutes: 12
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Unit test standalone AVI writer without any external media library
-        run: |
-          rustc --edition=2021 --test apps/desktop/src-tauri/src/avi.rs -o "$RUNNER_TEMP/avi-tests"
-          "$RUNNER_TEMP/avi-tests" --nocapture
-      - name: Generate a known-good JPEG fixture
+      - name: Install test-only FFmpeg tools if missing
         run: |
           if ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null; then
             sudo apt-get update -qq
             sudo apt-get install -y -qq ffmpeg
           fi
-          command -v ffmpeg
-          command -v ffprobe
-          ffmpeg -hide_banner -loglevel error -f lavfi -i color=c=blue:s=640x360:r=1 -frames:v 1 -q:v 3 -y "$RUNNER_TEMP/source.jpg"
-          test -s "$RUNNER_TEMP/source.jpg"
-      - name: Encode the actual Rust muxer output
-        run: |
-          cp apps/desktop/src-tauri/src/avi.rs "$RUNNER_TEMP/avi.rs"
-          cat > "$RUNNER_TEMP/create_avi.rs" <<'RUST'
-          mod avi;
-          use std::{env, fs::{self, File}};
-          fn main() {
-              let args: Vec<String> = env::args().collect();
-              let jpeg = fs::read(&args[1]).expect("JPEG sample missing");
-              let file = File::create(&args[2]).expect("AVI destination file unavailable");
-              let mut writer = avi::AviWriter::new(file, 640, 360, 10)
-                  .expect("Rust AVI writer initialization failed");
-              for _ in 0..20 {
-                  writer.write_frame(&jpeg).expect("AVI streaming frame failed");
-              }
-              writer.finish().expect("RIFF/AVI finalization failed");
-          }
-          RUST
-          rustc --edition=2021 "$RUNNER_TEMP/create_avi.rs" -o "$RUNNER_TEMP/create_avi"
-          "$RUNNER_TEMP/create_avi" "$RUNNER_TEMP/source.jpg" "$RUNNER_TEMP/preview.avi"
-      - name: FFprobe validates playable MJPEG AVI metadata
-        run: |
-          ffprobe -v error -show_entries stream=codec_name,codec_type,width,height,avg_frame_rate,nb_frames:format=duration -of json "$RUNNER_TEMP/preview.avi" > "$RUNNER_TEMP/probe.json"
-          python3 - "$RUNNER_TEMP/probe.json" <<'PY'
-          import json, sys
-          data = json.load(open(sys.argv[1]))
-          video = next(item for item in data['streams'] if item['codec_type'] == 'video')
-          assert video['codec_name'] == 'mjpeg', video
-          assert video['width'] == 640 and video['height'] == 360, video
-          assert video['nb_frames'] == '20', video
-          assert video['avg_frame_rate'] == '10/1', video
-          assert abs(float(data['format']['duration']) - 2.0) < 0.05, data
-          print('Rust AVI muxer accepted by FFprobe: 640x360 MJPEG, 10 fps, 2 seconds')
-          PY
-      - name: Decode all frames, not just container metadata
-        run: |
-          ffmpeg -hide_banner -loglevel error -xerror -i "$RUNNER_TEMP/preview.avi" -f null -
+      - name: Validate incremental AVI muxer, metadata and full decode
+        run: bash scripts/check-avi-muxer.sh
