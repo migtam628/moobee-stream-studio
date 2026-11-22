@@ -42,7 +42,7 @@ try {
   await page.getByRole('button', { name: 'Send Test Alert' }).click();
   await overlay.getByText('ViceCityViewer').waitFor();
   await overlay.screenshot({ path: new URL('overlay.png', dir).pathname });
-  await page.getByRole('button', { name: 'Clips' }).first().click();
+  await page.getByRole('button', { name: 'Clips', exact: true }).first().click();
   await page.getByRole('heading', { name: 'Clips' }).waitFor();
   await page.getByRole('heading', { name: 'Browser screen recording' }).waitFor();
   await page.getByRole('button', { name: 'Record shared screen' }).waitFor();
@@ -94,7 +94,7 @@ try {
     Object.defineProperty(window, 'MediaRecorder', { configurable: true, value: FakeRecorder });
   });
   await recordingPage.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'domcontentloaded' });
-  await recordingPage.getByRole('button', { name: 'Clips' }).first().click();
+  await recordingPage.getByRole('button', { name: 'Clips', exact: true }).first().click();
   await recordingPage.getByLabel('Webcam picture-in-picture').check();
   await recordingPage.getByLabel('Camera position').selectOption('left');
   await recordingPage.getByRole('button', { name: 'Record shared screen' }).click();
@@ -111,7 +111,7 @@ try {
   await mobile.getByRole('heading', { name: 'Studio' }).waitFor();
   await mobile.screenshot({ path: new URL('mobile.png', dir).pathname, fullPage: true });
   await mobile.getByRole('button', { name: 'Open navigation' }).click();
-  await mobile.getByRole('button', { name: 'Clips' }).click();
+  await mobile.getByRole('button', { name: 'Clips', exact: true }).click();
   await mobile.getByRole('heading', { name: 'Browser screen recording' }).waitFor();
   await mobile.screenshot({ path: new URL('mobile-clips.png', dir).pathname, fullPage: true });
 
