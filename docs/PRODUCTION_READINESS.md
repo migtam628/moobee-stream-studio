@@ -85,7 +85,9 @@ MooBee must operate as its own installation and service. It may **bundle properl
 ### 0.3.8 Mac native H.264 MP4 experiment
 
 - [x] Implemented scoped macOS 15+ ScreenCaptureKit video-to-MP4 recording bridge with selectable raw display identity, optional system/mic audio requests and a private atomic clip publish path.
-- [ ] Verify Apple Silicon and Intel Swift ABI linking, full Tauri installers and `Info.plist` microphone/screen permissions in CI.
+- [x] Apple Silicon and Intel Swift typechecks and native Rust/Tauri compilation passed on PR #16 CI.
+- [x] Added top-level MP4 box validation and unit-test cases before final clip publishing (awaiting latest PR CI).
+- [ ] Verify full Apple Silicon/Intel installer packaging and `Info.plist` microphone/screen permission prompts on real installed builds.
 - [ ] Hardware-test video duration, H.264, selected display identity, optional audio tracks and A/V sync on supported machines, including permission refusal.
 - [ ] Windows native H.264/AAC/MP4 output and actual program scene composition remain P0 blockers.
 
