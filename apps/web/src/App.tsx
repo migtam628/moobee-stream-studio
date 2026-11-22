@@ -462,7 +462,14 @@ function ClipLab() {
             <Film size={16}/><span className="truncate">Test clip {clips.length - index} · {(clip.format ?? 'gif').toUpperCase()}</span><small>{(clip.bytes / (1024 * 1024)).toFixed(2)} MB</small>
           </button>) : <p className="empty-list">No test clips have been saved on this device.</p>}
         </div>
-        {selected && <div className="clip-path"><span>Saved locally</span><code>{selected.path}</code><button className="secondary-button" onClick={() => void navigator.clipboard.writeText(selected.path)}><Copy size={15}/>Copy path</button></div>}
+        {selected && <div className="clip-path"><span>Saved locally</span><code>{selected.path}</code>
+          <div className="clip-actions">
+            <button className="secondary-button" onClick={() => void navigator.clipboard.writeText(selected.path)}><Copy size={15}/>Copy path</button>
+            {isMacDesktop && <button className="secondary-button" onClick={() => {
+              void request('/clips/reveal', { clipId: selected.id })
+                .catch(cause => setError('Finder could not reveal clip: ' + (cause as Error).message))
+            }}><Film size={15}/>Show in Finder</button>}
+          </div></div>}
       </Panel>
     </div>
     {desktop && <Panel title="Native Capture Input Diagnostic" icon={Activity}>
