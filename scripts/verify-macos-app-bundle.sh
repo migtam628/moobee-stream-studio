@@ -3,7 +3,30 @@
 # All failures print the observed metadata so CI errors are actionable.
 set -euo pipefail
 
-APP_PATH="${1:-apps/desktop/src-tauri/target/release/bundle/macos/MooBee Stream Studio.app}"
+# The Tauri DMG job removes its intermediate .app after packaging. Inspect
+# the real distributable by mounting the read-only DMG rather than looking for
+# that deleted intermediate directory.
+MOUNT_DIR=""
+if [[ "${1:-}" == "--dmg" ]]; then
+  DMG_PATH="${2:-}"
+  [[ -n "$DMG_PATH" && -s "$DMG_PATH" ]] || {
+    echo "::error::Pass a built .dmg path after --dmg" >&2
+    exit 1
+  }
+  MOUNT_DIR="$(mktemp -d)"
+  cleanup() {
+    hdiutil detach "$MOUNT_DIR" -quiet >/dev/null 2>&1 || true
+    rmdir "$MOUNT_DIR" >/dev/null 2>&1 || true
+  }
+  trap cleanup EXIT
+  hdiutil attach -readonly -nobrowse -quiet -mountpoint "$MOUNT_DIR" "$DMG_PATH" || {
+    echo "::error::Unable to mount DMG for macOS version verification: $DMG_PATH" >&2
+    exit 1
+  }
+  APP_PATH="$MOUNT_DIR/MooBee Stream Studio.app"
+else
+  APP_PATH="${1:-apps/desktop/src-tauri/target/release/bundle/macos/MooBee Stream Studio.app}"
+fi
 PLIST="$APP_PATH/Contents/Info.plist"
 
 die() {
