@@ -39,7 +39,7 @@
       "icons/icon.ico"
     ],
     "macOS": {
-      "minimumSystemVersion": "15.0",
+      "minimumSystemVersion": "13.0",
       "infoPlist": "Info.plist"
     }
   }
