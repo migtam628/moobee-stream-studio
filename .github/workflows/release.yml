@@ -139,6 +139,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev librsvg2-dev libayatana-appindicator3-dev patchelf
       - run: npm ci
+      - name: Validate native Swift-linked MP4 box tests on macOS
+        if: runner.os == 'macOS'
+        working-directory: apps/desktop/src-tauri
+        run: cargo test --lib mp4_validation::tests
       - name: Build desktop installer
         uses: tauri-apps/tauri-action@v1
         env:
@@ -146,6 +150,20 @@ jobs:
         with:
           projectPath: apps/desktop
           args: ${{ matrix.args }}
+      - name: Validate packaged macOS version and executable
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="apps/desktop/src-tauri/target/release/bundle/macos/MooBee Stream Studio.app"
+          PLIST="$APP/Contents/Info.plist"
+          test -s "$PLIST"
+          test "$(plutil -extract LSMinimumSystemVersion raw -o - "$PLIST")" = "13.0"
+          EXECUTABLE="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$PLIST")"
+          test -x "$APP/Contents/MacOS/$EXECUTABLE"
+          otool -l "$APP/Contents/MacOS/$EXECUTABLE" | grep -A4 'cmd LC_BUILD_VERSION' |
+            grep -Eq 'minos 13\\.0'
+          echo "Verified Ventura-compatible macOS app bundle metadata."
       - name: Collect installer files
         shell: bash
         run: |
