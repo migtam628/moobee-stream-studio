@@ -3,6 +3,7 @@ mod capture_probe;
 mod avi;
 mod native_avi;
 mod macos_mp4;
+mod mp4_validation;
 
 use axum::{
     extract::State,
