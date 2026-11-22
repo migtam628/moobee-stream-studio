@@ -9,7 +9,6 @@ use tauri::Manager;
 use std::{
     ffi::{CStr, CString},
     fs::{self, OpenOptions},
-    io::Read,
     os::raw::{c_char, c_int},
     sync::atomic::Ordering,
 };
@@ -113,15 +112,14 @@ fn record_mp4_to_private_folder(
         let _ = fs::remove_file(&temporary);
         return Err("MP4 file is empty, incomplete, or exceeds the 256 MiB test limit".into());
     }
-    let mut header = [0u8; 12];
-    file.read_exact(&mut header)
-        .map_err(|error| format!("Could not verify recorded MP4 header: {error}"))?;
-    // A successful native delegate callback is not sufficient evidence of an
-    // MP4; reject files with missing ISO BMFF 'ftyp' headers.
-    if &header[4..8] != b"ftyp" {
+    // Do not expose a partial output as a finished clip just because it starts
+    // with 'ftyp'. Verify all top-level boxes fit inside the file and that the
+    // recording includes both movie metadata (moov) and media payload (mdat).
+    // This is structural validation only, not independent playback/audio QA.
+    if let Err(message) = crate::mp4_validation::validate_mp4_boxes(&mut file, len) {
         drop(file);
         let _ = fs::remove_file(&temporary);
-        return Err("Native recording did not produce an ISO BMFF MP4 header".into());
+        return Err(format!("Native recording produced an incomplete MP4: {message}"));
     }
     file.sync_all().map_err(|error| format!("Could not synchronize recorded MP4: {error}"))?;
     drop(file);
