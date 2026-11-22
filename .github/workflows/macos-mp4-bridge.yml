@@ -30,6 +30,8 @@ jobs:
             swift_target: x86_64-apple-macos13.0
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 25
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '13.0'
     steps:
       - uses: actions/checkout@v4
       - name: Check Swift type correctness against the macOS 15+ SDK
@@ -68,23 +70,4 @@ jobs:
       - name: Inspect packaged macOS runtime and privacy declarations
         if: matrix.label == 'Apple Silicon'
         shell: bash
-        run: |
-          set -euo pipefail
-          APP_PATH="apps/desktop/src-tauri/target/release/bundle/macos/MooBee Stream Studio.app"
-          PLIST="$APP_PATH/Contents/Info.plist"
-          test -d "$APP_PATH"
-          test -s "$PLIST"
-          MIN_OS="$(plutil -extract LSMinimumSystemVersion raw -o - "$PLIST")"
-          test "$MIN_OS" = "13.0"
-          plutil -extract NSScreenCaptureUsageDescription raw -o - "$PLIST" >/dev/null
-          plutil -extract NSMicrophoneUsageDescription raw -o - "$PLIST" >/dev/null
-          EXECUTABLE="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$PLIST")"
-          test -n "$EXECUTABLE"
-          test -x "$APP_PATH/Contents/MacOS/$EXECUTABLE"
-          otool -l "$APP_PATH/Contents/MacOS/$EXECUTABLE" > "${RUNNER_TEMP}/moobee-macos-load-commands.txt"
-          grep -Fq 'path /usr/lib/swift' "${RUNNER_TEMP}/moobee-macos-load-commands.txt"
-          # Reject binaries that would still require macOS 15 at load time.
-          otool -l "$APP_PATH/Contents/MacOS/$EXECUTABLE" | grep -A4 'cmd LC_BUILD_VERSION' |
-            grep -Eq 'minos 13\\.0'
-
-          echo "Packaged macOS app has the Swift runtime rpath and required privacy strings."
+        run: bash scripts/verify-macos-app-bundle.sh
