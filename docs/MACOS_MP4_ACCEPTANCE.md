@@ -4,7 +4,7 @@
 
 This experiment adds a **native H.264 MP4 screen recorder on macOS 15+** with optional system audio and optional microphone requested through ScreenCaptureKit. It compiles Swift into the installed Tauri binary, without OBS, Streamlabs or an FFmpeg capture executable. It does **not** yet record the MooBee program scene, webcam layer or RTMP stream.
 
-The Rust command records for **3–15 seconds** into a private `.mp4.part` file and publishes the finished `.mp4` only after the ScreenCaptureKit completion delegate, basic output-size validation and file synchronization. A successful command means the file was finalized, **not** that microphone/system audio was independently verified.
+The Rust command records for **3–15 seconds** into a private `.mp4.part` file and publishes the finished `.mp4` only after the ScreenCaptureKit completion delegate, bounded output-size checks, top-level MP4 box validation (`ftyp`, `moov`, non-empty `mdat`, and box sizes), and file synchronization. A successful command means the file was finalized, **not** that microphone/system audio was independently verified.
 
 ## Required manual tests (perform on a real Mac)
 
