@@ -52,3 +52,7 @@ jobs:
           npm run build
           cd apps/desktop/src-tauri
           cargo check
+      - name: Link native test binary and validate MP4 container regressions
+        run: |
+          cd apps/desktop/src-tauri
+          cargo test --lib mp4_validation::tests
