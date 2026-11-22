@@ -1,3 +1,29 @@
+# MooBee Stream Studio v0.3.8-alpha.3 — macOS Compatibility Fix
+
+**Experimental alpha, not production-ready.** This release fixes the macOS system-version requirement that prevented users on macOS 13/14 from opening the application.
+
+## Fixes since alpha.2
+
+- Lowered the bundled macOS minimum from **15.0 to 13.0** (Ventura), matching the Swift compilation deployment target on Intel and Apple Silicon.
+- Kept the experimental **H.264 MP4 capture feature restricted to macOS 15+** through a native Swift availability check. On macOS 13/14, MooBee shows the MP4 test as unavailable while leaving scenes, screenshot capture, silent GIF/AVI test recordings and release information accessible.
+- Expanded macOS CI to validate the app bundle's minimum-version declaration and linked Mach-O deployment target, in addition to compilation and MP4 structural tests.
+- Platform installer and release-manifest workflows remain in GitHub Actions, with SHA-256 asset hashes and prerelease safeguards.
+
+## Important limitations
+
+- **macOS 13/14 compatibility requires real-device launch and capture testing.** GitHub CI can inspect bundle metadata, but cannot prove behavior on those older versions.
+- Install the `macos-arm64` DMG on Apple Silicon or `macos-x64` on Intel. Replacing the old DMG download alone will not update an existing installed application.
+- MP4/audio device recording, Windows H.264/AAC, scene composition, RTMP, automatic signed updates, and stable distribution still require additional implementation or acceptance testing.
+- **Record and Go Live remain disabled.** This release is only a compatibility and hardening update.
+
+## Existing alpha features
+
+Short local capture experiments, native screen diagnostics, independent scene management, local API and GitHub Release update discovery remain available where supported.
+
+See `docs/PRODUCTION_READINESS.md`, `docs/MACOS_MP4_ACCEPTANCE.md`, and `docs/GITHUB_RELEASES.md`.
+
+---
+
 # MooBee Stream Studio v0.3.8-alpha.2 — GitHub Release Center and Mac MP4 Hardening
 
 **Experimental standalone alpha. Not production-ready.** All installers and the self-hosted web bundle are distributed through GitHub Releases. The main **Record** and **Go Live** controls remain disabled.
