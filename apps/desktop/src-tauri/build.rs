@@ -6,8 +6,8 @@ fn main() {
     if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
         let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo OUT_DIR missing"));
         let swift_target = match env::var("CARGO_CFG_TARGET_ARCH").as_deref() {
-            Ok("aarch64") => "arm64-apple-macos15.0",
-            Ok("x86_64") => "x86_64-apple-macos15.0",
+            Ok("aarch64") => "arm64-apple-macos13.0",
+            Ok("x86_64") => "x86_64-apple-macos13.0",
             other => panic!("Unsupported macOS recorder architecture: {other:?}"),
         };
         let sdk = Command::new("xcrun")
