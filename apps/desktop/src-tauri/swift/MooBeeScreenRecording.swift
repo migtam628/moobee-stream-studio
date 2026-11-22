@@ -119,6 +119,16 @@ private func recordNativeMP4(
     }
 }
 
+/// Separate the app-shell OS requirement from the newer native MP4 API.
+/// Never infer macOS versions from browser WebKit user-agent strings.
+@_cdecl("moobee_macos_mp4_supported")
+public func moobee_macos_mp4_supported() -> Int32 {
+    if #available(macOS 15.0, *) {
+        return 1
+    }
+    return 0
+}
+
 private final class RecordingBridgeResult: @unchecked Sendable {
     let finished = DispatchSemaphore(value: 0)
     private let lock = NSLock()
