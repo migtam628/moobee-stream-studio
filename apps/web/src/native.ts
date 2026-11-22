@@ -187,6 +187,13 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
   if (path === '/clips/macos-mp4-availability') {
     return await invoke('macos_mp4_availability')
   }
+  if (path === '/clips/reveal') {
+    if (typeof body.clipId !== 'string' ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(body.clipId)) {
+      throw new Error('Choose a saved MooBee clip to reveal in Finder')
+    }
+    return await invoke('reveal_test_clip', { clipId: body.clipId })
+  }
   if (path === '/clips/capture-mp4') {
     if (typeof body.displayId !== 'number' || !Number.isSafeInteger(body.displayId) ||
         typeof body.seconds !== 'number' || !Number.isInteger(body.seconds) ||
