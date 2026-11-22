@@ -6,6 +6,20 @@ This experiment adds a **native H.264 MP4 screen recorder on macOS 15+** with op
 
 The Rust command records for **3–15 seconds** into a private `.mp4.part` file and publishes the finished `.mp4` only after the ScreenCaptureKit completion delegate, bounded output-size checks, top-level MP4 box validation (`ftyp`, `moov`, non-empty `mdat`, and box sizes), and file synchronization. A successful command means the file was finalized, **not** that microphone/system audio was independently verified.
 
+## macOS compatibility validation
+
+The MooBee desktop shell is now packaged with macOS **13.0+** minimum deployment
+metadata. Native `SCRecordingOutput` MP4 remains available only on **macOS 15+**.
+
+- [ ] Launch the correct ARM64/Intel app on a real macOS **13 Ventura** machine.
+  Confirm scene editor, screenshot/GIF/AVI test tools and disabled MP4 control.
+- [ ] Repeat on macOS **14 Sonoma**; the app must not crash while resolving the
+  weakly linked macOS 15 ScreenCaptureKit recording symbols.
+- [ ] On macOS **15+**, confirm MP4 control enables and complete the playback/audio
+  tests below.
+- [ ] Verify `LSMinimumSystemVersion=13.0` and Mach-O deployment metadata in
+  CI's installed app bundle. CI cannot replace actual 13/14 launch tests.
+
 ## Required manual tests (perform on a real Mac)
 
 - [ ] Install on **macOS 15 or later**, with Screen Recording permission granted when requested in System Settings > Privacy & Security. Verify the installed app's Info.plist includes the permission reasons.
