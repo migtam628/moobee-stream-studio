@@ -35,12 +35,12 @@ jobs:
             'apps/desktop/package.json'
           ].map(path => [path, JSON.parse(fs.readFileSync(path,'utf8')).version]);
           const branch = process.env.GITHUB_REF_NAME || '';
-          const match = /^release\/v(\d+\.\d+\.\d+)-(alpha|beta|rc)\.(\d+)$/.exec(branch);
+          const match = /^release\/v(\d+\.\d+\.\d+)-alpha\.(\d+)$/.exec(branch);
           // Existing 0.3.x experimental builds use the core package version.
           // Future signed updater releases should set full prerelease versions.
           if (!match || web !== match[1] || tauri !== web || cargo !== web ||
               workspaceVersions.some(([,version]) => version !== web)) {
-            console.error('Only aligned prerelease versions can publish:', {
+            console.error('Only aligned experimental alpha versions can publish:', {
               branch, web, tauri, cargo, workspaceVersions
             });
             process.exit(1);
