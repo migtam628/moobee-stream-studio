@@ -1,3 +1,27 @@
+# MooBee Stream Studio v0.3.8-alpha.4 — Usable Native Screen Capture in Studio
+
+**Experimental alpha — not a finished livestreaming application.** This update makes existing standalone recording test features easier to use directly from the Studio workspace.
+
+## What works in this update
+
+- **Studio → Capture screen test** opens a new native Quick Screen Capture section with display selection, 4/6/8-second recording length, explicit progress and error messages, and saved file information.
+- **macOS 15+** uses the existing native ScreenCaptureKit H.264 MP4 adapter. System audio and microphone requests are optional and default off until compatibility is verified on actual hardware.
+- **Windows and macOS 13–14** use the existing short silent MJPEG AVI fallback (640×360/10 fps). This does not record the saved scene, webcam, overlays or mixed audio.
+- **Show in Finder** reveals validated UUID-named MP4/AVI/GIF files from MooBee's own private clips folder. No arbitrary filesystem path is accepted.
+- Studio preview labels now distinguish periodic display snapshots from an actual livestream or composited Program.
+- Quick Capture provides direct access to the Clips library and a copyable file path.
+
+## Important limitations
+
+- Native MP4 encoder output and audio tracks must still be checked with a real Mac and a media player; CI only verifies build, linking and container structure.
+- Main **Record** and **Go Live** controls remain deliberately disabled. Full real-time compositor, webcam/audio mixing, streaming destinations, secure keys, RTMP/RTMPS and device-soak tests are not implemented.
+- App targets macOS 13+ for desktop scene tools; experimental ScreenCaptureKit MP4 remains macOS 15+ only.
+- Unsigned alpha installers are for local testing. No signed automatic installer updates.
+
+See `docs/PRODUCTION_READINESS.md` and `docs/GITHUB_RELEASES.md` for remaining blockers.
+
+---
+
 # MooBee Stream Studio v0.3.8-alpha.3 — macOS Compatibility Fix
 
 **Experimental alpha, not production-ready.** This release fixes the macOS system-version requirement that prevented users on macOS 13/14 from opening the application.
