@@ -1,6 +1,8 @@
 # MooBee Stream Studio
 
-**Standalone Alpha 0.3.8 (macOS native H.264 MP4 recording experiment)** — a native streaming studio foundation, independent of OBS Studio and Streamlabs. The old 0.2 installers are legacy OBS-controller builds and are **not** standalone.
+**Standalone Alpha 0.3.8 (macOS native H.264 MP4 recording experiment)** — a native streaming studio foundation, independent of OBS Studio and Streamlabs.
+
+**macOS compatibility:** the standalone desktop shell now targets **macOS 13.0 Ventura or newer** (Apple Silicon or Intel). The optional ScreenCaptureKit **H.264/MP4 test still requires macOS 15+** and is disabled on older systems; GIF, silent AVI and scene tools remain independent. CI verifies deployment metadata, but real devices running macOS 13/14 still need launch testing. The old 0.2 installers are legacy OBS-controller builds and are **not** standalone.
 
 ![Early visual direction](docs/design-reference.webp)
 
