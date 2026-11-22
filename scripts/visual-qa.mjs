@@ -25,6 +25,11 @@ try {
   page.on('pageerror', error => errors.push(error.message));
   await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'domcontentloaded' });
   await page.getByRole('heading', { name: 'Studio' }).waitFor();
+  await page.getByText('Quick screen capture — native test').waitFor();
+  const nativeQuickCapture = page.locator('.quick-capture').getByRole('button', { name: 'Capture screen test' });
+  if (await nativeQuickCapture.isEnabled()) {
+    throw new Error('Native Quick Capture must be disabled in the browser-only edition');
+  }
   await page.screenshot({ path: new URL('desktop.png', dir).pathname, fullPage: true });
   await page.getByRole('button', { name: 'Overlays' }).first().click();
   await page.getByRole('heading', { name: 'Overlays' }).waitFor();
