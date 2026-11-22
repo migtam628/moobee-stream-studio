@@ -184,6 +184,9 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
     const clips = await invoke<{ id: string; path: string; bytes: number }[]>('list_test_clips')
     return { available: true, clips }
   }
+  if (path === '/clips/macos-mp4-availability') {
+    return await invoke('macos_mp4_availability')
+  }
   if (path === '/clips/capture-mp4') {
     if (typeof body.displayId !== 'number' || !Number.isSafeInteger(body.displayId) ||
         typeof body.seconds !== 'number' || !Number.isInteger(body.seconds) ||
