@@ -287,6 +287,7 @@ function ClipLab() {
   const [probeResult, setProbeResult] = useState<CaptureProbe | null>(null)
   const [error, setError] = useState('')
   const [macMp4Working, setMacMp4Working] = useState(false)
+  const [macMp4Supported, setMacMp4Supported] = useState(false)
   const [captureSystemAudio, setCaptureSystemAudio] = useState(true)
   const [captureMicrophone, setCaptureMicrophone] = useState(false)
   const [macMp4Result, setMacMp4Result] = useState<{ path: string; bytes: number; durationSeconds: number; audioTrackVerified: boolean } | null>(null)
@@ -307,6 +308,14 @@ function ClipLab() {
     } catch (cause) { setError((cause as Error).message) }
   }, [desktop])
   useEffect(() => { void reload() }, [reload])
+  useEffect(() => {
+    if (!isMacDesktop) return
+    let active = true
+    void request<{ supported: boolean; requiredMacos: string }>('/clips/macos-mp4-availability')
+      .then(result => { if (active) setMacMp4Supported(result.supported) })
+      .catch(() => { if (active) setMacMp4Supported(false) })
+    return () => { active = false }
+  }, [isMacDesktop])
 
   async function selectClip(id: string, format: string = 'gif') {
     setError('')
@@ -351,7 +360,7 @@ function ClipLab() {
     } finally { setWorking(false) }
   }
   async function captureMacMP4() {
-    if (!isMacDesktop || !displayId || working || probing || macMp4Working || seconds < 3 || seconds > 15) return
+    if (!isMacDesktop || !macMp4Supported || !displayId || working || probing || macMp4Working || seconds < 3 || seconds > 15) return
     setMacMp4Working(true)
     setMacMp4Result(null)
     setError('')
@@ -418,10 +427,11 @@ function ClipLab() {
             <button className="secondary-button" disabled={!desktop || !displayId || working || probing || seconds > 8} onClick={() => void captureAvi()} title={seconds > 8 ? 'AVI test recording supports 2–8 seconds' : 'Save a silent MJPEG AVI video'}>
               <Video size={17}/>Capture Video AVI
             </button>
-            {isMacDesktop && <button className="secondary-button" disabled={!displayId || working || probing || macMp4Working || seconds < 3 || seconds > 15}
-              onClick={() => void captureMacMP4()} title={seconds < 3 ? 'Select 4–10 seconds' : 'Native ScreenCaptureKit H.264 MP4 test'}>
-              <Video size={17}/>{macMp4Working ? 'Capturing native MP4…' : 'Capture MP4 (macOS test)'}
+            {isMacDesktop && <button className="secondary-button" disabled={!macMp4Supported || !displayId || working || probing || macMp4Working || seconds < 3 || seconds > 15}
+              onClick={() => void captureMacMP4()} title={!macMp4Supported ? 'Native H.264 MP4 requires macOS 15 or later; other test capture features remain available' : seconds < 3 ? 'Select 4–10 seconds' : 'Native ScreenCaptureKit H.264 MP4 test'}>
+              <Video size={17}/>{macMp4Working ? 'Capturing native MP4…' : 'Capture MP4 (macOS 15+ test)'}
             </button>}
+            {isMacDesktop && !macMp4Supported && <small role="status">Native MP4 requires macOS 15+. On macOS 13–14, use GIF or silent AVI capture tests.</small>}
             <button className="secondary-button" disabled={!desktop || working} onClick={() => void reload()}><RefreshCcw size={16}/>Refresh</button>
           </div>
           <p className="help-text">{desktop ? 'All files stay on your computer. Grant Screen Recording permission on macOS if prompted. AVI playback is available in external players such as VLC.' : 'Native test capture is only available in the installed Windows/macOS app. Web and Android editions cannot use native GIF/AVI capture.'}</p>
