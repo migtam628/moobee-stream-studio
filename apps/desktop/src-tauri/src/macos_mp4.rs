@@ -40,6 +40,7 @@ fn validate(seconds: u32, display_id: usize) -> Result<(), String> {
 
 #[cfg(target_os = "macos")]
 unsafe extern "C" {
+    fn moobee_macos_mp4_supported() -> c_int;
     fn moobee_macos_record_mp4(
         output_path: *const c_char,
         display_id: u32,
@@ -136,6 +137,23 @@ fn record_mp4_to_private_folder(
         has_requested_microphone: microphone,
         audio_track_verified: false,
     })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MacOsMp4Availability {
+    supported: bool,
+    required_macos: &'static str,
+}
+
+#[tauri::command]
+pub fn macos_mp4_availability() -> MacOsMp4Availability {
+    #[cfg(target_os = "macos")]
+    let supported = unsafe { moobee_macos_mp4_supported() == 1 };
+    #[cfg(not(target_os = "macos"))]
+    let supported = false;
+
+    MacOsMp4Availability { supported, required_macos: "15.0" }
 }
 
 #[tauri::command]
