@@ -227,9 +227,11 @@ jobs:
           done
           find release-assets -type f -name 'moobee-stream-studio-android-arm64-debug.apk' -print -quit | grep -q . || { echo "Missing Android APK"; exit 1; }
           find release-assets -type f -name 'moobee-stream-studio-web-*.tar.gz' -print -quit | grep -q . || { echo "Missing web distribution"; exit 1; }
+          node scripts/build-release-manifest.mjs release-assets "$TAG" "$GITHUB_SHA" > RELEASE-MANIFEST.json
           while IFS= read -r -d '' file; do
             ( cd "$(dirname "$file")" && sha256sum "$(basename "$file")" )
           done < <(find release-assets -type f -print0 | sort -z) > SHA256SUMS.txt
+          sha256sum RELEASE-MANIFEST.json >> SHA256SUMS.txt
           # Protect artifact provenance: a tag is immutable from our pipeline.
           # Releasing a correction requires a fresh alpha/beta/rc identifier.
           if gh release view "$TAG" >/dev/null 2>&1 || \
@@ -237,7 +239,7 @@ jobs:
             echo "::error::Refusing to reuse already published release/tag $TAG"
             exit 1
           fi
-          gh release create "$TAG" "${FILES[@]}" SHA256SUMS.txt \
+          gh release create "$TAG" "${FILES[@]}" RELEASE-MANIFEST.json SHA256SUMS.txt \
             --target "$GITHUB_SHA" \
             --title "MooBee Stream Studio $TAG — Standalone Capture Alpha" \
             --notes-file docs/RELEASE_NOTES.md \
