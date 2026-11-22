@@ -37,6 +37,11 @@ fn main() {
 
         println!("cargo:rustc-link-search=native={}", out_dir.display());
         println!("cargo:rustc-link-lib=static=moobee_sck");
+        // Swift's async runtime uses @rpath/libswift_Concurrency.dylib on
+        // macOS. Rust is the final linker here, so it must supply the standard
+        // OS Swift runtime search path for both the app and native test binaries.
+        // This is a system path, not a developer-machine Xcode dependency.
+        println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/swift");
         println!("cargo:rustc-link-lib=framework=Foundation");
         println!("cargo:rustc-link-lib=framework=AVFoundation");
         println!("cargo:rustc-link-lib=framework=CoreMedia");
