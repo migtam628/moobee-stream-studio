@@ -19,6 +19,13 @@ ffprobe -v error -show_entries format=duration,size:stream=index,codec_type,code
 ```
 
 - [ ] Confirm **H.264 video**, plausible frame rate and dimensions, file duration within a documented tolerance. Check whether the **audio** stream is actually present; an audio checkbox does not guarantee that it is.
+- [ ] Run the repeatable **offline** metadata and full-file decode acceptance check (Node.js + locally installed FFprobe/FFmpeg; not dependencies of MooBee itself). Supply the duration actually requested, and include `--expect-audio` only when audio was enabled:
+
+```bash
+node scripts/verify-native-mp4.mjs --file "/path/to/clip-UUID.mp4" --seconds 4 --expect-audio --report macos-mp4-evidence.json
+```
+
+  The JSON report contains the base filename, stream details, duration, decode result and explicit `hardwarePlaybackVerified: false` / `audioSyncVerified: false` fields. Do not claim those last two checks passed until you manually watch/listen. The script does **not upload** footage or evidence and refuses to overwrite an existing report. Redact local filenames and machine details before sharing evidence.
 - [ ] Record again with a microphone enabled after granting microphone permission; confirm both expected audio sources and measure sync against on-screen clicks and spoken taps. Report missing or corrupted audio.
 - [ ] Connect two monitors and confirm MooBee records exactly the selected display. The bridge maps XCap monitor identity to ScreenCaptureKit's macOS display ID rather than relying on array ordering.
 - [ ] Deny/revoke screen or mic permission, unplug a selected display, interrupt capture and repeat capture. Confirm errors do not produce a completed file or a false-success UI message.
