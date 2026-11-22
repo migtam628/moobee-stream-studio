@@ -9,6 +9,7 @@ import type { LucideIcon } from 'lucide-react'
 import { isStaticPreview, request, runningInTauri, subscribeEvents } from './api'
 import { version as appVersion } from '../../../package.json'
 import BrowserRecorder from './BrowserRecorder'
+import GithubUpdates from './GithubUpdates'
 import { offline, type Activity as ActivityItem, type Alert, type StudioStatus } from './types'
 
 type Tab = 'Studio' | 'Scenes' | 'Overlays' | 'Alerts' | 'Multistream' | 'AI Sidekick' | 'Clips' | 'Chatbot' | 'Analytics' | 'Settings'
@@ -220,6 +221,8 @@ function Settings({ status }: { status: StudioStatus }) {
       <div className="info-block"><Link2 size={22}/><div><strong>Local scene API</strong><p>{status.connected ? 'Ready for scene control' : 'Start the desktop app or local API to edit scenes'} — no Native engine settings or third-party service.</p></div></div>
       <div className="info-block"><CircleHelp size={22}/><div><strong>Encoding and streaming</strong><p>Not implemented in this alpha. Recording and Go Live remain disabled until MooBee can produce and verify actual encoded video output.</p></div></div>
       <p className="help-text">The web preview has no local device permission. macOS needs Screen Recording access; Windows may request screen or device permissions.</p>
+    </Panel><Panel title="GitHub Releases & Updates" icon={RefreshCcw}>
+      <GithubUpdates appVersion={appVersion}/>
     </Panel><Panel title="Scene Collection Backup" icon={Layers}>
       <div className="collection-backup">
         <p>Back up, restore or move scenes between MooBee installations. Imports are validated before replacing your current collection.</p>
