@@ -29,12 +29,34 @@ jobs:
           const web = JSON.parse(fs.readFileSync('package.json','utf8')).version;
           const tauri = JSON.parse(fs.readFileSync('apps/desktop/src-tauri/tauri.conf.json','utf8')).version;
           const cargo = fs.readFileSync('apps/desktop/src-tauri/Cargo.toml','utf8').match(/^version\s*=\s*"([^"]+)"/m)?.[1];
+          const workspaceVersions = [
+            'apps/api/package.json',
+            'apps/web/package.json',
+            'apps/desktop/package.json'
+          ].map(path => [path, JSON.parse(fs.readFileSync(path,'utf8')).version]);
           const branch = process.env.GITHUB_REF_NAME || '';
-          if (!branch.startsWith('release/v' + web + '-') || tauri !== web || cargo !== web) {
-            console.error('Release ref, npm, Tauri and Cargo versions must match:', {branch, web, tauri, cargo});
+          const match = /^release\/v(\d+\.\d+\.\d+)-(alpha|beta|rc)\.(\d+)$/.exec(branch);
+          // Existing 0.3.x experimental builds use the core package version.
+          // Future signed updater releases should set full prerelease versions.
+          if (!match || web !== match[1] || tauri !== web || cargo !== web ||
+              workspaceVersions.some(([,version]) => version !== web)) {
+            console.error('Only aligned prerelease versions can publish:', {
+              branch, web, tauri, cargo, workspaceVersions
+            });
             process.exit(1);
           }
           NODE
+      - name: Refuse already-published GitHub release tags
+        if: startsWith(github.ref, 'refs/heads/release/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF_NAME#release/}"
+          # Never overwrite or silently rebuild assets under a published tag.
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            echo "::error::Tag $TAG already exists. Create a new release/v*-alpha.N branch."
+            exit 1
+          fi
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -208,15 +230,16 @@ jobs:
           while IFS= read -r -d '' file; do
             ( cd "$(dirname "$file")" && sha256sum "$(basename "$file")" )
           done < <(find release-assets -type f -print0 | sort -z) > SHA256SUMS.txt
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Refreshing existing prerelease assets for $TAG"
-            gh release upload "$TAG" "${FILES[@]}" SHA256SUMS.txt --clobber
-            gh release edit "$TAG" --title "MooBee Stream Studio $TAG — Standalone Capture Alpha" --notes-file docs/RELEASE_NOTES.md --prerelease
-          else
-            gh release create "$TAG" "${FILES[@]}" SHA256SUMS.txt \
-              --target "$GITHUB_SHA" \
-              --title "MooBee Stream Studio $TAG — Standalone Capture Alpha" \
-              --notes-file docs/RELEASE_NOTES.md \
-              --prerelease
+          # Protect artifact provenance: a tag is immutable from our pipeline.
+          # Releasing a correction requires a fresh alpha/beta/rc identifier.
+          if gh release view "$TAG" >/dev/null 2>&1 || \
+             gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            echo "::error::Refusing to reuse already published release/tag $TAG"
+            exit 1
           fi
+          gh release create "$TAG" "${FILES[@]}" SHA256SUMS.txt \
+            --target "$GITHUB_SHA" \
+            --title "MooBee Stream Studio $TAG — Standalone Capture Alpha" \
+            --notes-file docs/RELEASE_NOTES.md \
+            --prerelease
 
