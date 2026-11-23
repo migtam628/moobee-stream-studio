@@ -96,6 +96,7 @@ function run() {
       '-of', 'json', options.file,
     ], { encoding: 'utf8', timeout: 30_000, maxBuffer: 2 * 1024 * 1024 }));
     const checked = assessNativeMp4(metadata, options);
+    let fullyDecodedWithFFmpeg = false;
     if (checked.passed) {
       // A successful ffprobe is not proof that every encoded frame can decode.
       try {
@@ -103,6 +104,7 @@ function run() {
           '-hide_banner', '-nostdin', '-v', 'error', '-xerror',
           '-i', options.file, '-f', 'null', '-',
         ], { encoding: 'utf8', timeout: 120_000, maxBuffer: 2 * 1024 * 1024 });
+        fullyDecodedWithFFmpeg = true;
       } catch (error) {
         checked.errors.push('FFmpeg full-file decode failed: ' + String(error.message).slice(0, 200));
         checked.passed = false;
@@ -120,7 +122,7 @@ function run() {
         '-af', 'volumedetect', '-f', 'null', '-',
       ], { encoding: 'utf8', timeout: 120_000, maxBuffer: 4 * 1024 * 1024 });
       const output = String(result.stderr ?? '');
-      const peak = output.match(/max_volume:\\s*(-?(?:\\d+(?:\\.\\d+)?|inf))\\s*dB/i);
+      const peak = output.match(/max_volume:\s*(-?(?:\d+(?:\.\d+)?|inf))\s*dB/i);
       if (!result.error && result.status === 0 && peak) {
         const db = peak[1].toLowerCase() === '-inf' ? -Infinity : Number(peak[1]);
         audioPeakDbfs = Number.isFinite(db) ? db : null;
@@ -137,7 +139,7 @@ function run() {
     const report = {
       ...checked, fileName: basename(options.file), fileBytes: info.size,
       checkedAt: new Date().toISOString(), platform: process.platform, arch: process.arch,
-      fullyDecodedWithFFmpeg: checked.errors.every(error => !error.startsWith('FFmpeg full-file decode')),
+      fullyDecodedWithFFmpeg,
       expectAudible: options.expectAudible,
       audioPeakDbfs, audioLevelMeasured,
       // Peak level is signal evidence, not proof of the intended source or A/V synchronization.
