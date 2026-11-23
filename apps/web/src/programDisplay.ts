@@ -63,7 +63,7 @@ export function programTestDisplayIds(collection: unknown): number[] {
     throw new Error('Composited AVI test supports displays only; camera, overlays and audio are not recorded')
   }
   const ids = enabled.map(source => {
-    if (typeof source.deviceId !== 'string' || !/^(0|[1-9]\\d{0,1})$/.test(source.deviceId)) {
+    if (typeof source.deviceId !== 'string' || !/^(0|[1-9]\d{0,1})$/.test(source.deviceId)) {
       throw new Error('Invalid Program display identifier')
     }
     const id = Number(source.deviceId)
