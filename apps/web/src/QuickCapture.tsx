@@ -38,6 +38,8 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
   const [error, setError] = useState('')
   const [permissionSettingsError, setPermissionSettingsError] = useState('')
   const [saved, setSaved] = useState<CapturedFile | null>(null)
+  const [persistedClips, setPersistedClips] = useState<{ id: string; format: string }[] | null>(null)
+  const [inventoryError, setInventoryError] = useState('')
 
   useEffect(() => {
     if (!desktop) return
@@ -68,6 +70,28 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
     return () => { active = false }
   }, [desktop, mac])
 
+  // Read the installed app's persistent clip directory at every Studio mount.
+  // Reopening MooBee can then show saved recordings without relying on a
+  // browser session or the previous component's in-memory state.
+  useEffect(() => {
+    if (!desktop) return
+    let mounted = true
+    void request<{ clips: { id: string; format: string }[] }>('/clips')
+      .then(data => { if (mounted) setPersistedClips(data.clips) })
+      .catch(cause => { if (mounted) setInventoryError('Cannot read saved clips: ' + (cause as Error).message) })
+    return () => { mounted = false }
+  }, [desktop])
+
+  async function refreshSavedClips() {
+    setInventoryError('')
+    try {
+      const result = await request<{ clips: { id: string; format: string }[] }>('/clips')
+      setPersistedClips(result.clips)
+    } catch (cause) {
+      setInventoryError('Cannot read saved clips: ' + (cause as Error).message)
+    }
+  }
+
   const useMp4 = mac && mp4Supported
   const canRecord = supportedDesktop && !!displayId && !loading && !busy
   const durations = useMp4 ? [4, 6, 8, 15, 30, 60, 120] : [4, 6, 8]
@@ -87,6 +111,7 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
           : { displayId: Number(displayId), seconds: duration }
       )
       setSaved(result)
+      await refreshSavedClips()
     } catch (cause) {
       setError('Native recording failed: ' + (cause as Error).message)
     } finally {
@@ -168,6 +193,17 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
         onClick={() => void stopCapture()}><Square size={15}/>{stopRequested ? 'Stopping and finalizing…' : 'Stop and save MP4'}</button>}
       <button className="secondary-button" type="button" onClick={openClips}><Film size={16}/>Open Clips</button>
     </div>
+    {desktop && <div className="clip-inventory-status">
+      <span>{persistedClips === null ? 'Saved clip inventory not checked'
+        : `${persistedClips.length} saved clip(s) found in MooBee's local storage`}</span>
+      {saved && persistedClips && <span>{persistedClips.some(clip => clip.id === saved.id)
+        ? 'Latest clip is present in local storage'
+        : 'Latest clip is not in the saved clip inventory; refresh or open Clips'}</span>}
+      <button className="secondary-button" type="button" disabled={busy} onClick={() => void refreshSavedClips()}>
+        Refresh saved clips
+      </button>
+      {inventoryError && <small role="alert">{inventoryError}</small>}
+    </div>}
     {!supportedDesktop && <p className="help-text">Native screen capture requires the Mac/Windows desktop application. Android and browser editions cannot record local desktop screens.</p>}
     {mac && !mp4Supported && desktop && <p className="help-text">
       {mp4AvailabilityReason} · Silent AVI capture remains available as a fallback.
