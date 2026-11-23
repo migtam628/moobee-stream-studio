@@ -15,7 +15,7 @@
     "desktop:build": "npm run tauri:build -w @moobee-live/desktop"
   },
   "devDependencies": {
-    "concurrently": "^9.2.1",
+    "concurrently": "^10.0.7",
     "playwright": "^1.65.1"
   },
   "engines": {
