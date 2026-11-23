@@ -63,6 +63,14 @@ export function assessNativeMp4(probe, { targetSeconds = 4, expectAudio = false,
   };
 }
 
+export function parseAudioPeakDbfs(log) {
+  const peak = String(log).match(/max_volume:\s*(-?(?:\d+(?:\.\d+)?|inf))\s*dB/i);
+  if (!peak) return null;
+  if (peak[1].toLowerCase() === '-inf') return -Infinity;
+  const value = Number(peak[1]);
+  return Number.isFinite(value) ? value : null;
+}
+
 export function parseOptions(argv) {
   const options = { file: '', targetSeconds: 4, expectAudio: false, expectAudible: false, stoppedEarly: false, report: '' };
   for (let i = 0; i < argv.length; i += 1) {
@@ -122,9 +130,8 @@ function run() {
         '-af', 'volumedetect', '-f', 'null', '-',
       ], { encoding: 'utf8', timeout: 120_000, maxBuffer: 4 * 1024 * 1024 });
       const output = String(result.stderr ?? '');
-      const peak = output.match(/max_volume:\s*(-?(?:\d+(?:\.\d+)?|inf))\s*dB/i);
-      if (!result.error && result.status === 0 && peak) {
-        const db = peak[1].toLowerCase() === '-inf' ? -Infinity : Number(peak[1]);
+      const db = parseAudioPeakDbfs(output);
+      if (!result.error && result.status === 0 && db !== null) {
         audioPeakDbfs = Number.isFinite(db) ? db : null;
         audioLevelMeasured = true;
         if (db < -50) {
