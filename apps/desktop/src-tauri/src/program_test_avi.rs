@@ -174,4 +174,28 @@ mod tests {
         assert!(check_program_test(&[0], 9).is_err());
         assert_eq!((TEST_FPS, TEST_WIDTH, TEST_HEIGHT), (10, 640, 360));
     }
+
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    #[test]
+    fn synthetic_two_display_composite_is_encoded_into_indexed_avi() {
+        use image::{codecs::jpeg::JpegEncoder, DynamicImage, Rgba, RgbaImage};
+        let first = RgbaImage::from_pixel(40, 40, Rgba([240, 0, 0, 255]));
+        let second = RgbaImage::from_pixel(40, 40, Rgba([0, 0, 240, 255]));
+        let frame = crate::scene_compositor::composite_grid(
+            &[first, second], TEST_WIDTH, TEST_HEIGHT
+        ).unwrap();
+        assert!(frame.get_pixel(160, 180)[0] > 200);
+        assert!(frame.get_pixel(480, 180)[2] > 200);
+        let mut jpeg = Vec::new();
+        JpegEncoder::new_with_quality(&mut jpeg, 72)
+            .encode_image(&DynamicImage::ImageRgb8(
+                DynamicImage::ImageRgba8(frame).to_rgb8()
+            )).unwrap();
+        let avi = crate::avi::encode_silent_mjpeg_avi(
+            &vec![jpeg; 20], TEST_WIDTH, TEST_HEIGHT, TEST_FPS
+        ).unwrap();
+        assert_eq!(&avi[0..4], b"RIFF");
+        assert_eq!(&avi[8..12], b"AVI ");
+        assert!(avi.windows(4).any(|bytes| bytes == b"idx1"));
+    }
 }
