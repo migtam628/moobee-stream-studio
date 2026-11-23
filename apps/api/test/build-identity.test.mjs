@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { formatBuildIdentity } from '../../../apps/web/src/buildIdentity.ts'
+import { formatBuildIdentity } from '../../../apps/web/src/buildLabel.ts'
 
 test('release builds show immutable release tag and commit for hardware acceptance', () => {
   assert.equal(formatBuildIdentity('0.3.9', 'release/v0.3.9-alpha.7', 'a12345678abcdef'),
