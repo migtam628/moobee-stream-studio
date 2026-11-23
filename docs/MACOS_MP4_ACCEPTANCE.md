@@ -6,6 +6,33 @@ This experiment adds a **native H.264 MP4 screen recorder on macOS 15+** with op
 
 The Rust command records for a user-selected maximum of **3–120 seconds** (or stops earlier when requested) into a private `.mp4.part` file and publishes the finished `.mp4` only after the ScreenCaptureKit completion delegate, bounded output-size checks, top-level MP4 box validation (`ftyp`, `moov`, non-empty `mdat`, and box sizes), and file synchronization. A successful command means the file was finalized, **not** that microphone/system audio was independently verified.
 
+## Screen Recording permission recovery (Sonoma 14.2)
+
+If a capture fails with `com.apple.ScreenCaptureKit.SCStreamErrorDomain:-3801`
+or `The user declined TCCs for application, window, display capture`,
+the immediate blocker is **macOS Screen Recording consent**, not proof of a
+codec or AVAssetWriter failure.
+
+1. Quit MooBee completely. Go to **System Settings → Privacy & Security →
+   Screen Recording** (later macOS may label it Screen & System Audio Recording).
+2. Enable **MooBee Stream Studio**. If already enabled, switch it off and on,
+   then quit and reopen MooBee from **/Applications**.
+3. If no MooBee entry appears, or the stale consent persists, first verify its
+   installed bundle ID: `defaults read "/Applications/MooBee Stream Studio.app/Contents/Info" CFBundleIdentifier`.
+   The expected ID is `com.mttechservices.moobeestreamstudio`.
+4. Only after verifying that ID, reset **MooBee's** screen-capture consent:
+   `tccutil reset ScreenCapture com.mttechservices.moobeestreamstudio`.
+   This does not grant access; it clears the decision so macOS can prompt again.
+   Do **not** use `tccutil reset ScreenCapture` without an app ID, which resets
+   unrelated applications' access.
+5. Reopen MooBee, allow Screen Recording when macOS prompts, and retry a
+   15-second silent MP4. If the exact -3801 error persists, note whether the
+   new beta binary was launched from /Applications or another folder and
+   preserve the error string.
+
+The Studio recovery panel now recognizes -3801 and offers a shortcut to the
+macOS Screen Recording privacy settings. It cannot bypass TCC or grant access.
+
 ## Sonoma 14.2 first-party MP4 fallback (experimental)
 
 macOS 14 does **not** provide `SCRecordingOutput`. MooBee's experimental
