@@ -148,6 +148,7 @@ jobs:
         if: runner.os == 'macOS'
         working-directory: apps/desktop/src-tauri
         run: cargo test --lib mp4_validation::tests
+          cargo test --lib scene_compositor::tests
       - name: Build desktop installer
         uses: tauri-apps/tauri-action@v1
         env:
