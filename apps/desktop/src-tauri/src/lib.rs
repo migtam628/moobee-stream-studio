@@ -226,6 +226,27 @@ async fn native_service_diagnostics() -> NativeServiceReport {
     }
 }
 
+/// Open the exact Apple Screen Recording privacy settings panel.
+/// This cannot grant permission; only the local user can enable MooBee.
+#[tauri::command]
+fn open_screen_recording_settings() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let status = std::process::Command::new("/usr/bin/open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+            .status()
+            .map_err(|error| format!("Unable to open Screen Recording settings: {error}"))?;
+        if !status.success() {
+            return Err("macOS could not open Screen Recording settings. Open System Settings > Privacy & Security > Screen Recording manually.".into());
+        }
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err("Screen Recording privacy settings are only available on macOS".into())
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let (sender, _) = broadcast::channel(100);
@@ -237,7 +258,7 @@ pub fn run() {
             tauri::async_runtime::spawn(serve_overlays(runner_state));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![emit_test_alert, list_displays, capture_display, clip::capture_test_clip, clip::list_test_clips, clip::read_test_clip, clip::reveal_test_clip, capture_probe::probe_native_capture, native_avi::capture_silent_avi, macos_mp4::capture_macos_mp4, macos_mp4::stop_macos_mp4, macos_mp4::macos_mp4_availability, native_service_diagnostics])
+        .invoke_handler(tauri::generate_handler![emit_test_alert, list_displays, capture_display, clip::capture_test_clip, clip::list_test_clips, clip::read_test_clip, clip::reveal_test_clip, capture_probe::probe_native_capture, native_avi::capture_silent_avi, macos_mp4::capture_macos_mp4, macos_mp4::stop_macos_mp4, macos_mp4::macos_mp4_availability, native_service_diagnostics, open_screen_recording_settings])
         .run(tauri::generate_context!())
         .expect("failed to run MooBee Live desktop");
 }
