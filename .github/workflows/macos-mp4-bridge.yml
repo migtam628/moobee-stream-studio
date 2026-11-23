@@ -39,7 +39,8 @@ jobs:
           SDK="$(xcrun --sdk macosx --show-sdk-path)"
           xcrun swiftc -swift-version 5 -parse-as-library -typecheck \
             -target "${{ matrix.swift_target }}" -sdk "$SDK" \
-            apps/desktop/src-tauri/swift/MooBeeScreenRecording.swift
+            apps/desktop/src-tauri/swift/MooBeeScreenRecording.swift \
+            apps/desktop/src-tauri/swift/MooBeeSonomaRecording.swift
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
