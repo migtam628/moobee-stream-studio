@@ -196,6 +196,10 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      # Cache downloaded Gradle plugins, Kotlin and Maven coordinates across
+      # new release branches; this reduces cold-start Maven Central traffic.
+      - name: Configure Gradle dependency caching
+        uses: gradle/actions/setup-gradle@v4
       - uses: android-actions/setup-android@v4
       - name: Install Android toolchain
         run: |
@@ -211,9 +215,32 @@ jobs:
       - name: Generate Tauri Android project
         working-directory: apps/desktop
         run: npx tauri android init --ci
-      - name: Build Android debug-signed APK
+      - name: Build Android debug-signed APK (retry only transient Maven 429)
         working-directory: apps/desktop
-        run: npx tauri android build --apk --debug --target aarch64 --ci
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$(mktemp)"
+          trap 'rm -f "$log"' EXIT
+          for attempt in 1 2 3; do
+            echo "Android debug APK build attempt $attempt/3"
+            if npx tauri android build --apk --debug --target aarch64 --ci 2>&1 | tee "$log"; then
+              exit 0
+            fi
+            # Re-run only rate-limited Maven/Gradle dependency resolution.
+            # Compilation, configuration and signing errors must fail immediately.
+            if ! grep -Eqi 'Received status code 429|HTTP[[:space:]]*429|429 Too Many Requests|status code:[[:space:]]*429' "$log"; then
+              echo "::error::Android build failed for a non-throttling reason."
+              exit 1
+            fi
+            if [[ "$attempt" -eq 3 ]]; then
+              echo "::error::Android dependencies still rate-limited after bounded retries."
+              exit 1
+            fi
+            delay=$((30 * attempt))
+            echo "::warning::Transient dependency HTTP 429; retrying in ${delay}s."
+            sleep "$delay"
+          done
       - name: Collect installable debug APK
         run: |
           mkdir -p release-assets
