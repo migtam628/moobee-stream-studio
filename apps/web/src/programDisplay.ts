@@ -38,3 +38,42 @@ export function singleProgramDisplayId(collection: unknown): number {
   if (!Number.isSafeInteger(id)) throw new Error('Invalid Program display selection')
   return id
 }
+
+/** Resolve up to four enabled display sources from the selected Program scene.
+ * This is a bounded silent AVI diagnostic; it does not record webcam, alerts,
+ * microphone or synchronized audio. Never capture the Studio Preview scene.
+ */
+export function programTestDisplayIds(collection: unknown): number[] {
+  if (!collection || typeof collection !== 'object') {
+    throw new Error('No current Program scene is available')
+  }
+  const state = collection as Partial<MinimalSceneCollection>
+  if (typeof state.currentScene !== 'string' || !Array.isArray(state.scenes)) {
+    throw new Error('Invalid Program scene state')
+  }
+  const program = state.scenes.find(scene => scene?.name === state.currentScene)
+  if (!program || !Array.isArray(program.sources)) {
+    throw new Error('The selected Program scene could not be found')
+  }
+  const enabled = program.sources.filter(source => source?.enabled)
+  if (enabled.length < 1 || enabled.length > 4) {
+    throw new Error('Composited AVI test requires one to four enabled display sources in Program')
+  }
+  if (enabled.some(source => source.kind !== 'display')) {
+    throw new Error('Composited AVI test supports displays only; camera, overlays and audio are not recorded')
+  }
+  const ids = enabled.map(source => {
+    if (typeof source.deviceId !== 'string' || !/^(0|[1-9]\\d{0,1})$/.test(source.deviceId)) {
+      throw new Error('Invalid Program display identifier')
+    }
+    const id = Number(source.deviceId)
+    if (!Number.isSafeInteger(id) || id > 24) {
+      throw new Error('Invalid Program display identifier')
+    }
+    return id
+  })
+  if (new Set(ids).size !== ids.length) {
+    throw new Error('A display may appear only once in the composed AVI test')
+  }
+  return ids
+}
