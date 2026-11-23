@@ -1,3 +1,29 @@
+# MooBee Stream Studio v0.3.9-alpha.7 — Native Multi-Display Preview & Exact Build Identity
+
+**Experimental prerelease, not full Program recording or livestreaming.**
+
+## Improvements over alpha.6
+
+- Added a first-party native **still-frame compositor** for Mac and Windows that captures up to four enabled display sources and arranges them into a bounded 960×540 composite PNG. It preserves aspect ratios and runs off the Tauri UI thread.
+- Studio Preview and Program now request all enabled display sources in the selected scene instead of silently displaying only the first screen. Native capture errors are shown; the preview still refreshes approximately every five seconds.
+- Added pixel-level Rust tests for two-display composition, letterboxing, and rejecting invalid source counts/IDs. The browser UI and native build are covered by existing CI checks.
+- Sidebar and Settings now show the actual GitHub release tag and commit identifier built into the app, rather than reporting every experimental installer simply as `0.3.9 (DEV)`. Local and PR builds remain visibly marked as development builds.
+- Includes all alpha.6 reliability improvements: measured MP4 duration rather than requested maximum, improved saved-clip persistence inventory, and independent audio-level verification scripts.
+
+## Hardware acceptance (do not infer from CI)
+
+1. Install ARM64 DMG on macOS 14.2, quit the previous instance, and verify sidebar/Settings show the alpha.7 release tag and short commit.
+2. In Studio, create a scene with **two enabled display sources**, when two displays are available. Confirm both appear side-by-side in the still preview, while the Program and Preview selection behave correctly in Studio Mode. Do not claim multi-source acceptance on a single-display Mac.
+3. Disable one source and confirm the remaining preview fills the canvas without distorted aspect ratio. Deny Screen Recording to confirm the app shows a capture error rather than falsely indicating live output.
+4. Recheck a single-display MP4, then a 60-second maximum recording stopped at ~15 seconds. Validate actual duration, playback/seeking, and clip inventory after restarting the application.
+5. Record system audio from a permitted audible source and verify the recorded AAC track independently. A merely present audio track does not establish audible content or synchronization.
+
+## Beta blockers
+
+This compositor generates **still frames, not a continuously synchronized video stream**. Real Program composition (camera and overlays), a sustained H.264/AAC scene recorder, live audio mixer, RTMP/RTMPS, secure credentials and real-device acceptance remain unfinished. Keep the main **Record** and **Go Live** controls disabled.
+
+---
+
 # MooBee Stream Studio v0.3.9-alpha.6 — Measured Recording Duration & Beta Acceptance Tools
 
 **Experimental prerelease.** This update hardens the working first-party macOS H.264 MP4 recording workflow on Sonoma 14.2; it is not full Program recording or RTMP broadcasting.
