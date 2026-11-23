@@ -7,6 +7,8 @@ type NativeReport = {
   displayEnumerationError: string | null
   overlayHealthResponding: boolean
   nativeMp4Supported: boolean
+  nativeMp4OsVersion: string | null
+  nativeMp4Reason: string
   nativeRecordingVerified: boolean
   audioMixerAvailable: boolean
   sceneCompositorAvailable: boolean
@@ -62,9 +64,8 @@ export default function ServiceDiagnostics({ sceneConnected }: { sceneConnected:
     {
       name: 'macOS H.264 recorder',
       status: report?.nativeMp4Supported ? 'Available to test' : 'Not available',
-      detail: report?.nativeMp4Supported
-        ? 'ScreenCaptureKit backend available on this Mac; user recording/playback and audio are not yet verified'
-        : 'Requires macOS 15+ on a supported Mac; Windows MP4 is not implemented',
+      detail: report?.nativeMp4Reason ||
+        'Run native diagnostics to determine whether this Mac meets the system requirement or whether the recorder bridge has failed',
       ready: false
     },
     {
