@@ -174,6 +174,20 @@ private func recordNativeMP4(
 
 /// Separate the app-shell OS requirement from the newer native MP4 API.
 /// Never infer macOS versions from browser WebKit user-agent strings.
+/// The native runtime, not browser user-agent heuristics, supplies the exact
+/// macOS version used to decide whether ScreenCaptureKit MP4 is available.
+@_cdecl("moobee_macos_os_version")
+public func moobee_macos_os_version(
+    _ major: UnsafeMutablePointer<Int32>?,
+    _ minor: UnsafeMutablePointer<Int32>?,
+    _ patch: UnsafeMutablePointer<Int32>?
+) {
+    let version = ProcessInfo.processInfo.operatingSystemVersion
+    major?.pointee = Int32(version.majorVersion)
+    minor?.pointee = Int32(version.minorVersion)
+    patch?.pointee = Int32(version.patchVersion)
+}
+
 @_cdecl("moobee_macos_mp4_supported")
 public func moobee_macos_mp4_supported() -> Int32 {
     if #available(macOS 15.0, *) {
