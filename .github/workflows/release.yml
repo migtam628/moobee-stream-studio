@@ -63,6 +63,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - name: Audit beta blockers (informational; beta publishing remains disabled)
+        run: node scripts/check-beta-readiness.mjs
       - run: npm run build
       - uses: dtolnay/rust-toolchain@stable
       - name: Install FFmpeg for CI-only media verification
