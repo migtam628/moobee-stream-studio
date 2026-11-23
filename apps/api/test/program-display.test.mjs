@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { singleProgramDisplayId } from '../../../apps/web/src/programDisplay.ts'
+import { singleProgramDisplayId, programTestDisplayIds } from '../../../apps/web/src/programDisplay.ts'
 
 const state = {
   studioMode: true,
@@ -33,4 +33,31 @@ test('rejects unavailable or invalid Program scenes', () => {
     { kind: 'display', deviceId: '../../etc/passwd', enabled: true }
   ] }] }
   assert.throws(() => singleProgramDisplayId(invalid), /identifier is invalid/)
+})
+
+
+test('composed Program AVI selects active Program displays, never Preview', () => {
+  const two = structuredClone(state)
+  two.scenes[0].sources.push({ id: 9, kind: 'display', deviceId: '1', enabled: true })
+  assert.deepEqual(programTestDisplayIds(two), [0, 1])
+  assert.deepEqual(programTestDisplayIds(state), [0])
+})
+
+test('composed Program AVI rejects missing, duplicate and unsupported sources', () => {
+  const empty = structuredClone(state)
+  empty.scenes[0].sources = []
+  assert.throws(() => programTestDisplayIds(empty), /one to four/)
+  const duplicate = structuredClone(state)
+  duplicate.scenes[0].sources.push({ id: 9, kind: 'display', deviceId: '0', enabled: true })
+  assert.throws(() => programTestDisplayIds(duplicate), /only once/)
+  const unsupported = structuredClone(state)
+  unsupported.scenes[0].sources.push({ id: 10, kind: 'camera', deviceId: '1', enabled: true })
+  assert.throws(() => programTestDisplayIds(unsupported), /displays only/)
+  const invalid = structuredClone(state)
+  invalid.scenes[0].sources[0].deviceId = '../../secret'
+  assert.throws(() => programTestDisplayIds(invalid), /Invalid Program/)
+  const tooMany = structuredClone(state)
+  tooMany.scenes[0].sources = [0, 1, 2, 3, 4].map((i) =>
+    ({ id: i + 10, kind: 'display', deviceId: String(i), enabled: true }))
+  assert.throws(() => programTestDisplayIds(tooMany), /one to four/)
 })
