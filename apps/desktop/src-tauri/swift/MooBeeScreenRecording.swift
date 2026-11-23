@@ -281,7 +281,13 @@ public func moobee_macos_record_mp4(
             }
             result.complete(nil)
         } catch {
-            result.complete(error.localizedDescription)
+            // Preserve domain/code and OSStatus for errors that have only a
+            // generic localizedDescription ("operation could not complete").
+            // This stays on the local device; no capture data is uploaded.
+            let native = error as NSError
+            let underlying = native.userInfo[NSUnderlyingErrorKey] as? NSError
+            let details = underlying.map { " underlying=\($0.domain):\($0.code)" } ?? ""
+            result.complete("\(native.domain):\(native.code) — \(native.localizedDescription)\(details)")
         }
     }
 
