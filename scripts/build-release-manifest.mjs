@@ -6,7 +6,11 @@ import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative, basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-export function manifestForArtifacts(dir, tag, commit) {
+export function manifestForArtifacts(dir, tag, commit, options = {}) {
+  const androidThrottled = options.androidThrottled === true
+  if (androidThrottled && !/^v\d+\.\d+\.\d+-alpha\.\d+$/.test(tag)) {
+    throw new Error('Only experimental alpha releases can omit an Android test APK due to Maven HTTP 429')
+  }
   if (!/^v\d+\.\d+\.\d+-(alpha|beta|rc)\.\d+$/.test(tag)) {
     throw new Error('A valid prerelease tag is required')
   }
@@ -37,9 +41,16 @@ export function manifestForArtifacts(dir, tag, commit) {
     /^macos-x64-.*\.dmg$/,
     /^windows-x64-.*setup\.exe$/,
     /^linux-x64-.*\.deb$/,
-    /^moobee-stream-studio-android-arm64-debug\.apk$/,
     /^moobee-stream-studio-web-.*\.tar\.gz$/
   ]
+  const androidPattern = /^moobee-stream-studio-android-arm64-debug\.apk$/
+  const hasAndroid = artifacts.some(item => androidPattern.test(item.name))
+  if (!hasAndroid && !androidThrottled) {
+    throw new Error('Missing required alpha artifact: Android debug APK')
+  }
+  if (hasAndroid && androidThrottled) {
+    throw new Error('Android throttling override is invalid when an APK is present')
+  }
   for (const pattern of required) {
     if (!artifacts.some(item => pattern.test(item.name))) {
       throw new Error(`Missing required alpha artifact: ${pattern}`)
@@ -53,15 +64,25 @@ export function manifestForArtifacts(dir, tag, commit) {
     installableAppUpdateSigned: false,
     hardwareAcceptanceVerified: false,
     generatedAt: new Date().toISOString(),
+    // An alpha missing the optional Android *test* package must disclose it.
+    partialPlatformDistribution: !hasAndroid,
+    unavailableTargets: hasAndroid ? [] : [{
+      target: 'android-arm64-debug',
+      reason: 'Maven Central HTTP 429 dependency throttling during Android build',
+      installable: false
+    }],
     artifacts
   }
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   try {
-    const [dir, tag, sha] = process.argv.slice(2)
+    const [dir, tag, sha, flag] = process.argv.slice(2)
+    if (flag && flag !== '--android-throttled') throw new Error('Unknown release manifest option')
     if (!dir || !tag || !sha) throw new Error('Usage: node scripts/build-release-manifest.mjs release-assets v0.3.8-alpha.2 COMMIT_SHA')
-    process.stdout.write(JSON.stringify(manifestForArtifacts(dir, tag, sha), null, 2) + '\n')
+    process.stdout.write(JSON.stringify(manifestForArtifacts(dir, tag, sha, {
+      androidThrottled: flag === '--android-throttled'
+    }), null, 2) + '\n')
   } catch (error) {
     console.error((error instanceof Error ? error.message : String(error)))
     process.exitCode = 1
