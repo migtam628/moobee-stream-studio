@@ -148,6 +148,8 @@ pub struct MacOsMp4Availability {
     pub(crate) os_version: Option<String>,
     pub(crate) reason: String,
     required_macos: &'static str,
+    microphone_supported: bool,
+    engine: &'static str,
 }
 
 #[tauri::command]
@@ -160,22 +162,31 @@ pub fn macos_mp4_availability() -> MacOsMp4Availability {
         unsafe { moobee_macos_os_version(&mut major, &mut minor, &mut patch); }
         let os_version = format!("{major}.{minor}.{patch}");
         let supported = unsafe { moobee_macos_mp4_supported() == 1 };
-        let reason = if supported {
-            "Native ScreenCaptureKit MP4 backend is available to test; recording and audio still require device verification".to_owned()
-        } else if major < 15 {
-            format!("This Mac is running macOS {os_version}; native MP4 requires macOS 15 or newer")
+        let engine = if major >= 15 { "screen-capture-kit-native" }
+            else if major >= 14 { "sonoma-avassetwriter" } else { "unavailable" };
+        let reason = if supported && major >= 15 {
+            "ScreenCaptureKit H.264 MP4 backend available to test; device playback/audio not yet verified".to_owned()
+        } else if supported && major == 14 {
+            "macOS Sonoma MP4 fallback (ScreenCaptureKit frames + AVAssetWriter H.264) available to test; microphone recording requires macOS 15+".to_owned()
+        } else if major < 14 {
+            format!("macOS {os_version} is below the native MP4 minimum of macOS 14")
         } else {
-            format!("macOS {os_version} meets the version requirement, but the native Swift recorder reports unavailable; inspect the bundled bridge")
+            format!("macOS {os_version} meets the version requirement, but the native recorder bridge is unavailable; inspect the bundled Swift adapter")
         };
-        MacOsMp4Availability { supported, os_version: Some(os_version), reason, required_macos: "15.0" }
+        MacOsMp4Availability {
+            supported, os_version: Some(os_version), reason, required_macos: "14.0",
+            microphone_supported: supported && major >= 15, engine,
+        }
     }
     #[cfg(not(target_os = "macos"))]
     {
         MacOsMp4Availability {
             supported: false,
             os_version: None,
-            reason: "Native ScreenCaptureKit MP4 recording is supported only on macOS 15+".to_owned(),
-            required_macos: "15.0",
+            reason: "Native MP4 recording is implemented for macOS 14+ only".to_owned(),
+            required_macos: "14.0",
+            microphone_supported: false,
+            engine: "unavailable",
         }
     }
 }
