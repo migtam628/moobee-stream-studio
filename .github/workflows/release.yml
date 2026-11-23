@@ -235,12 +235,22 @@ jobs:
             fi
             if [[ "$attempt" -eq 3 ]]; then
               echo "::error::Android dependencies still rate-limited after bounded retries."
+              # The only allowed exception to complete alpha publication.
+              # An independent release job validates this exact marker.
+              printf '{"schemaVersion":1,"reason":"maven-http-429","target":"android-arm64-debug"}\n' > ../../android-dependency-throttle.json
               exit 1
             fi
             delay=$((30 * attempt))
             echo "::warning::Transient dependency HTTP 429; retrying in ${delay}s."
             sleep "$delay"
           done
+      - name: Publish verifiable Android dependency throttle marker
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-dependency-throttle
+          path: android-dependency-throttle.json
+          if-no-files-found: ignore
       - name: Collect installable debug APK
         run: |
           mkdir -p release-assets
@@ -254,7 +264,7 @@ jobs:
 
   publish:
     name: Publish alpha prerelease
-    if: ${{ always() && startsWith(github.ref, 'refs/heads/release/') && needs.verify.result == 'success' && needs.web.result == 'success' && needs.desktop.result == 'success' && needs.android.result == 'success' }}
+    if: ${{ always() && startsWith(github.ref, 'refs/heads/release/') && needs.verify.result == 'success' && needs.web.result == 'success' && needs.desktop.result == 'success' && (needs.android.result == 'success' || needs.android.result == 'failure') }}
     needs: [verify, web, desktop, android]
     runs-on: ubuntu-24.04
     permissions:
@@ -267,17 +277,62 @@ jobs:
       - name: Publish standalone prerelease and checksums
         env:
           GH_TOKEN: ${{ github.token }}
+          ANDROID_JOB_RESULT: ${{ needs.android.result }}
         run: |
+          set -euo pipefail
           TAG="${GITHUB_REF_NAME#release/}"
           case "$TAG" in v*) ;; *) echo 'Release branch must be named release/v*' >&2; exit 1 ;; esac
+          ANDROID_THROTTLED=false
+          manifest_args=()
+          if [[ "$ANDROID_JOB_RESULT" == 'failure' ]]; then
+            MARKER="$(find release-assets -type f -name 'android-dependency-throttle.json' -print -quit)"
+            test -n "$MARKER" && test -s "$MARKER" || {
+              echo "::error::Android failed without a verified Maven 429 marker. Refusing incomplete alpha."
+              exit 1
+            }
+            MARKER_FILE="$MARKER" node -e '
+              const fs = require("node:fs");
+              const marker = JSON.parse(fs.readFileSync(process.env.MARKER_FILE, "utf8"));
+              if (marker.schemaVersion !== 1 || marker.reason !== "maven-http-429" ||
+                  marker.target !== "android-arm64-debug") {
+                throw new Error("Invalid Android throttling evidence; refusing incomplete release");
+              }
+            '
+            rm -f "$MARKER"
+            if find release-assets -type f -name 'moobee-stream-studio-android-arm64-debug.apk' -print -quit | grep -q .; then
+              echo "::error::Android APK exists but build is recorded as failed."
+              exit 1
+            fi
+            ANDROID_THROTTLED=true
+            manifest_args+=(--android-throttled)
+            echo "::warning::Publishing an explicitly partial experimental alpha without Android test APK after verified Maven HTTP 429."
+          elif [[ "$ANDROID_JOB_RESULT" != 'success' ]]; then
+            echo "::error::Android job was not completed: $ANDROID_JOB_RESULT"
+            exit 1
+          fi
           mapfile -d '' FILES < <(find release-assets -type f -print0)
           test "${#FILES[@]}" -ge 5
           for expected in macos-arm64 macos-x64 windows-x64 linux-x64; do
             find release-assets -type f -name "${expected}-*" -print -quit | grep -q . || { echo "Missing installer for ${expected}"; exit 1; }
           done
-          find release-assets -type f -name 'moobee-stream-studio-android-arm64-debug.apk' -print -quit | grep -q . || { echo "Missing Android APK"; exit 1; }
+          if [[ "$ANDROID_THROTTLED" != 'true' ]]; then
+            find release-assets -type f -name 'moobee-stream-studio-android-arm64-debug.apk' -print -quit | grep -q . || {
+              echo "Missing Android APK without verified Maven 429 exception"; exit 1;
+            }
+          fi
           find release-assets -type f -name 'moobee-stream-studio-web-*.tar.gz' -print -quit | grep -q . || { echo "Missing web distribution"; exit 1; }
-          node scripts/build-release-manifest.mjs release-assets "$TAG" "$GITHUB_SHA" > RELEASE-MANIFEST.json
+          node scripts/build-release-manifest.mjs release-assets "$TAG" "$GITHUB_SHA" "${manifest_args[@]}" > RELEASE-MANIFEST.json
+          cp docs/RELEASE_NOTES.md RELEASE-NOTES.txt
+          if [[ "$ANDROID_THROTTLED" == 'true' ]]; then
+            printf '%s\n' \
+              '' '## Android package not included in this experimental release' \
+              '' 'The optional Android ARM64 debug APK was not built because Maven Central returned' \
+              'HTTP 429 on dependency downloads after three bounded attempts. This release contains' \
+              'Mac ARM64/Intel, Windows x64, Linux x64 and web archives only. The signedness and' \
+              'hardware acceptance of these experimental packages are unchanged. The manifest' \
+              'explicitly identifies Android as unavailable; do not substitute another build tag.' \
+              >> RELEASE-NOTES.txt
+          fi
           while IFS= read -r -d '' file; do
             ( cd "$(dirname "$file")" && sha256sum "$(basename "$file")" )
           done < <(find release-assets -type f -print0 | sort -z) > SHA256SUMS.txt
@@ -292,6 +347,6 @@ jobs:
           gh release create "$TAG" "${FILES[@]}" RELEASE-MANIFEST.json SHA256SUMS.txt \
             --target "$GITHUB_SHA" \
             --title "MooBee Stream Studio $TAG — Standalone Capture Alpha" \
-            --notes-file docs/RELEASE_NOTES.md \
+            --notes-file RELEASE-NOTES.txt \
             --prerelease
 
