@@ -190,9 +190,9 @@ public func moobee_macos_os_version(
 
 @_cdecl("moobee_macos_mp4_supported")
 public func moobee_macos_mp4_supported() -> Int32 {
-    if #available(macOS 15.0, *) {
-        return 1
-    }
+    // macOS 15 uses SCRecordingOutput. Sonoma 14 uses AVAssetWriter and
+    // SCStreamOutput to encode/mux H.264 in-process (hardware acceptance pending).
+    if #available(macOS 14.0, *) { return 1 }
     return 0
 }
 
@@ -247,8 +247,8 @@ public func moobee_macos_record_mp4(
         copyError("Native recorder requires a private temporary MP4 path", to: errorText, size: errorLength)
         return -1
     }
-    guard #available(macOS 15.0, *) else {
-        copyError("Native MP4 requires macOS 15 or newer", to: errorText, size: errorLength)
+    guard #available(macOS 14.0, *) else {
+        copyError("Native MP4 requires macOS 14 or newer", to: errorText, size: errorLength)
         return -1
     }
 
@@ -257,13 +257,24 @@ public func moobee_macos_record_mp4(
     Task { @MainActor in
         defer { recordingStopControl.end() }
         do {
-            try await recordNativeMP4(
-                url: URL(fileURLWithPath: filePath),
-                displayID: displayID,
-                seconds: Int(durationSeconds),
-                systemAudio: systemAudio != 0,
-                microphone: microphone != 0
-            )
+            if #available(macOS 15.0, *) {
+                try await recordNativeMP4(
+                    url: URL(fileURLWithPath: filePath),
+                    displayID: displayID,
+                    seconds: Int(durationSeconds),
+                    systemAudio: systemAudio != 0,
+                    microphone: microphone != 0
+                )
+            } else if #available(macOS 14.0, *) {
+                try await recordSonomaMP4(
+                    url: URL(fileURLWithPath: filePath),
+                    displayID: displayID,
+                    seconds: Int(durationSeconds),
+                    systemAudio: systemAudio != 0,
+                    microphone: microphone != 0,
+                    shouldStop: { recordingStopControl.shouldStop() }
+                )
+            }
             result.complete(nil)
         } catch {
             result.complete(error.localizedDescription)
