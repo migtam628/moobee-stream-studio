@@ -112,3 +112,12 @@
 .service-state-pending{color:#b8aec1;background:#292633}
 .service-diagnostics-row small{flex:1 1 100%;font-size:11px;color:#a9a0b5;line-height:1.45}
 @media(max-width:700px){.service-diagnostics-list{grid-template-columns:1fr}.service-diagnostics{padding:13px}}
+
+/* Recovery for macOS ScreenCaptureKit -3801 (TCC privacy denial).
+   Do not imply MooBee can grant the OS permission itself. */
+.capture-permission-help{display:flex;flex-direction:column;align-items:flex-start;gap:10px;
+  padding:14px 16px;border:1px solid #9d7653;border-radius:9px;background:#2c241f;
+  color:#f5dfc5;font-size:12px;line-height:1.55}
+.capture-permission-help strong{font-size:13px}
+.capture-permission-help p{margin:0;max-width:850px}
+.capture-permission-help small{color:#dfbfa4;line-height:1.55}
