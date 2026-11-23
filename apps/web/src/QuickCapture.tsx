@@ -17,6 +17,10 @@ type CapturedFile = {
   displayCount?: number
   elapsedMs?: number
   measuredSamplingFps?: number
+  sourceFramesReceived?: number[]
+  repeatedSourceSlots?: number[]
+  lateOutputFrames?: number
+  maxSourceArrivalSkewMs?: number
 }
 
 /**
@@ -142,7 +146,7 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
     }
   }
 
-  async function captureProgramAviTest() {
+  async function captureProgramAviTest(mode: 'sampled' | 'continuous' = 'sampled') {
     if (!supportedDesktop || loading || busy) return
     setBusy(true)
     setCaptureMode('program')
@@ -155,13 +159,14 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
       if (displayIds.some(id => !displays.some(display => display.id === id))) {
         throw new Error('One of the Program displays is disconnected. Refresh displays and check the scene.')
       }
-      const result = await request<CapturedFile>('/clips/capture-program-test-avi', {
+      const result = await request<CapturedFile>(mode === 'continuous'
+        ? '/clips/capture-program-continuous-avi' : '/clips/capture-program-test-avi', {
         displayIds, seconds: programAviDuration
       })
       setSaved(result)
       await refreshSavedClips()
     } catch (cause) {
-      setError('Program AVI test failed: ' + (cause as Error).message)
+      setError((mode === 'continuous' ? 'Continuous Program input' : 'Program AVI') + ' test failed: ' + (cause as Error).message)
     } finally {
       setBusy(false)
       setCaptureMode(null)
@@ -240,9 +245,11 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
           </select>
         </label>
         <button type="button" className="secondary-button" disabled={busy || loading}
-          onClick={() => void captureProgramAviTest()}><Video size={16}/>{busy ? 'Native capture in progress…' : 'Capture Program AVI test'}</button>
+          onClick={() => void captureProgramAviTest('sampled')}><Video size={16}/>{busy ? 'Native capture in progress…' : 'Sampled Program AVI'}</button>
+        <button type="button" className="secondary-button" disabled={busy || loading}
+          onClick={() => void captureProgramAviTest('continuous')}><Video size={16}/>{busy ? 'Native capture in progress…' : 'Continuous-source Program AVI'}</button>
       </div>
-      <small className="help-text">Native screenshots are sampled sequentially; capture can run slower than nominal AVI playback time. Saved output requires independent decode/playback verification. Camera, microphone, audio mixing, alerts, transforms and RTMPS are not included.</small>
+      <small className="help-text">Compare the sampled-screenshot test with the continuous native-frame input test. Both produce silent 640×360 nominal 10fps AVIs and may fall behind wall-clock time. Continuous source frames are received asynchronously but have no native PTS or synchronization guarantee. Neither includes camera, microphone, overlays, audio mixing, scene transitions or RTMPS.</small>
     </div>}
     {useMp4 && <div className="quick-capture-options">
       <label className="quick-capture-check"><input type="checkbox" checked={systemAudio} disabled={busy}
@@ -305,6 +312,13 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
           {typeof saved.measuredSamplingFps === 'number' ? ` ${saved.measuredSamplingFps.toFixed(1)} fps measured sampling` : ' capture performance unknown'} ·
           {saved.elapsedMs !== undefined ? ` ${(saved.elapsedMs / 1000).toFixed(2)}s wall-clock capture` : ' elapsed time unknown'}.
           AVI playback duration may differ from wall-clock capture time when frames arrive late.
+        </p>}
+        {saved.sourceFramesReceived && <p className="help-text" role="status">
+          Continuous native frame input · received per source: {saved.sourceFramesReceived.join(', ')} ·
+          repeated input slots: {saved.repeatedSourceSlots?.join(', ') ?? 'unknown'} ·
+          late composite frames: {saved.lateOutputFrames ?? 'unknown'} ·
+          max source arrival skew: {saved.maxSourceArrivalSkewMs ?? 'unknown'}ms.
+          Arrival-time skew is not native capture timestamp synchronization.
         </p>}
         <code>{saved.path}</code>
         <div className="clip-actions">
