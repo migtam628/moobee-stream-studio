@@ -73,25 +73,32 @@ function formatElapsed(seconds: number) {
 
 function ScenePreview({ status, label, previewScene }: { status: StudioStatus; label: string; previewScene: string }) {
   const [image, setImage] = useState('')
+  const [previewError, setPreviewError] = useState('')
   useEffect(() => {
     if (!status.connected || !previewScene) { setImage(''); return }
     let cancelled = false
     async function load() {
       try {
         const response = await request<{ image: string }>(`/studio/snapshot?scene=${encodeURIComponent(previewScene)}`)
-        if (!cancelled) setImage(response.image)
-      } catch { if (!cancelled) setImage('') }
+        if (!cancelled) { setImage(response.image ?? ''); setPreviewError('') }
+      } catch (error) {
+        if (!cancelled) {
+          setImage('')
+          setPreviewError((error as Error).message || 'Could not render native scene still preview')
+        }
+      }
     }
     void load()
     const timer = setInterval(() => void load(), 5000)
     return () => { cancelled = true; clearInterval(timer) }
   }, [previewScene, status.connected])
   return <div className="preview-block">
-    <div className="preview-heading"><span><Monitor size={15}/>{label}</span><span>{status.connected ? 'Native screenshot · every 5 sec' : 'Local studio offline'}</span></div>
+    <div className="preview-heading"><span><Monitor size={15}/>{label}</span><span>{status.connected ? 'Composite still preview · every 5 sec' : 'Local studio offline'}</span></div>
     <div className="preview-canvas">
       {image ? <img src={image} alt={`MooBee scene: ${previewScene}`} /> : <div className="preview-empty"><Radio size={34}/><strong>{status.connected ? 'No preview available' : 'Your stream starts here'}</strong><span>{status.connected ? 'Add or enable a display source in this scene' : 'Add a native display source to preview this scene'}</span></div>}
       {status.streaming && <span className="live-flag">LIVE</span>}
     </div>
+    {previewError && <small className="preview-error" role="status">{previewError}</small>}
   </div>
 }
 
