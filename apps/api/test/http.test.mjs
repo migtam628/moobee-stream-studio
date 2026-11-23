@@ -138,3 +138,13 @@ test('web API cannot claim native composited Program AVI recording', async () =>
   const data = await response.json();
   assert.match(data.error, /installed Mac\/Windows app/);
 });
+
+test('web control API explicitly refuses continuous native Program capture', async () => {
+  const response = await fetch(root + '/api/clips/capture-program-continuous-avi', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ displayIds: [0, 1], seconds: 4 })
+  });
+  assert.equal(response.status, 501);
+  const payload = await response.json();
+  assert.match(payload.error, /installed Mac\/Windows application/);
+});
