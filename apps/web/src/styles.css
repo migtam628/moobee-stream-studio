@@ -97,3 +97,18 @@
 .quick-capture .clip-result{align-self:stretch}
 .quick-capture .clip-result .clip-actions{margin-top:4px}
 @media(max-width:700px){.quick-capture{padding:13px}.quick-capture-options>label:not(.quick-capture-check){flex:1 1 170px}}
+
+/* Native and future service states. Keep unmet gates visually neutral and explicit. */
+.service-diagnostics{padding:18px 19px;display:flex;flex-direction:column;gap:13px}
+.service-diagnostics>p{font-size:12px;color:#b5aabd;line-height:1.55;margin:0}
+.service-diagnostics-actions{display:flex;align-items:center;flex-wrap:wrap;gap:11px}
+.service-diagnostics-actions>span{font-size:11px;color:#928a9b}
+.service-diagnostics-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+.service-diagnostics-row{min-width:0;border:1px solid #373140;border-radius:9px;background:#1c1b26;padding:12px;display:flex;align-items:flex-start;gap:7px;flex-wrap:wrap}
+.service-diagnostics-name{display:flex;align-items:center;gap:7px;flex:1 1 150px;min-width:0}
+.service-diagnostics-name strong{font-size:12px;overflow-wrap:anywhere}
+.service-diagnostics-row>span{flex:0 0 auto;border:1px solid #484352;border-radius:5px;padding:4px 7px;font-size:10px}
+.service-state-ready{color:#88e8c8;background:#152b2a}
+.service-state-pending{color:#b8aec1;background:#292633}
+.service-diagnostics-row small{flex:1 1 100%;font-size:11px;color:#a9a0b5;line-height:1.45}
+@media(max-width:700px){.service-diagnostics-list{grid-template-columns:1fr}.service-diagnostics{padding:13px}}
