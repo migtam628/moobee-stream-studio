@@ -58,3 +58,25 @@ test('missing installer, duplicate names, empty files and invalid versions fail 
     assert.throws(() => manifestForArtifacts(empty, tag, commit), /Empty release artifact/)
   } finally { rmSync(empty, { recursive: true, force: true }) }
 })
+
+test('explicit alpha-only Android throttle omission is labeled incomplete, never hardware-ready', () => {
+  const withoutAndroid = fixture(names.filter(name => !name.endsWith('.apk')))
+  try {
+    assert.throws(() => manifestForArtifacts(withoutAndroid, tag, commit), /Missing required/)
+    const result = manifestForArtifacts(withoutAndroid, tag, commit, { androidThrottled: true })
+    assert.equal(result.partialPlatformDistribution, true)
+    assert.deepEqual(result.unavailableTargets.map(x => x.target), ['android-arm64-debug'])
+    assert.equal(result.hardwareAcceptanceVerified, false)
+    assert.equal(result.installableAppUpdateSigned, false)
+    assert.equal(result.artifacts.length, 5)
+    assert.throws(() => manifestForArtifacts(withoutAndroid, 'v0.4.0-beta.1', commit, { androidThrottled: true }), /Only experimental alpha/)
+    assert.throws(() => manifestForArtifacts(withoutAndroid, 'v0.4.0-rc.1', commit, { androidThrottled: true }), /Only experimental alpha/)
+  } finally { rmSync(withoutAndroid, { recursive: true, force: true }) }
+  const complete = fixture()
+  try {
+    const full = manifestForArtifacts(complete, tag, commit)
+    assert.equal(full.partialPlatformDistribution, false)
+    assert.deepEqual(full.unavailableTargets, [])
+    assert.throws(() => manifestForArtifacts(complete, tag, commit, { androidThrottled: true }), /override is invalid/)
+  } finally { rmSync(complete, { recursive: true, force: true }) }
+})
