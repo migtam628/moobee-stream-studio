@@ -57,10 +57,11 @@ fn composite_grid(frames: &[RgbaImage], width: u32, height: u32) -> Result<RgbaI
 /// Return a PNG data URL of the selected scene's captured displays.
 /// Only integer monitor-list indices are accepted, never arbitrary file paths.
 #[tauri::command]
-pub fn capture_scene_snapshot(display_ids: Vec<usize>) -> Result<String, String> {
+pub async fn capture_scene_snapshot(display_ids: Vec<usize>) -> Result<String, String> {
     validate_ids(&display_ids)?;
     #[cfg(any(target_os = "windows", target_os = "macos"))]
     {
+        tauri::async_runtime::spawn_blocking(move || {
         let monitors = xcap::Monitor::all()
             .map_err(|error| format!("Unable to enumerate scene displays: {error}"))?;
         let mut frames = Vec::with_capacity(display_ids.len());
@@ -77,6 +78,7 @@ pub fn capture_scene_snapshot(display_ids: Vec<usize>) -> Result<String, String>
             .map_err(|error| format!("Unable to encode scene preview PNG: {error}"))?;
         Ok(format!("data:image/png;base64,{}",
             base64::engine::general_purpose::STANDARD.encode(buffer.into_inner())))
+        }).await.map_err(|error| format!("Scene preview worker stopped: {error}"))?
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
