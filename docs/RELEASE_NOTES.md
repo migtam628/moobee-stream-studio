@@ -6,6 +6,7 @@
 
 - After MP4 finalization, MooBee now reads the **actual movie duration** from `moov/mvhd` instead of displaying the selected recording maximum as if it were the clip's duration. Early Stop and Save (for example, 60-second maximum stopped after 15 seconds) can now show an independently reported length.
 - Studio Quick Screen Capture now displays the measured duration, requested maximum, file size, and a refreshed **saved local clips inventory**. The inventory reloads when Studio is opened again, making restart-persistence checks easier.
+- Added **Use Program display** for a scene containing exactly one enabled screen source. It resolves the currently selected Program scene, not Studio Mode Preview, and refuses multi-source scenes instead of silently dropping layers. This is not a compositor or Program recorder.
 - The native MP4 duration probe reads only the metadata boxes; no video footage needs to be uploaded or copied to the cloud. Rust tests cover both common MP4 movie-header versions and missing timing information.
 
 ## Audio and automated verification
