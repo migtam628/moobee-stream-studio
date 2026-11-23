@@ -73,9 +73,84 @@ pub(crate) fn validate_mp4_boxes<R: Read + Seek>(
     Ok(())
 }
 
+
+/// Read the real container movie duration from the finalized movie header
+/// (moov/mvhd). A requested capture maximum is not the duration of an early
+/// Stop-and-Save. No FFmpeg dependency or large media-buffer allocation.
+/// Return None when a structurally valid MP4 lacks usable movie timing.
+pub(crate) fn movie_duration_seconds<R: Read + Seek>(
+    reader: &mut R,
+    length: u64,
+) -> Result<Option<f64>, String> {
+    fn read_box<R: Read + Seek>(
+        reader: &mut R, pos: u64, end: u64,
+    ) -> Result<(u64, u64, [u8; 4]), String> {
+        if end.saturating_sub(pos) < 8 {
+            return Err("Truncated ISO BMFF box header".into());
+        }
+        reader.seek(SeekFrom::Start(pos)).map_err(|e| e.to_string())?;
+        let mut header = [0u8; 8];
+        reader.read_exact(&mut header).map_err(|e| e.to_string())?;
+        let declared = u32::from_be_bytes(header[0..4].try_into().unwrap());
+        let (size, header_size) = if declared == 1 {
+            if end - pos < 16 { return Err("Truncated extended ISO box".into()); }
+            let mut extended = [0; 8];
+            reader.read_exact(&mut extended).map_err(|e| e.to_string())?;
+            (u64::from_be_bytes(extended), 16)
+        } else if declared == 0 { (end - pos, 8) }
+        else { (u64::from(declared), 8) };
+        if size < header_size || size > end - pos {
+            return Err("Invalid or overlong ISO BMFF box".into());
+        }
+        Ok((size, header_size, header[4..8].try_into().unwrap()))
+    }
+    let mut cursor = 0u64;
+    while cursor < length {
+        let (box_len, header_len, kind) = read_box(reader, cursor, length)?;
+        if kind == *b"moov" {
+            let mut child = cursor + header_len;
+            let box_end = cursor + box_len;
+            while child < box_end {
+                let (size, h, child_kind) = read_box(reader, child, box_end)?;
+                if child_kind == *b"mvhd" {
+                    let payload_len = size - h;
+                    if payload_len < 20 { return Ok(None); }
+                    reader.seek(SeekFrom::Start(child + h)).map_err(|e| e.to_string())?;
+                    let mut version = [0u8; 4];
+                    reader.read_exact(&mut version).map_err(|e| e.to_string())?;
+                    let (timescale, duration) = match version[0] {
+                        0 if payload_len >= 20 => {
+                            let mut fields = [0u8; 16];
+                            reader.read_exact(&mut fields).map_err(|e| e.to_string())?;
+                            (u32::from_be_bytes(fields[8..12].try_into().unwrap()),
+                             u32::from_be_bytes(fields[12..16].try_into().unwrap()) as u64)
+                        }
+                        1 if payload_len >= 32 => {
+                            let mut fields = [0u8; 28];
+                            reader.read_exact(&mut fields).map_err(|e| e.to_string())?;
+                            (u32::from_be_bytes(fields[16..20].try_into().unwrap()),
+                             u64::from_be_bytes(fields[20..28].try_into().unwrap()))
+                        }
+                        _ => return Ok(None),
+                    };
+                    if timescale == 0 || duration == 0 || duration == u64::MAX ||
+                       duration == u32::MAX as u64 {
+                        return Ok(None);
+                    }
+                    let seconds = duration as f64 / f64::from(timescale);
+                    return Ok((0.01..=3600.0).contains(&seconds).then_some(seconds));
+                }
+                child += size;
+            }
+        }
+        cursor += box_len;
+    }
+    Ok(None)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::validate_mp4_boxes;
+    use super::{validate_mp4_boxes, movie_duration_seconds};
     use std::io::Cursor;
 
     fn atom(name: &[u8; 4], data: &[u8]) -> Vec<u8> {
@@ -153,4 +228,37 @@ mod tests {
         bytes.splice(moov_offset + 8..moov_offset + 8, 24u64.to_be_bytes());
         assert!(check(&bytes).is_ok());
     }
+    #[test]
+    fn movie_duration_uses_actual_mvhd_v0_and_v1_not_requested_limit() {
+        let mut v0 = vec![0u8; 20];
+        v0[12..16].copy_from_slice(&600u32.to_be_bytes());
+        v0[16..20].copy_from_slice(&9_600u32.to_be_bytes()); // 16 sec
+        let mut data = atom(b"ftyp", b"isom\\0\\0\\0\\0isom");
+        data.extend(atom(b"moov", &atom(b"mvhd", &v0)));
+        data.extend(atom(b"mdat", &[3u8; 32]));
+        let measured = movie_duration_seconds(&mut Cursor::new(&data), data.len() as u64).unwrap();
+        assert_eq!(measured, Some(16.0));
+
+        let mut v1 = vec![0u8; 32];
+        v1[0] = 1;
+        v1[20..24].copy_from_slice(&1000u32.to_be_bytes());
+        v1[24..32].copy_from_slice(&15_250u64.to_be_bytes());
+        let mut data = atom(b"ftyp", b"isom\\0\\0\\0\\0isom");
+        data.extend(atom(b"moov", &atom(b"mvhd", &v1)));
+        data.extend(atom(b"mdat", &[3u8; 32]));
+        assert_eq!(movie_duration_seconds(&mut Cursor::new(&data), data.len() as u64).unwrap(), Some(15.25));
+    }
+
+    #[test]
+    fn movie_duration_rejects_unavailable_or_invalid_timing_without_guessing() {
+        let data = sample(true);
+        assert_eq!(movie_duration_seconds(&mut Cursor::new(&data), data.len() as u64).unwrap(), None);
+        let mut v0 = vec![0u8; 20];
+        v0[16..20].copy_from_slice(&900u32.to_be_bytes()); // timescale is zero
+        let mut data = atom(b"ftyp", b"isom\\0\\0\\0\\0isom");
+        data.extend(atom(b"moov", &atom(b"mvhd", &v0)));
+        data.extend(atom(b"mdat", &[3u8; 32]));
+        assert_eq!(movie_duration_seconds(&mut Cursor::new(&data), data.len() as u64).unwrap(), None);
+    }
+
 }
