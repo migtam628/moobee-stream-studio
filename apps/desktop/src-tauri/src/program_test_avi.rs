@@ -20,6 +20,7 @@ pub struct ProgramTestAviReport {
     format: &'static str,
     bytes: u64,
     duration_seconds: u32,
+    requested_max_seconds: u32,
     frame_count: u32,
     width: u32,
     height: u32,
@@ -117,7 +118,7 @@ fn capture_program_test_to_dir(
     }
     Ok(ProgramTestAviReport {
         id, path: destination.to_string_lossy().into_owned(), format: "avi",
-        bytes, duration_seconds: seconds, frame_count: total_frames,
+        bytes, duration_seconds: seconds, requested_max_seconds: seconds, frame_count: total_frames,
         width: TEST_WIDTH, height: TEST_HEIGHT, fps: TEST_FPS,
         display_count: monitors.len(), elapsed_ms,
         measured_sampling_fps: if elapsed_ms > 0 {
