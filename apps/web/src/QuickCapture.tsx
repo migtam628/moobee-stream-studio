@@ -43,7 +43,7 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
       request<{ displays: Display[] }>('/capture/displays'),
       mac
         ? request<Availability>('/clips/macos-mp4-availability')
-        : Promise.resolve({ supported: false, requiredMacos: '15.0' })
+        : Promise.resolve<Availability>({ supported: false, requiredMacos: '15.0', reason: 'ScreenCaptureKit MP4 is only available on macOS 15+.' })
     ]).then(([list, availability]) => {
       if (!active) return
       setDisplays(list.displays)
