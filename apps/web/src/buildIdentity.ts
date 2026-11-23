@@ -4,6 +4,8 @@
  * These strings are baked into web/Tauri assets at build time, never fetched
  * from the network or derived from the user's machine.
  */
+import { version as appVersion } from '../../../package.json'
+
 declare const __MOOBEE_BUILD_SHA__: string
 declare const __MOOBEE_RELEASE_REF__: string
 
@@ -14,7 +16,7 @@ export function formatBuildIdentity(version: string, reference: string, sha: str
 }
 
 export const buildIdentity = formatBuildIdentity(
-  '0.3.9',
+  appVersion,
   __MOOBEE_RELEASE_REF__,
   __MOOBEE_BUILD_SHA__
 )
