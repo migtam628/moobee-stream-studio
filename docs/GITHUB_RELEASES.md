@@ -32,10 +32,10 @@ completed or a package installed. Record and Go Live remain disabled.
    - fails if the release tag already exists;
    - builds self-hosted web distribution, macOS ARM64/x64 DMGs, Windows NSIS
      setup EXE, Linux DEB and Android debug APK;
-   - blocks publication unless **all** required platform jobs pass;
+   - blocks publication unless **all four desktop installers and the web bundle** pass; an Android dependency HTTP 429 failure can only be exempted for **experimental alpha** releases after three failed rate-limited attempts, with an uploaded reason marker verified by the publish job. Other Android build failures block publication;
    - generates `RELEASE-MANIFEST.json` (commit, asset sizes, SHA-256 hashes),
      and `SHA256SUMS.txt`;
-   - publishes all artifacts as a GitHub **prerelease** under the new tag.
+   - publishes available artifacts as a GitHub **prerelease** under the new tag. A documented Android HTTP 429 exception produces a **partial-platform** alpha with no Android APK, a machine-readable `unavailableTargets` entry and an explicit warning in the release notes. Its workflow may still report a failed Android job; the desktop artifacts do not become signed or hardware-verified by publication.
 5. Inspect the release page, download each installer and perform real-device
    permission/recording/playback tests. Record evidence under Issue #14/#15.
    Github Actions cannot substitute for physical hardware acceptance.
