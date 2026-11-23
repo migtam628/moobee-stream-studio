@@ -1,3 +1,24 @@
+# MooBee Stream Studio v0.3.9-alpha.5 — Sonoma Screen Recording Permission Recovery
+
+**Experimental alpha — user consent remains required.** This update helps diagnose and recover from macOS screen recording permission denial.
+
+## Changes since alpha.4
+
+- Recognizes ScreenCaptureKit error `-3801` as a macOS Screen Recording privacy denial rather than an AVAssetWriter or H.264 encoder error.
+- On the Studio Quick Capture screen, displays a permission-specific explanation and an **Open Screen Recording Settings** shortcut. The app cannot grant itself access or bypass macOS privacy controls.
+- Retains the underlying native error to support accurate debugging and avoids automatic permission resets or shell scripts that affect other apps.
+- Adds tests distinguishing actual `-3801` errors from unrelated ScreenCaptureKit/codec failures and documents Sonoma permission recovery.
+
+## macOS 14.2 acceptance
+
+Quit MooBee; enable it under **System Settings → Privacy & Security → Screen Recording**; reopen it from /Applications. Try a 15-second MP4 with audio off. If denied again, verify the installed bundle ID and consider resetting **only MooBee's** ScreenCapture consent (see `docs/MACOS_MP4_ACCEPTANCE.md`).
+
+Success criteria are a playable, seekable H.264 recording, followed by early Stop and Save, system audio, repeated capture and relaunch checks. **A green GitHub build does not prove device acceptance.**
+
+Full Program recording, scene compositor, microphone mixer, RTMP, and signed updates remain unavailable or incomplete. Record and Go Live remain gated.
+
+---
+
 # MooBee Stream Studio v0.3.9-alpha.4 — Sonoma MP4 Error Visibility and Temp-file Hardening
 
 **Diagnostic alpha for macOS 14.2.** This release addresses a user-observed failure, but actual MP4 capture success is not yet verified on the affected Mac.
