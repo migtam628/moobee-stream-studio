@@ -245,9 +245,16 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
     const name = new URL(path, 'http://localhost').searchParams.get('scene') || draft.currentScene
     const scene = draft.scenes.find(s => s.name === name)
     if (!scene) throw new Error('Scene not found')
-    const display = scene.sources.find(source => source.enabled && source.kind === 'display')
-    if (!display?.deviceId) return { image: null }
-    return { image: await invoke<string>('capture_display', { displayId: Number(display.deviceId) }) }
+    const enabledDisplays = scene.sources.filter(source => source.enabled && source.kind === 'display')
+    if (!enabledDisplays.length) return { image: null }
+    if (enabledDisplays.length > 4) {
+      throw new Error('Still preview supports up to four display sources; full scene composition is not yet implemented')
+    }
+    const ids = enabledDisplays.map(source => Number(source.deviceId))
+    if (ids.some(id => !Number.isSafeInteger(id) || id < 0 || id > 24)) {
+      throw new Error('Scene includes an invalid display identity')
+    }
+    return { image: await invoke<string>('capture_scene_snapshot', { displayIds: ids }) }
   }
   if (path === '/alerts/test') {
     const alert = await invoke<Alert>('emit_test_alert', { alert: { type: body.type, name: body.name, message: body.message } })
