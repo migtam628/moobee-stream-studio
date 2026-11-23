@@ -251,7 +251,11 @@ mod tests {
 
     #[test]
     fn movie_duration_rejects_unavailable_or_invalid_timing_without_guessing() {
-        let data = sample(true);
+        // A valid ISO BMFF moov can omit mvhd. Do not use the intentionally
+        // malformed moov body in sample(true), which is for top-level guards.
+        let mut data = atom(b"ftyp", b"isom\\0\\0\\0\\0isom");
+        data.extend(atom(b"moov", &atom(b"free", &[0u8; 8])));
+        data.extend(atom(b"mdat", &[3u8; 32]));
         assert_eq!(movie_duration_seconds(&mut Cursor::new(&data), data.len() as u64).unwrap(), None);
         let mut v0 = vec![0u8; 20];
         v0[16..20].copy_from_slice(&900u32.to_be_bytes()); // timescale is zero
