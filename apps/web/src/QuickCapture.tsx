@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { CheckCircle2, Copy, Film, FolderOpen, Monitor, Video } from 'lucide-react'
+import { CheckCircle2, Copy, Film, FolderOpen, Monitor, Square, Video } from 'lucide-react'
 import { request, runningInTauri } from './api'
 
 type Display = { id: number; name: string; width: number; height: number }
@@ -21,6 +21,7 @@ type CapturedFile = {
 export default function QuickCapture({ openClips }: { openClips: () => void }) {
   const desktop = runningInTauri()
   const mac = desktop && /Macintosh|Mac OS X/i.test(navigator.userAgent)
+  const supportedDesktop = desktop && (mac || /Windows/i.test(navigator.userAgent))
   const [displays, setDisplays] = useState<Display[]>([])
   const [displayId, setDisplayId] = useState('')
   const [mp4Supported, setMp4Supported] = useState(false)
@@ -29,6 +30,7 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
   const [microphone, setMicrophone] = useState(false)
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [stopRequested, setStopRequested] = useState(false)
   const [error, setError] = useState('')
   const [saved, setSaved] = useState<CapturedFile | null>(null)
 
@@ -56,11 +58,13 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
   }, [desktop, mac])
 
   const useMp4 = mac && mp4Supported
-  const canRecord = desktop && !!displayId && !loading && !busy
+  const canRecord = supportedDesktop && !!displayId && !loading && !busy
+  const durations = useMp4 ? [4, 6, 8, 15, 30, 60, 120] : [4, 6, 8]
   const formatLabel = useMp4 ? 'H.264 MP4 (macOS 15+)' : 'silent MJPEG AVI (10 fps)'
   async function capture() {
-    if (!canRecord || ![4, 6, 8].includes(duration)) return
+    if (!canRecord || !durations.includes(duration)) return
     setBusy(true)
+    setStopRequested(false)
     setSaved(null)
     setError('')
     try {
@@ -75,6 +79,18 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
       setError('Native recording failed: ' + (cause as Error).message)
     } finally {
       setBusy(false)
+      setStopRequested(false)
+    }
+  }
+
+  async function stopCapture() {
+    if (!useMp4 || !busy || stopRequested) return
+    try {
+      const result = await request<{ stopRequested: boolean }>('/clips/stop-mp4', {})
+      if (!result.stopRequested) throw new Error('No active capture was found; retry if recording is still running')
+      setStopRequested(true)
+    } catch (cause) {
+      setError('Could not request a graceful stop: ' + (cause as Error).message)
     }
   }
 
@@ -96,7 +112,7 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
 
   return <div className="quick-capture">
     <p className="help-text">
-      Save a <strong>4–8 second test recording of one display</strong> using MooBee's own native capture.
+      Save a <strong>bounded test recording of one display</strong> using MooBee's native capture. On supported Macs, request up to 120 seconds and stop early with finalization.
       This is not the composited Program feed and does not include saved scene overlays or webcam layers.
     </p>
     <div className="quick-capture-options">
@@ -111,7 +127,7 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
       <label>Duration
         <select aria-label="Recording duration" value={duration} disabled={busy}
           onChange={event => setDuration(Number(event.target.value))}>
-          {[4, 6, 8].map(seconds => <option key={seconds} value={seconds}>{seconds} seconds</option>)}
+          {durations.map(seconds => <option key={seconds} value={seconds}>{seconds} seconds</option>)}
         </select>
       </label>
       <span className="quick-capture-format"><Video size={15}/>{formatLabel}</span>
@@ -127,9 +143,11 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
       <button className="primary-button" type="button" disabled={!canRecord} onClick={() => void capture()}>
         <Monitor size={16}/>{busy ? 'Recording and finalizing…' : 'Capture screen test'}
       </button>
+      {useMp4 && busy && <button className="secondary-button" type="button" disabled={stopRequested}
+        onClick={() => void stopCapture()}><Square size={15}/>{stopRequested ? 'Stopping and finalizing…' : 'Stop and save MP4'}</button>}
       <button className="secondary-button" type="button" onClick={openClips}><Film size={16}/>Open Clips</button>
     </div>
-    {!desktop && <p className="help-text">Install the Mac/Windows desktop application to use native capture.</p>}
+    {!supportedDesktop && <p className="help-text">Native screen capture requires the Mac/Windows desktop application. Android and browser editions cannot record local desktop screens.</p>}
     {mac && !mp4Supported && desktop && <p className="help-text">
       Native MP4 requires macOS 15+. Silent AVI capture is available as a fallback.
     </p>}
