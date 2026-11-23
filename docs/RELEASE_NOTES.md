@@ -1,3 +1,37 @@
+# MooBee Stream Studio v0.3.9-alpha.1 — Mac Recording Sessions & Service Diagnostics
+
+**Experimental alpha.** This is a functional expansion of the native Mac capture workflow, not a production broadcaster. The primary program **Record** and **Go Live** actions remain disabled.
+
+## Shipped improvements (code and CI validation required)
+
+- **Longer Mac display recordings:** the built-in ScreenCaptureKit H.264 MP4 adapter now accepts bounded 3–120-second sessions on macOS 15+. Studio offers 4/6/8/15/30/60/120-second maximum durations.
+- **Stop and save:** while a native Mac MP4 is capturing, a Stop button signals the Swift recorder to finish early; the existing Rust workflow waits for ScreenCaptureKit finalization, checks MP4 box structure, and only then atomically exposes the saved file.
+- **Finder integration:** saved MP4 files can be revealed using the existing validated private clip-ID interface.
+- **Runtime Service Diagnostics:** Settings now checks local monitor detection and the embedded overlay health endpoint, shows whether the Mac recording backend is supported, and explicitly identifies unavailable RTMP, real-time composition, audio mixing and signed automatic updates.
+- **Truthful status indicators:** the application distinguishes a functioning scene editor from actual live output; it does not claim a broadcast is active when no stream exists.
+- **Version alignment:** web, API, desktop, Cargo, Tauri, and npm lockfile now identify the separate `0.3.9` build rather than reusing the earlier `0.3.8` installer version.
+
+## What must be tested on a real Mac
+
+1. Install the Apple Silicon macOS DMG, verify app launch, displays and Settings diagnostics.
+2. In Studio, record a 15-second MP4 without audio; check the file in QuickTime/VLC.
+3. Start a 60- or 120-second maximum test; press **Stop and save MP4** early; wait for a complete file, then independently verify seekability, playback and actual recorded duration.
+4. Test requested microphone/system audio separately and verify the resulting track(s). A checked option does not prove audio capture.
+5. Repeat after denying screen access and restarting the app. Failed recordings must not show up as completed clips.
+
+## Unfinished production functions
+
+- No real-time program scene compositor or webcam/image/text layers rendered into encoded video.
+- No verified synchronized microphone/system-audio mixer or production-length recordings.
+- No native Windows H.264/AAC parity.
+- No RTMP/RTMPS broadcasting to Twitch, YouTube, Kick, or custom destinations.
+- No developer-signed/notarized installers or cryptographically signed in-app update bundles.
+- The Android APK remains a debug/test package, not a mobile live production engine.
+
+All native device claims remain **unverified pending hardware acceptance** even after GitHub Actions compiles successfully. See `docs/MACOS_MP4_ACCEPTANCE.md` and `docs/PRODUCTION_READINESS.md`.
+
+---
+
 # MooBee Stream Studio v0.3.8-alpha.4 — Usable Native Screen Capture in Studio
 
 **Experimental alpha — not a finished livestreaming application.** This update makes existing standalone recording test features easier to use directly from the Studio workspace.
