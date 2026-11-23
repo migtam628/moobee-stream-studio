@@ -41,7 +41,8 @@ jobs:
         run: npm run build
       - name: Validate native Program source selection and synthetic composition
         working-directory: apps/desktop/src-tauri
-        run: cargo test --lib program_test_avi::tests
+        run: |
+          cargo test --lib program_test_avi::tests
           cargo test --lib program_continuous_avi::tests
       - name: Compile Windows Tauri native media commands
         working-directory: apps/desktop/src-tauri
