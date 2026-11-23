@@ -121,3 +121,9 @@
 .capture-permission-help strong{font-size:13px}
 .capture-permission-help p{margin:0;max-width:850px}
 .capture-permission-help small{color:#dfbfa4;line-height:1.55}
+
+/* Persisted local clip inventory is a storage check, not a playback claim. */
+.clip-inventory-status{display:flex;flex-wrap:wrap;align-items:center;gap:10px;
+  border:1px solid #3f3b4d;border-radius:8px;padding:10px 12px;font-size:11px;color:#c8bfd5}
+.clip-inventory-status>span{flex:1 1 180px}
+.clip-inventory-status>small{flex:1 1 100%;color:#e2a799}
