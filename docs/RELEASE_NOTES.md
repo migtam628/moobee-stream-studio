@@ -1,3 +1,35 @@
+# MooBee Stream Studio v0.3.9-alpha.3 — Sonoma 14 H.264 Test Recorder
+
+**Experimental prerelease for macOS 14.2 compatibility testing. Not a complete broadcasting studio.**
+
+## What changed
+
+- Added a first-party macOS **14.x Sonoma** MP4 capture backend. ScreenCaptureKit supplies video frames; AVFoundation's `AVAssetWriter` encodes H.264 and finalizes the MP4. It runs inside MooBee's native Tauri application and does **not** require OBS, Streamlabs, or an external FFmpeg service.
+- macOS **15+** continues to use the existing `SCRecordingOutput` backend. The native capability report chooses the backend based on the actual OS version.
+- Studio → Quick screen capture and Clips now offer an **experimental H.264 MP4** option on macOS 14+ with bounded 4/6/8/15/30/60/120-second selections and early Stop and Save.
+- Optional **system audio** capture on Sonoma is experimental and must be independently verified for AAC, audibility and sync. **Microphone capture on macOS 14 is disabled**; it is available for experimental testing on macOS 15+ only.
+- Updated macOS 14.2 hardware acceptance checklist, project documentation and deployment compatibility notes.
+- Swift typecheck and Rust linking checks have passed on GitHub CI for Apple Silicon and Intel. This proves that the source compiles against the runner SDK; **it does not verify recording on a Mac running Sonoma 14.2**.
+
+## macOS 14.2 manual acceptance (required before beta)
+
+1. Install the matching Apple Silicon DMG, fully quit/reopen MooBee, and confirm **Settings → Runtime Service Diagnostics** reports the native MP4 backend available and the Sonoma AVAssetWriter route.
+2. Choose one display; leave both audio options off; capture **15 seconds** as H.264 MP4. Check real motion, correct duration, seeking and playback in QuickTime.
+3. Start a **60-second** maximum MP4 and select **Stop and save MP4** after approximately 15 seconds. Check that it finalizes and opens correctly, without exposing `.mp4.part`.
+4. Repeat with only system audio enabled. Check for an AAC track and audible synchronized audio. macOS 14 microphone audio is **not supported by this implementation**.
+5. Test consecutive captures, screen-permission denial, an app restart and Clips persistence. Save any error text and check the actual file with `scripts/verify-native-mp4.mjs` when possible.
+
+## Still unavailable
+
+- Full real-time Program scene compositor with saved overlays, webcam layers and transitions feeding the recorder.
+- Synchronized production audio mixer, live device meters and microphone on the Sonoma path.
+- Production-length recorded output, Windows native H.264/AAC, RTMP/RTMPS livestreaming and multistream destinations.
+- Cryptographically signed automatic updates and signed/notarized production installers.
+
+**Record** and **Go Live** for Program output stay disabled. The new H.264 functionality is an experimental **display-recording test**, not the finished production recorder.
+
+---
+
 # MooBee Stream Studio v0.3.9-alpha.2 — Native MP4 Availability Diagnostics
 
 **Diagnostic prerelease, not a complete broadcaster.** This update does not bypass macOS requirements or enable unfinished streaming controls.
