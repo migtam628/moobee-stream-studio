@@ -34,7 +34,8 @@ test('rejects unsupported codec, absent video, invalid geometry and incomplete d
 
 test('rejects invalid requested durations and badly formed metadata', () => {
   assert.equal(assessNativeMp4(probe, { targetSeconds: 0 }).passed, false);
-  assert.equal(assessNativeMp4(probe, { targetSeconds: 16 }).passed, false);
+  assert.equal(assessNativeMp4(probe, { targetSeconds: 121 }).passed, false);
+  assert.equal(assessNativeMp4(probe, { targetSeconds: 120 }).passed, false); // sample duration is only 4 seconds
   assert.equal(assessNativeMp4(null).passed, false);
 });
 
