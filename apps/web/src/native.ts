@@ -194,12 +194,15 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
     }
     return await invoke('reveal_test_clip', { clipId: body.clipId })
   }
+  if (path === '/clips/stop-mp4') {
+    return { stopRequested: await invoke<boolean>('stop_macos_mp4') }
+  }
   if (path === '/clips/capture-mp4') {
     if (typeof body.displayId !== 'number' || !Number.isSafeInteger(body.displayId) ||
         typeof body.seconds !== 'number' || !Number.isInteger(body.seconds) ||
-        body.seconds < 3 || body.seconds > 15 ||
+        body.seconds < 3 || body.seconds > 120 ||
         typeof body.systemAudio !== 'boolean' || typeof body.microphone !== 'boolean') {
-      throw new Error('Choose a valid 3–15-second native MP4 capture and audio options')
+      throw new Error('Choose a valid 3–120-second native MP4 capture and audio options')
     }
     return await invoke('capture_macos_mp4', {
       displayId: body.displayId, seconds: body.seconds,
