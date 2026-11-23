@@ -176,6 +176,8 @@ function collection() {
 }
 export async function nativeRequest(path: string, body: Body = {}): Promise<unknown> {
   if (path === '/health') return { ok: true, name: 'MooBee Studio', version: appVersion, engine: 'in-house' }
+  if (path === '/services/diagnostics') return await invoke('native_service_diagnostics')
+  if (path === '/macos/open-screen-recording-settings') return await invoke('open_screen_recording_settings')
   if (path === '/activity') return history
   if (path === '/studio/status') return refresh()
   if (path === '/studio/collection') return Object.keys(body).length ? replaceCollection(body) : collection()
@@ -183,6 +185,31 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
   if (path === '/clips') {
     const clips = await invoke<{ id: string; path: string; bytes: number }[]>('list_test_clips')
     return { available: true, clips }
+  }
+  if (path === '/clips/macos-mp4-availability') {
+    return await invoke('macos_mp4_availability')
+  }
+  if (path === '/clips/reveal') {
+    if (typeof body.clipId !== 'string' ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(body.clipId)) {
+      throw new Error('Choose a saved MooBee clip to reveal in Finder')
+    }
+    return await invoke('reveal_test_clip', { clipId: body.clipId })
+  }
+  if (path === '/clips/stop-mp4') {
+    return { stopRequested: await invoke<boolean>('stop_macos_mp4') }
+  }
+  if (path === '/clips/capture-mp4') {
+    if (typeof body.displayId !== 'number' || !Number.isSafeInteger(body.displayId) ||
+        typeof body.seconds !== 'number' || !Number.isInteger(body.seconds) ||
+        body.seconds < 3 || body.seconds > 120 ||
+        typeof body.systemAudio !== 'boolean' || typeof body.microphone !== 'boolean') {
+      throw new Error('Choose a valid 3–120-second native MP4 capture and audio options')
+    }
+    return await invoke('capture_macos_mp4', {
+      displayId: body.displayId, seconds: body.seconds,
+      systemAudio: body.systemAudio, microphone: body.microphone
+    })
   }
   if (path === '/clips/capture-avi') {
     if (typeof body.displayId !== 'number' || !Number.isSafeInteger(body.displayId) ||
@@ -218,9 +245,16 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
     const name = new URL(path, 'http://localhost').searchParams.get('scene') || draft.currentScene
     const scene = draft.scenes.find(s => s.name === name)
     if (!scene) throw new Error('Scene not found')
-    const display = scene.sources.find(source => source.enabled && source.kind === 'display')
-    if (!display?.deviceId) return { image: null }
-    return { image: await invoke<string>('capture_display', { displayId: Number(display.deviceId) }) }
+    const enabledDisplays = scene.sources.filter(source => source.enabled && source.kind === 'display')
+    if (!enabledDisplays.length) return { image: null }
+    if (enabledDisplays.length > 4) {
+      throw new Error('Still preview supports up to four display sources; full scene composition is not yet implemented')
+    }
+    const ids = enabledDisplays.map(source => Number(source.deviceId))
+    if (ids.some(id => !Number.isSafeInteger(id) || id < 0 || id > 24)) {
+      throw new Error('Scene includes an invalid display identity')
+    }
+    return { image: await invoke<string>('capture_scene_snapshot', { displayIds: ids }) }
   }
   if (path === '/alerts/test') {
     const alert = await invoke<Alert>('emit_test_alert', { alert: { type: body.type, name: body.name, message: body.message } })

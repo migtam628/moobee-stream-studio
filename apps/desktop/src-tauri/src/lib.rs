@@ -2,6 +2,9 @@ mod clip;
 mod capture_probe;
 mod avi;
 mod native_avi;
+mod macos_mp4;
+mod mp4_validation;
+mod scene_compositor;
 
 use axum::{
     extract::State,
@@ -171,6 +174,80 @@ fn capture_display(display_id: usize) -> Result<String, String> {
     }
 }
 
+/// Read-only runtime diagnostics. A successful port probe is not proof of a
+/// playable stream or encoder; never report future media capabilities as ready.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NativeServiceReport {
+    displays_detected: usize,
+    display_enumeration_error: Option<String>,
+    overlay_health_responding: bool,
+    native_mp4_supported: bool,
+    native_mp4_os_version: Option<String>,
+    native_mp4_reason: String,
+    native_recording_verified: bool,
+    audio_mixer_available: bool,
+    scene_compositor_available: bool,
+    rtmp_output_available: bool,
+}
+
+async fn probe_overlay_health() -> bool {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let probe = async {
+        let mut stream = tokio::net::TcpStream::connect(OVERLAY_ADDRESS).await?;
+        stream.write_all(b"GET /health HTTP/1.1\r\nHost: 127.0.0.1:8788\r\nConnection: close\r\n\r\n").await?;
+        let mut response = Vec::new();
+        stream.take(2048).read_to_end(&mut response).await?;
+        Ok::<_, std::io::Error>(response.starts_with(b"HTTP/1.1 200 OK")
+            && response.ends_with(b"ok"))
+    };
+    tokio::time::timeout(Duration::from_secs(2), probe)
+        .await.ok().and_then(Result::ok).unwrap_or(false)
+}
+
+#[tauri::command]
+async fn native_service_diagnostics() -> NativeServiceReport {
+    let (displays_detected, display_enumeration_error) = match list_displays() {
+        Ok(monitors) => (monitors.len(), None),
+        Err(message) => (0, Some(message)),
+    };
+    let native_mp4 = macos_mp4::macos_mp4_availability();
+    NativeServiceReport {
+        displays_detected,
+        display_enumeration_error,
+        overlay_health_responding: probe_overlay_health().await,
+        native_mp4_supported: native_mp4.supported,
+        native_mp4_os_version: native_mp4.os_version,
+        native_mp4_reason: native_mp4.reason,
+        // Not ready until completed media and real device tests prove otherwise.
+        native_recording_verified: false,
+        audio_mixer_available: false,
+        scene_compositor_available: false,
+        rtmp_output_available: false,
+    }
+}
+
+/// Open the exact Apple Screen Recording privacy settings panel.
+/// This cannot grant permission; only the local user can enable MooBee.
+#[tauri::command]
+fn open_screen_recording_settings() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let status = std::process::Command::new("/usr/bin/open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+            .status()
+            .map_err(|error| format!("Unable to open Screen Recording settings: {error}"))?;
+        if !status.success() {
+            return Err("macOS could not open Screen Recording settings. Open System Settings > Privacy & Security > Screen Recording manually.".into());
+        }
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err("Screen Recording privacy settings are only available on macOS".into())
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let (sender, _) = broadcast::channel(100);
@@ -182,7 +259,7 @@ pub fn run() {
             tauri::async_runtime::spawn(serve_overlays(runner_state));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![emit_test_alert, list_displays, capture_display, clip::capture_test_clip, clip::list_test_clips, clip::read_test_clip, capture_probe::probe_native_capture, native_avi::capture_silent_avi])
+        .invoke_handler(tauri::generate_handler![emit_test_alert, list_displays, capture_display, scene_compositor::capture_scene_snapshot, clip::capture_test_clip, clip::list_test_clips, clip::read_test_clip, clip::reveal_test_clip, capture_probe::probe_native_capture, native_avi::capture_silent_avi, macos_mp4::capture_macos_mp4, macos_mp4::stop_macos_mp4, macos_mp4::macos_mp4_availability, native_service_diagnostics, open_screen_recording_settings])
         .run(tauri::generate_context!())
         .expect("failed to run MooBee Live desktop");
 }

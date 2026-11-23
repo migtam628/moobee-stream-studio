@@ -1,5 +1,6 @@
 import { isTauri } from '@tauri-apps/api/core'
 import { nativeRequest } from './native'
+import { nativeErrorMessage } from './nativeError'
 import type { Activity, Alert, StudioStatus } from './types'
 
 export function runningInTauri(): boolean { return isTauri() }
@@ -7,7 +8,16 @@ export const isStaticPreview = import.meta.env.VITE_STATIC_PREVIEW === 'true'
 
 export async function request<T>(path: string, body?: object): Promise<T> {
   if (isStaticPreview) throw new Error('The hosted preview has no device capture. Install MooBee Studio for native capture.')
-  if (runningInTauri()) return await nativeRequest(path, body as Record<string, unknown> | undefined) as T
+  if (runningInTauri()) {
+    try {
+      return await nativeRequest(path, body as Record<string, unknown> | undefined) as T
+    } catch (cause) {
+      // Rust Result::Err(String) rejects Tauri invoke() with a *string*, not
+      // necessarily an Error object. Normalize it before UI callers inspect
+      // .message or they may display the misleading literal "undefined".
+      throw new Error(nativeErrorMessage(cause))
+    }
+  }
   const response = await fetch(`/api${path}`, {
     method: body ? 'POST' : 'GET',
     headers: body ? { 'Content-Type': 'application/json' } : undefined,

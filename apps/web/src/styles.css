@@ -72,3 +72,61 @@
 .capture-diagnostic-results strong{font-size:18px;color:#ede4fc;font-variant-numeric:tabular-nums}
 .capture-diagnostic-results p{grid-column:1/-1;font-size:11px;color:#b6adc5;margin:0}
 @media(max-width:700px){.capture-diagnostic-results{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* macOS system encoder experiment — explicit permission and device caveats */
+.clip-mp4-options{display:flex;flex-direction:column;gap:10px;border:1px solid #65517e;border-radius:10px;padding:16px;background:linear-gradient(115deg,#28203b,#1b1a27);max-width:670px}
+.clip-mp4-options p{font-size:12px;line-height:1.6;color:#c9c2d8;margin:0}
+.clip-mp4-options strong{color:#eee6ff}
+.clip-mp4-options label{display:flex;align-items:center;gap:10px;font-size:12px;color:#e0d6ee;cursor:pointer}
+.clip-mp4-options input{width:16px;height:16px;accent-color:#af93eb}
+.clip-mp4-options label:has(input:disabled){opacity:.55;cursor:not-allowed}
+.clip-mp4-options small{color:#ada0c1;font-size:11px;line-height:1.5}
+@media(max-width:700px){.clip-mp4-options{padding:12px}}
+
+/* Bounded native capture available from Studio; not the future program recorder. */
+#quick-capture{margin-top:16px;scroll-margin-top:18px}
+.quick-capture{padding:17px 19px;display:flex;flex-direction:column;gap:15px}
+.quick-capture>.help-text{margin:0;line-height:1.6;max-width:870px}
+.quick-capture-options{display:flex;flex-wrap:wrap;align-items:end;gap:12px}
+.quick-capture-options>label:not(.quick-capture-check){display:flex;flex-direction:column;gap:6px;font-size:12px;color:#ccc4db;font-weight:700;min-width:190px}
+.quick-capture-options select{max-width:100%;background:#191824;color:#f3eeff;border:1px solid #544963;border-radius:8px;padding:10px}
+.quick-capture-options label.quick-capture-check{display:flex;align-items:center;gap:7px;min-width:0;color:#d5c9e8;font-size:12px;cursor:pointer}
+.quick-capture-options input[type="checkbox"]{width:16px;height:16px;accent-color:#a88cf4}
+.quick-capture-options>.help-text{font-size:11px;align-self:center}
+.quick-capture-format{display:flex;align-items:center;gap:7px;padding:10px;border-radius:8px;background:#252034;border:1px solid #453958;font-size:11px;color:#b8a6dd}
+.quick-capture .clip-result{align-self:stretch}
+.quick-capture .clip-result .clip-actions{margin-top:4px}
+@media(max-width:700px){.quick-capture{padding:13px}.quick-capture-options>label:not(.quick-capture-check){flex:1 1 170px}}
+
+/* Native and future service states. Keep unmet gates visually neutral and explicit. */
+.service-diagnostics{padding:18px 19px;display:flex;flex-direction:column;gap:13px}
+.service-diagnostics>p{font-size:12px;color:#b5aabd;line-height:1.55;margin:0}
+.service-diagnostics-actions{display:flex;align-items:center;flex-wrap:wrap;gap:11px}
+.service-diagnostics-actions>span{font-size:11px;color:#928a9b}
+.service-diagnostics-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+.service-diagnostics-row{min-width:0;border:1px solid #373140;border-radius:9px;background:#1c1b26;padding:12px;display:flex;align-items:flex-start;gap:7px;flex-wrap:wrap}
+.service-diagnostics-name{display:flex;align-items:center;gap:7px;flex:1 1 150px;min-width:0}
+.service-diagnostics-name strong{font-size:12px;overflow-wrap:anywhere}
+.service-diagnostics-row>span{flex:0 0 auto;border:1px solid #484352;border-radius:5px;padding:4px 7px;font-size:10px}
+.service-state-ready{color:#88e8c8;background:#152b2a}
+.service-state-pending{color:#b8aec1;background:#292633}
+.service-diagnostics-row small{flex:1 1 100%;font-size:11px;color:#a9a0b5;line-height:1.45}
+@media(max-width:700px){.service-diagnostics-list{grid-template-columns:1fr}.service-diagnostics{padding:13px}}
+
+/* Recovery for macOS ScreenCaptureKit -3801 (TCC privacy denial).
+   Do not imply MooBee can grant the OS permission itself. */
+.capture-permission-help{display:flex;flex-direction:column;align-items:flex-start;gap:10px;
+  padding:14px 16px;border:1px solid #9d7653;border-radius:9px;background:#2c241f;
+  color:#f5dfc5;font-size:12px;line-height:1.55}
+.capture-permission-help strong{font-size:13px}
+.capture-permission-help p{margin:0;max-width:850px}
+.capture-permission-help small{color:#dfbfa4;line-height:1.55}
+
+/* Persisted local clip inventory is a storage check, not a playback claim. */
+.clip-inventory-status{display:flex;flex-wrap:wrap;align-items:center;gap:10px;
+  border:1px solid #3f3b4d;border-radius:8px;padding:10px 12px;font-size:11px;color:#c8bfd5}
+.clip-inventory-status>span{flex:1 1 180px}
+.clip-inventory-status>small{flex:1 1 100%;color:#e2a799}
+
+/* A still-frame compositor error must be visible; never imply a blank canvas is live output. */
+.preview-error{display:block;padding:8px 10px;color:#efadad;font-size:11px;line-height:1.4;overflow-wrap:anywhere}

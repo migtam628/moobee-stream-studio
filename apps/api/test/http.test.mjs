@@ -117,3 +117,13 @@ test('web control endpoint cannot claim native AVI capture', async () => {
   const payload = await response.json();
   assert.match(payload.error, /installed Windows\/macOS/);
 });
+
+test('web API does not fabricate a native macOS H.264 MP4 recording', async () => {
+  const response = await fetch(root + '/api/clips/capture-mp4', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ displayId: 0, seconds: 4, systemAudio: true, microphone: false })
+  });
+  assert.equal(response.status, 501);
+  const payload = await response.json();
+  assert.match(payload.error, /installed macOS 15\+ application/);
+});

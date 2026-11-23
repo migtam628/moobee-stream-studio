@@ -1,0 +1,75 @@
+name: Compile native macOS ScreenCaptureKit MP4 adapter
+
+on:
+  pull_request:
+  push:
+    branches: [main, 'release/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Keep only the latest PR's native macOS compile; older Swift/Rust builds can
+# otherwise queue behind a newer patch and waste platform CI minutes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  screen-recording:
+    name: ScreenCaptureKit Swift ABI — ${{ matrix.label }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+            label: Apple Silicon
+            swift_target: arm64-apple-macos13.0
+          - runner: macos-15-intel
+            label: Intel
+            swift_target: x86_64-apple-macos13.0
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '13.0'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Swift type correctness against the macOS 15+ SDK
+        run: |
+          SDK="$(xcrun --sdk macosx --show-sdk-path)"
+          xcrun swiftc -swift-version 5 -parse-as-library -typecheck \
+            -target "${{ matrix.swift_target }}" -sdk "$SDK" \
+            apps/desktop/src-tauri/swift/MooBeeScreenRecording.swift \
+            apps/desktop/src-tauri/swift/MooBeeSonomaRecording.swift
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+      - run: npm ci
+      - name: Compile native Rust-Tauri and linked Swift recorder
+        run: |
+          npm run build
+          cd apps/desktop/src-tauri
+          cargo check
+      - name: Link native test binary and validate MP4 container regressions
+        run: |
+          cd apps/desktop/src-tauri
+          cargo test --lib mp4_validation::tests
+          cargo test --lib scene_compositor::tests
+      # A cargo check or test binary is not an installed Tauri application.
+      # Verify at least one actual .app contains the Swift runtime rpath and
+      # permission reasons before considering hardware acceptance.
+      - name: Package unsigned Apple Silicon macOS app for acceptance
+        if: matrix.label == 'Apple Silicon'
+        working-directory: apps/desktop
+        env:
+          APPLE_SIGNING_IDENTITY: '-'
+        run: npx tauri build --bundles app
+      - name: Inspect packaged macOS runtime and privacy declarations
+        if: matrix.label == 'Apple Silicon'
+        shell: bash
+        run: bash scripts/verify-macos-app-bundle.sh

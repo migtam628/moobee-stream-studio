@@ -1,6 +1,8 @@
 # MooBee Stream Studio
 
-**Standalone Alpha 0.3.7 (native media file reliability)** — a native streaming studio foundation, independent of OBS Studio and Streamlabs. The old 0.2 installers are legacy OBS-controller builds and are **not** standalone.
+**Standalone Alpha 0.3.9 (Sonoma-compatible H.264 MP4 recording experiment)** — a native streaming studio foundation, independent of OBS Studio and Streamlabs.
+
+**macOS compatibility:** the standalone desktop shell now targets **macOS 13.0 Ventura or newer** (Apple Silicon or Intel). The experimental **H.264/MP4 test supports macOS 14+ through two first-party paths**: ScreenCaptureKit frame output with AVAssetWriter on Sonoma 14, and SCRecordingOutput on macOS 15+. macOS 14 microphone audio is not supported by this fallback; macOS 15+ retains a microphone request option. System audio and MP4 playback still require real-device tests. GIF, silent AVI and scene tools remain independent. CI checks build metadata but does not prove real-device media operation. The old 0.2 installers are legacy OBS-controller builds and are **not** standalone.
 
 ![Early visual direction](docs/design-reference.webp)
 
@@ -11,9 +13,12 @@
 - **Clips → Capture Silent GIF**: a first-party 2–10 second, approximately 2 fps local display test clip. The saved GIF can be previewed and the file path copied inside the app.
 - **Native Capture Input Diagnostic**: measure continuous raw frames arriving from the bundled XCap video source on Mac/Windows, with average FPS, resolution, first-frame latency and maximum gap. This is not a recorder or streamer.
 - **Capture Video AVI** (Windows/macOS): record a short 2–8 second, 640×360, 10 fps silent MJPEG AVI video from the continuous native capture stream, encoded/muxed by our own Rust code. It is a video-file output test, not the final audio/video recorder. Play AVI externally in VLC or a compatible media player.
+- **macOS 14+ → Capture MP4 (experimental)**: a first-party ScreenCaptureKit test that records a selected display into local H.264 MP4 for up to 120 seconds, with early Stop and Save. Sonoma 14 uses AVAssetWriter for encoding; macOS 15+ uses SCRecordingOutput. System audio is experimental; separate microphone capture is available to request only on macOS 15+. No OBS/Streamlabs or installed FFmpeg is needed. It does not capture the saved MooBee Program, overlays or webcam. Actual playback, audio and reliability require real-device acceptance.
 - **Incremental AVI file publishing**: JPEG video frames are written to a private temporary file instead of accumulating the entire recording in RAM. MooBee finalizes the indexed AVI container, synchronizes it to disk, and only then publishes the `.avi` file in the Clips library. Failed captures remove incomplete output; abrupt process exits may leave hidden `.part` files.
 - **Web Clips → Record shared screen**: browser-native canvas compositing combines an approved screen, optional webcam picture-in-picture and optional microphone/shared audio. The browser records a 1280×720 WebM/MP4 where supported and saves the file locally, without uploading it.
 - Our own local scene management: create/rename/duplicate/delete scenes, select program/preview scenes, enable Studio Mode, take transitions, add/remove display sources, and control source visibility.
+- **Native multi-display still-frame previews (development / alpha.7)**: Mac/Windows Preview and Program show a bounded 960×540 image with up to four enabled display sources tiled without aspect distortion. These are still snapshots roughly every five seconds, **not** a video compositor feeding the recorder or RTMP.
+- **Identifiable prerelease builds (development / alpha.7)**: the sidebar and Settings display the actual GitHub release tag and short commit for troubleshooting. A core version of `0.3.9` alone does not identify the specific alpha installer.
 - Native scene drafts persist in Tauri's local storage; the web/API edition now saves scene collections atomically on disk, with Docker volume persistence.
 - Independent Node local-only API with `/api/studio/status`, `/api/studio/action`, `/api/studio/collection`, `/api/capture/displays`, SSE events, and alert-testing endpoints.
 - Rust local alert service, animated overlay test page, and local web edition.
@@ -67,7 +72,7 @@ Open **Clips** on an installed Mac/Windows build and select the desktop display.
 | Backend | MooBee Node API and event stream, later accounts/permissions/DB |
 | Web/mobile | Creator management clients, separate device-capability implementations |
 
-See `docs/PRODUCTION_READINESS.md` for the **P0 production go/no-go criteria** and `docs/ROADMAP.md` for the implementation plan and `docs/TAURI.md` for release/OS readiness. Existing GitHub Actions targets macOS Apple Silicon and Intel, Windows x64, Linux x64, Android ARM64, and web. **Build success is not media-functionality acceptance.**
+See `docs/MACOS_MP4_ACCEPTANCE.md` for the macOS MP4 manual test matrix and `docs/PRODUCTION_READINESS.md` for the **P0 production go/no-go criteria** and `docs/ROADMAP.md` for the implementation plan and `docs/TAURI.md` for release/OS readiness. Existing GitHub Actions targets macOS Apple Silicon and Intel, Windows x64, Linux x64, Android ARM64, and web. **Build success is not media-functionality acceptance.**
 
 ## Licensing
 

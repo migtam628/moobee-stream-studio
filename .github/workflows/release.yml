@@ -29,12 +29,34 @@ jobs:
           const web = JSON.parse(fs.readFileSync('package.json','utf8')).version;
           const tauri = JSON.parse(fs.readFileSync('apps/desktop/src-tauri/tauri.conf.json','utf8')).version;
           const cargo = fs.readFileSync('apps/desktop/src-tauri/Cargo.toml','utf8').match(/^version\s*=\s*"([^"]+)"/m)?.[1];
+          const workspaceVersions = [
+            'apps/api/package.json',
+            'apps/web/package.json',
+            'apps/desktop/package.json'
+          ].map(path => [path, JSON.parse(fs.readFileSync(path,'utf8')).version]);
           const branch = process.env.GITHUB_REF_NAME || '';
-          if (!branch.startsWith('release/v' + web + '-') || tauri !== web || cargo !== web) {
-            console.error('Release ref, npm, Tauri and Cargo versions must match:', {branch, web, tauri, cargo});
+          const match = /^release\/v(\d+\.\d+\.\d+)-alpha\.(\d+)$/.exec(branch);
+          // Existing 0.3.x experimental builds use the core package version.
+          // Future signed updater releases should set full prerelease versions.
+          if (!match || web !== match[1] || tauri !== web || cargo !== web ||
+              workspaceVersions.some(([,version]) => version !== web)) {
+            console.error('Only aligned experimental alpha versions can publish:', {
+              branch, web, tauri, cargo, workspaceVersions
+            });
             process.exit(1);
           }
           NODE
+      - name: Refuse already-published GitHub release tags
+        if: startsWith(github.ref, 'refs/heads/release/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF_NAME#release/}"
+          # Never overwrite or silently rebuild assets under a published tag.
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            echo "::error::Tag $TAG already exists. Create a new release/v*-alpha.N branch."
+            exit 1
+          fi
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -51,6 +73,8 @@ jobs:
           fi
       - name: Validate native AVI writer including full video decode
         run: bash scripts/check-avi-muxer.sh
+      - name: Validate synthetic MP4 decode, early-stop and audible-audio QA
+        run: bash scripts/check-mp4-acceptance.sh
 
   web:
     name: Self-hosted web distribution
@@ -117,6 +141,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev librsvg2-dev libayatana-appindicator3-dev patchelf
       - run: npm ci
+      - name: Set macOS 13 deployment target for native build
+        if: runner.os == 'macOS'
+        run: echo 'MACOSX_DEPLOYMENT_TARGET=13.0' >> "$GITHUB_ENV"
+      - name: Validate native Swift-linked MP4 box tests on macOS
+        if: runner.os == 'macOS'
+        working-directory: apps/desktop/src-tauri
+        run: cargo test --lib mp4_validation::tests
+          cargo test --lib scene_compositor::tests
       - name: Build desktop installer
         uses: tauri-apps/tauri-action@v1
         env:
@@ -124,6 +156,14 @@ jobs:
         with:
           projectPath: apps/desktop
           args: ${{ matrix.args }}
+      - name: Validate packaged macOS minimum version and Swift runtime
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          DMG="$(find apps/desktop/src-tauri/target/release/bundle/dmg -maxdepth 1 -type f -name '*.dmg' -print -quit)"
+          test -n "$DMG" || { echo "::error::Built macOS DMG not found"; exit 1; }
+          bash scripts/verify-macos-app-bundle.sh --dmg "$DMG"
       - name: Collect installer files
         shell: bash
         run: |
@@ -205,18 +245,21 @@ jobs:
           done
           find release-assets -type f -name 'moobee-stream-studio-android-arm64-debug.apk' -print -quit | grep -q . || { echo "Missing Android APK"; exit 1; }
           find release-assets -type f -name 'moobee-stream-studio-web-*.tar.gz' -print -quit | grep -q . || { echo "Missing web distribution"; exit 1; }
+          node scripts/build-release-manifest.mjs release-assets "$TAG" "$GITHUB_SHA" > RELEASE-MANIFEST.json
           while IFS= read -r -d '' file; do
             ( cd "$(dirname "$file")" && sha256sum "$(basename "$file")" )
           done < <(find release-assets -type f -print0 | sort -z) > SHA256SUMS.txt
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Refreshing existing prerelease assets for $TAG"
-            gh release upload "$TAG" "${FILES[@]}" SHA256SUMS.txt --clobber
-            gh release edit "$TAG" --title "MooBee Stream Studio $TAG — Standalone Capture Alpha" --notes-file docs/RELEASE_NOTES.md --prerelease
-          else
-            gh release create "$TAG" "${FILES[@]}" SHA256SUMS.txt \
-              --target "$GITHUB_SHA" \
-              --title "MooBee Stream Studio $TAG — Standalone Capture Alpha" \
-              --notes-file docs/RELEASE_NOTES.md \
-              --prerelease
+          sha256sum RELEASE-MANIFEST.json >> SHA256SUMS.txt
+          # Protect artifact provenance: a tag is immutable from our pipeline.
+          # Releasing a correction requires a fresh alpha/beta/rc identifier.
+          if gh release view "$TAG" >/dev/null 2>&1 || \
+             gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            echo "::error::Refusing to reuse already published release/tag $TAG"
+            exit 1
           fi
+          gh release create "$TAG" "${FILES[@]}" RELEASE-MANIFEST.json SHA256SUMS.txt \
+            --target "$GITHUB_SHA" \
+            --title "MooBee Stream Studio $TAG — Standalone Capture Alpha" \
+            --notes-file docs/RELEASE_NOTES.md \
+            --prerelease
 

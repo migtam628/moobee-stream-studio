@@ -8,7 +8,11 @@ import {
 import type { LucideIcon } from 'lucide-react'
 import { isStaticPreview, request, runningInTauri, subscribeEvents } from './api'
 import { version as appVersion } from '../../../package.json'
+import { buildIdentity } from './buildIdentity'
 import BrowserRecorder from './BrowserRecorder'
+import QuickCapture from './QuickCapture'
+import ServiceDiagnostics from './ServiceDiagnostics'
+import GithubUpdates from './GithubUpdates'
 import { offline, type Activity as ActivityItem, type Alert, type StudioStatus } from './types'
 
 type Tab = 'Studio' | 'Scenes' | 'Overlays' | 'Alerts' | 'Multistream' | 'AI Sidekick' | 'Clips' | 'Chatbot' | 'Analytics' | 'Settings'
@@ -70,25 +74,32 @@ function formatElapsed(seconds: number) {
 
 function ScenePreview({ status, label, previewScene }: { status: StudioStatus; label: string; previewScene: string }) {
   const [image, setImage] = useState('')
+  const [previewError, setPreviewError] = useState('')
   useEffect(() => {
     if (!status.connected || !previewScene) { setImage(''); return }
     let cancelled = false
     async function load() {
       try {
         const response = await request<{ image: string }>(`/studio/snapshot?scene=${encodeURIComponent(previewScene)}`)
-        if (!cancelled) setImage(response.image)
-      } catch { if (!cancelled) setImage('') }
+        if (!cancelled) { setImage(response.image ?? ''); setPreviewError('') }
+      } catch (error) {
+        if (!cancelled) {
+          setImage('')
+          setPreviewError((error as Error).message || 'Could not render native scene still preview')
+        }
+      }
     }
     void load()
     const timer = setInterval(() => void load(), 5000)
     return () => { cancelled = true; clearInterval(timer) }
   }, [previewScene, status.connected])
   return <div className="preview-block">
-    <div className="preview-heading"><span><Monitor size={15}/>{label}</span><span>{status.connected ? 'Native screenshot · every 5 sec' : 'Local studio offline'}</span></div>
+    <div className="preview-heading"><span><Monitor size={15}/>{label}</span><span>{status.connected ? 'Composite still preview · every 5 sec' : 'Local studio offline'}</span></div>
     <div className="preview-canvas">
       {image ? <img src={image} alt={`MooBee scene: ${previewScene}`} /> : <div className="preview-empty"><Radio size={34}/><strong>{status.connected ? 'No preview available' : 'Your stream starts here'}</strong><span>{status.connected ? 'Add or enable a display source in this scene' : 'Add a native display source to preview this scene'}</span></div>}
       {status.streaming && <span className="live-flag">LIVE</span>}
     </div>
+    {previewError && <small className="preview-error" role="status">{previewError}</small>}
   </div>
 }
 
@@ -165,10 +176,13 @@ function MixerPanel({ status, perform, pending }: { status: StudioStatus; perfor
 }
 
 function Studio({ status, perform, pending, setTab }: { status: StudioStatus; perform: (path: string, body: object) => Promise<boolean>; pending: boolean; setTab: (t: Tab) => void }) {
-  return <><div className="workspace-heading"><div><h1>Studio</h1><p>{isStaticPreview ? 'Explore the independent MooBee Stream Studio interface.' : 'Broadcast, manage scenes, audio, and your stream tools.'}</p></div><span className={`status-pill ${status.connected ? 'positive' : ''}`}><span className="status-dot"/>{isStaticPreview ? 'Public preview' : status.connected ? 'Local studio ready' : 'Local studio offline'}</span></div>
-    <div className="preview-grid"><ScenePreview status={status} label={status.studioMode ? 'Preview · next scene' : 'Preview · mirrored'} previewScene={status.previewScene || status.currentScene}/><div className="transition-slot"><button className="transition-button" disabled={!status.studioMode || !status.connected || pending} title="Take preview scene live" onClick={() => void perform('/studio/action', { action: 'transition' })}><RefreshCcw size={20}/><span>Take</span></button></div><ScenePreview status={status} label="Program · live output" previewScene={status.currentScene}/></div>
-    <div className="broadcast-toolbar"><button className={`tool-button ${status.studioMode ? 'tool-active' : ''}`} disabled={!status.connected || pending} onClick={() => void perform('/studio/action', { action: 'studioMode', studioModeEnabled: !status.studioMode })}><Layers size={17}/>{status.studioMode ? 'Studio Mode On' : 'Enable Studio Mode'}</button><button className={`tool-button ${status.recording ? 'tool-active' : ''}`} disabled={!status.recordAvailable || pending} title="Native recorder is under development" onClick={() => void perform('/studio/action', { action: 'record' })}><span className="record-dot"/>{status.recording ? 'Stop Recording' : 'Record (planned)'}</button><button className="tool-button" onClick={() => setTab('Overlays')}><LayoutGrid size={16}/>Overlays</button><button className="tool-button" onClick={() => setTab('Alerts')}><Bell size={16}/>Test Alerts</button><button className="tool-button" onClick={() => setTab('Settings')}><Settings2 size={16}/>Engine Settings</button></div>
+  return <><div className="workspace-heading"><div><h1>Studio</h1><p>{isStaticPreview ? 'Explore the independent MooBee Stream Studio interface.' : 'Manage scenes and test native capture. Full recording, compositing and streaming are still in development.'}</p></div><span className={`status-pill ${status.connected ? 'positive' : ''}`}><span className="status-dot"/>{isStaticPreview ? 'Public preview' : status.connected ? 'Scene editor ready · output unavailable' : 'Local studio offline'}</span></div>
+    <div className="preview-grid"><ScenePreview status={status} label={status.studioMode ? 'Preview · next scene' : 'Preview · mirrored'} previewScene={status.previewScene || status.currentScene}/><div className="transition-slot"><button className="transition-button" disabled={!status.studioMode || !status.connected || pending} title="Take preview scene live" onClick={() => void perform('/studio/action', { action: 'transition' })}><RefreshCcw size={20}/><span>Take</span></button></div><ScenePreview status={status} label="Program · still preview (not live output)" previewScene={status.currentScene}/></div>
+    <div className="broadcast-toolbar"><button className={`tool-button ${status.studioMode ? 'tool-active' : ''}`} disabled={!status.connected || pending} onClick={() => void perform('/studio/action', { action: 'studioMode', studioModeEnabled: !status.studioMode })}><Layers size={17}/>{status.studioMode ? 'Studio Mode On' : 'Enable Studio Mode'}</button><button className={`tool-button ${status.recording ? 'tool-active' : ''}`} disabled={!status.recordAvailable || pending} title="Native recorder is under development" onClick={() => void perform('/studio/action', { action: 'record' })}><span className="record-dot"/>{status.recording ? 'Stop Recording' : 'Record (planned)'}</button><button className="tool-button" onClick={() => document.getElementById('quick-capture')?.scrollIntoView({ behavior: 'smooth' })}><Video size={16}/>Capture screen test</button><button className="tool-button" onClick={() => setTab('Overlays')}><LayoutGrid size={16}/>Overlays</button><button className="tool-button" onClick={() => setTab('Alerts')}><Bell size={16}/>Test Alerts</button><button className="tool-button" onClick={() => setTab('Settings')}><Settings2 size={16}/>Engine Settings</button></div>
     <div className="control-grid"><ScenesPanel status={status} perform={perform} pending={pending}/><SourcesPanel status={status} perform={perform} pending={pending}/><MixerPanel status={status} perform={perform} pending={pending}/></div>
+    <div id="quick-capture"><Panel title="Quick screen capture — native test" icon={Video}>
+      <QuickCapture openClips={() => setTab('Clips')}/>
+    </Panel></div>
   </>
 }
 
@@ -210,7 +224,10 @@ function Settings({ status }: { status: StudioStatus }) {
     } catch (error) { setCaptureError((error as Error).message); setDisplays([]) }
   }, [])
   useEffect(() => { void reload() }, [reload])
-  return <><div className="workspace-heading"><div><h1>Settings</h1><p>MooBee's own local production engine. No other broadcaster or WebSocket service required.</p></div></div>
+  return <><div className="workspace-heading"><div><h1>Settings</h1><p>Native services, capture devices and build readiness. Scene editing works locally; live output is not ready.</p></div></div>
+    <Panel title="Runtime Service Diagnostics" icon={Activity}>
+      <ServiceDiagnostics sceneConnected={status.connected}/>
+    </Panel>
     <div className="settings-layout"><Panel title="Native Capture" icon={Monitor}>
       <div className="info-block"><CheckCircle2 size={22}/><div><strong>Self-contained desktop studio</strong><p>Scene control and test alerts run inside MooBee. Display screenshots use packaged native Rust capture code on macOS and Windows.</p></div></div>
       <div className="info-block"><Video size={22}/><div><strong>Available displays</strong><p>{displays.length ? displays.map(d => `${d.name} (${d.width} × ${d.height})`).join(', ') : 'No displays detected in this edition. Use the installed Mac/Windows app, and grant screen recording permission where prompted.'}</p></div></div>
@@ -220,6 +237,9 @@ function Settings({ status }: { status: StudioStatus }) {
       <div className="info-block"><Link2 size={22}/><div><strong>Local scene API</strong><p>{status.connected ? 'Ready for scene control' : 'Start the desktop app or local API to edit scenes'} — no Native engine settings or third-party service.</p></div></div>
       <div className="info-block"><CircleHelp size={22}/><div><strong>Encoding and streaming</strong><p>Not implemented in this alpha. Recording and Go Live remain disabled until MooBee can produce and verify actual encoded video output.</p></div></div>
       <p className="help-text">The web preview has no local device permission. macOS needs Screen Recording access; Windows may request screen or device permissions.</p>
+    </Panel><Panel title="GitHub Releases & Updates" icon={RefreshCcw}>
+      <GithubUpdates appVersion={appVersion}/>
+      <p className="help-text">Installed frontend build: <code>{buildIdentity}</code>. Include this identifier when reporting recording errors or hardware-test results.</p>
     </Panel><Panel title="Scene Collection Backup" icon={Layers}>
       <div className="collection-backup">
         <p>Back up, restore or move scenes between MooBee installations. Imports are validated before replacing your current collection.</p>
@@ -283,7 +303,15 @@ function ClipLab() {
   const [probing, setProbing] = useState(false)
   const [probeResult, setProbeResult] = useState<CaptureProbe | null>(null)
   const [error, setError] = useState('')
+  const [macMp4Working, setMacMp4Working] = useState(false)
+  const [macMp4Supported, setMacMp4Supported] = useState(false)
+  const [macMicSupported, setMacMicSupported] = useState(false)
+  const [macMp4Reason, setMacMp4Reason] = useState('Checking native MP4 compatibility…')
+  const [captureSystemAudio, setCaptureSystemAudio] = useState(true)
+  const [captureMicrophone, setCaptureMicrophone] = useState(false)
+  const [macMp4Result, setMacMp4Result] = useState<{ path: string; bytes: number; durationSeconds: number; audioTrackVerified: boolean } | null>(null)
   const desktop = runningInTauri()
+  const isMacDesktop = desktop && /Macintosh|Mac OS X/i.test(navigator.userAgent)
 
   const reload = useCallback(async () => {
     if (!desktop) return
@@ -299,6 +327,25 @@ function ClipLab() {
     } catch (cause) { setError((cause as Error).message) }
   }, [desktop])
   useEffect(() => { void reload() }, [reload])
+  useEffect(() => {
+    if (!isMacDesktop) return
+    let active = true
+    void request<{ supported: boolean; requiredMacos: string; osVersion?: string; reason?: string; microphoneSupported?: boolean }>('/clips/macos-mp4-availability')
+      .then(result => {
+        if (active) {
+          setMacMp4Supported(result.supported)
+          setMacMicSupported(Boolean(result.microphoneSupported))
+          setMacMp4Reason(result.reason || 'Native MP4 availability not confirmed')
+        }
+      })
+      .catch(cause => {
+        if (active) {
+          setMacMp4Supported(false)
+          setMacMp4Reason('Could not check native MP4 compatibility: ' + (cause as Error).message)
+        }
+      })
+    return () => { active = false }
+  }, [isMacDesktop])
 
   async function selectClip(id: string, format: string = 'gif') {
     setError('')
@@ -342,6 +389,26 @@ function ClipLab() {
       setError('Native AVI recording failed: ' + (cause as Error).message)
     } finally { setWorking(false) }
   }
+  async function captureMacMP4() {
+    if (!isMacDesktop || !macMp4Supported || !displayId || working || probing || macMp4Working || seconds < 3 || seconds > 15) return
+    setMacMp4Working(true)
+    setMacMp4Result(null)
+    setError('')
+    try {
+      const result = await request<{ id: string; path: string; bytes: number; durationSeconds: number; audioTrackVerified: boolean }>('/clips/capture-mp4', {
+        displayId: Number(displayId),
+        seconds, systemAudio: captureSystemAudio, microphone: captureMicrophone
+      })
+      setMacMp4Result(result)
+      setSelectedClip(result.id)
+      setPreviewUrl('')
+      await reload()
+    } catch (cause) {
+      setError('Native macOS MP4 capture failed: ' + (cause as Error).message)
+    } finally {
+      setMacMp4Working(false)
+    }
+  }
   async function measureCapture() {
     if (!desktop || !displayId || working || probing) return
     setProbing(true)
@@ -375,6 +442,14 @@ function ClipLab() {
               {[2, 4, 6, 8, 10].map(value => <option key={value} value={value}>{value} seconds</option>)}
             </select>
           </label>
+          {isMacDesktop && <div className="clip-mp4-options">
+            <p><strong>Experimental native H.264 MP4 (macOS 14+)</strong> — display capture using ScreenCaptureKit. It does not yet capture MooBee’s saved scenes, webcam overlay, or provide streaming.</p>
+            <label><input type="checkbox" checked={captureSystemAudio} disabled={working || probing || macMp4Working}
+              onChange={event => setCaptureSystemAudio(event.target.checked)}/> Include system audio when available</label>
+            <label><input type="checkbox" checked={captureMicrophone} disabled={working || probing || macMp4Working || !macMicSupported}
+              onChange={event => setCaptureMicrophone(event.target.checked)}/> Request microphone audio (macOS 15+ only)</label>
+            <small>Mac screen and microphone permissions may be required. Requesting audio does not guarantee an audio track; check the saved file independently.</small>
+          </div>}
           <div className="clip-actions">
             <button className="primary-button" disabled={!desktop || !displayId || working || probing} onClick={() => void capture()}>
               <Film size={17}/>{working ? 'Capturing frames…' : 'Capture Silent GIF'}
@@ -382,16 +457,29 @@ function ClipLab() {
             <button className="secondary-button" disabled={!desktop || !displayId || working || probing || seconds > 8} onClick={() => void captureAvi()} title={seconds > 8 ? 'AVI test recording supports 2–8 seconds' : 'Save a silent MJPEG AVI video'}>
               <Video size={17}/>Capture Video AVI
             </button>
+            {isMacDesktop && <button className="secondary-button" disabled={!macMp4Supported || !displayId || working || probing || macMp4Working || seconds < 3 || seconds > 15}
+              onClick={() => void captureMacMP4()} title={!macMp4Supported ? macMp4Reason : seconds < 3 ? 'Select 4–10 seconds' : 'Native H.264 MP4 test'}>
+              <Video size={17}/>{macMp4Working ? 'Capturing native MP4…' : 'Capture MP4 (macOS 14+ test)'}
+            </button>}
+            {isMacDesktop && !macMp4Supported && <small role="status">{macMp4Reason} · GIF and silent AVI capture remain available.</small>}
             <button className="secondary-button" disabled={!desktop || working} onClick={() => void reload()}><RefreshCcw size={16}/>Refresh</button>
           </div>
           <p className="help-text">{desktop ? 'All files stay on your computer. Grant Screen Recording permission on macOS if prompted. AVI playback is available in external players such as VLC.' : 'Native test capture is only available in the installed Windows/macOS app. Web and Android editions cannot use native GIF/AVI capture.'}</p>
           {error && <p role="alert" className="clip-error">{error}</p>}
+          {macMp4Result && <div className="clip-result" role="status"><CheckCircle2 size={18}/><div>
+            <strong>MP4 file saved — playback/audio unverified</strong>
+            <small>{macMp4Result.durationSeconds}s requested · {(macMp4Result.bytes / (1024 * 1024)).toFixed(2)} MB · H.264 test</small>
+            <code>{macMp4Result.path}</code>
+            <button className="secondary-button" onClick={() => void navigator.clipboard.writeText(macMp4Result.path)}>
+              <Copy size={15}/>Copy file path</button>
+            <p>Open the MP4 in QuickTime or VLC to verify duration, image, and audio tracks. MooBee has not yet verified the encoded audio.</p>
+          </div></div>}
           {lastCapture && <div className="clip-result"><CheckCircle2 size={18}/><div><strong>Saved {lastCapture.frameCount} frames · {lastCapture.format.toUpperCase()}</strong><small>{lastCapture.durationSeconds}s · {lastCapture.width}×{lastCapture.height}{lastCapture.fps ? ` · ${lastCapture.fps} fps` : ''} · {(lastCapture.bytes / (1024 * 1024)).toFixed(2)} MB</small><code>{lastCapture.path}</code><button className="secondary-button" onClick={() => void navigator.clipboard.writeText(lastCapture.path)}><Copy size={15}/>Copy file path</button></div></div>}
         </div>
       </Panel>
       <Panel title="Local test clips" icon={Film}>
         <div className="clip-preview">
-          {selected?.format === 'avi' ? <div className="preview-empty"><Film size={32}/><strong>AVI video saved</strong><span>Use the saved path below to open the file in VLC or another MJPEG AVI-capable player.</span></div> :
+          {(selected?.format === 'avi' || selected?.format === 'mp4') ? <div className="preview-empty"><Film size={32}/><strong>Video file saved</strong><span>Use the local path below to open AVI in VLC or MP4 in QuickTime/VLC for playback and audio checks.</span></div> :
             previewUrl ? <img src={previewUrl} alt="Animated local test capture preview"/> :
             <div className="preview-empty"><Film size={32}/><strong>No clip selected</strong><span>Capture a GIF or AVI test clip and select it from the list</span></div>}
         </div>
@@ -400,7 +488,14 @@ function ClipLab() {
             <Film size={16}/><span className="truncate">Test clip {clips.length - index} · {(clip.format ?? 'gif').toUpperCase()}</span><small>{(clip.bytes / (1024 * 1024)).toFixed(2)} MB</small>
           </button>) : <p className="empty-list">No test clips have been saved on this device.</p>}
         </div>
-        {selected && <div className="clip-path"><span>Saved locally</span><code>{selected.path}</code><button className="secondary-button" onClick={() => void navigator.clipboard.writeText(selected.path)}><Copy size={15}/>Copy path</button></div>}
+        {selected && <div className="clip-path"><span>Saved locally</span><code>{selected.path}</code>
+          <div className="clip-actions">
+            <button className="secondary-button" onClick={() => void navigator.clipboard.writeText(selected.path)}><Copy size={15}/>Copy path</button>
+            {isMacDesktop && <button className="secondary-button" onClick={() => {
+              void request('/clips/reveal', { clipId: selected.id })
+                .catch(cause => setError('Finder could not reveal clip: ' + (cause as Error).message))
+            }}><Film size={15}/>Show in Finder</button>}
+          </div></div>}
       </Panel>
     </div>
     {desktop && <Panel title="Native Capture Input Diagnostic" icon={Activity}>
@@ -418,7 +513,7 @@ function ClipLab() {
           </div>}
         </div>
       </Panel>}
-    <div className="clip-roadmap"><strong>Still to build:</strong> continuous high-frame-rate capture, the GPU compositor, microphone and system audio, hardware video encoding, recoverable MP4/MKV recordings, and RTMP/RTMPS streaming. The main Record and Go Live controls remain disabled until those features are tested.</div>
+    <div className="clip-roadmap"><strong>Still to build:</strong> independent Windows MP4/audio recording, cross-platform synchronized A/V and webcam scene composition, sustained capture, recoverable containers, and RTMP/RTMPS livestreaming. The main Record and Go Live controls remain disabled until those features are tested.</div>
   </>
 }
 
@@ -448,7 +543,7 @@ export default function App() {
   const go = (target: Tab) => { setTab(target); setDrawerOpen(false) }
   return <div className="app-shell">
     <header className="app-topbar"><div className="brand"><RadioTower size={27}/><span>MooBee <em>Studio</em></span></div><div className="top-divider"/><div className="project-select"><span>Workspace</span><strong>My Studio</strong></div><div className="top-spacer"/><div className="destination-pills"><span className="dest-label">Destinations</span><span className="destination"><span className="dest-icon twitch">T</span>Twitch <small>Not linked</small></span><span className="destination"><span className="dest-icon youtube">▶</span>YouTube <small>Not linked</small></span><span className="destination"><span className="dest-icon kick">K</span>Kick <small>Not linked</small></span></div><div className="top-divider"/><span className="profile">MT</span><button className="mobile-menu" type="button" aria-label={drawerOpen ? 'Close navigation' : 'Open navigation'} aria-expanded={drawerOpen} onClick={() => setDrawerOpen(!drawerOpen)}><LayoutGrid size={22}/></button></header>
-    <aside className={`sidebar ${drawerOpen ? 'drawer-open' : ''}`}><nav>{navigation.map(({ label, icon: Icon }) => <button key={label} className={`nav-item ${tab === label ? 'active' : ''}`} onClick={() => go(label)}><Icon size={19}/><span>{label}</span></button>)}</nav><div className="sidebar-bottom"><div className="release-label">ALPHA {appVersion} (DEV)</div><button onClick={() => go('Settings')}><CircleHelp size={16}/>Engine guide</button></div></aside>
+    <aside className={`sidebar ${drawerOpen ? 'drawer-open' : ''}`}><nav>{navigation.map(({ label, icon: Icon }) => <button key={label} className={`nav-item ${tab === label ? 'active' : ''}`} onClick={() => go(label)}><Icon size={19}/><span>{label}</span></button>)}</nav><div className="sidebar-bottom"><div className="release-label" title="Release tag and immutable GitHub commit"><span>BUILD {buildIdentity}</span></div><button onClick={() => go('Settings')}><CircleHelp size={16}/>Engine guide</button></div></aside>
     <main className="workspace">
       {error && <div className="error-banner" role="alert"><span>{error}</span><button onClick={() => setError('')}><X size={17}/></button></div>}
       {(tab === 'Studio' || tab === 'Scenes') && <Studio status={status} perform={perform} pending={pending} setTab={go}/>}
@@ -463,6 +558,6 @@ export default function App() {
       <Panel title="Quick Actions" icon={SlidersHorizontal}><div className="quick-actions"><button onClick={() => go('Alerts')}><Bell size={17}/>Test an alert</button><button onClick={() => go('Overlays')}><LayoutGrid size={17}/>Browser overlay</button><button onClick={() => go('Clips')}><Film size={17}/>Capture a test GIF</button><button onClick={() => go('Settings')}><Terminal size={17}/>Native engine settings</button></div></Panel>
       {alert && <div className="recent-test"><Bell size={18}/>Last test: {alert.name}</div>}
     </aside>
-    <footer className="status-footer"><div className={`health ${status.connected ? 'healthy' : ''}`}><span className="status-dot"/>{status.connected ? (status.streaming ? 'Live Broadcast' : 'Studio Ready (No Output)') : 'Local engine offline'}</div><div className="footer-data"><span>Encoder <b>In development</b></span><span>Bitrate <b>{status.bitrateKbps === null ? '—' : `${status.bitrateKbps} kbps`}</b></span><span>Uptime <b>{formatElapsed(status.streamSeconds)}</b></span><span>Dropped <b>{status.droppedFrames === null ? '—' : status.droppedFrames}</b></span></div><button className={`go-live ${status.streaming ? 'stop-live' : ''}`} disabled={!status.broadcastAvailable || pending} title="The native streaming encoder is not implemented yet" onClick={() => void perform('/studio/action', { action: 'stream' })}>{status.streaming ? <Square size={18}/> : <Radio size={20}/>} {status.streaming ? 'End Stream' : 'Go Live (planned)'}</button></footer>
+    <footer className="status-footer"><div className={`health ${status.connected ? 'healthy' : ''}`}><span className="status-dot"/>{status.connected ? (status.streaming ? 'Live Broadcast' : 'Scene Editor Ready · No Live Output') : 'Local engine offline'}</div><div className="footer-data"><span>Encoder <b>In development</b></span><span>Bitrate <b>{status.bitrateKbps === null ? '—' : `${status.bitrateKbps} kbps`}</b></span><span>Uptime <b>{formatElapsed(status.streamSeconds)}</b></span><span>Dropped <b>{status.droppedFrames === null ? '—' : status.droppedFrames}</b></span></div><button className={`go-live ${status.streaming ? 'stop-live' : ''}`} disabled={!status.broadcastAvailable || pending} title="The native streaming encoder is not implemented yet" onClick={() => void perform('/studio/action', { action: 'stream' })}>{status.streaming ? <Square size={18}/> : <Radio size={20}/>} {status.streaming ? 'End Stream' : 'Go Live (planned)'}</button></footer>
   </div>
 }

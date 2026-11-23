@@ -122,6 +122,9 @@ app.get('/api/studio/snapshot', (_req, res) => {
 app.get('/api/clips', (_req, res) => res.json({
   available: false, clips: [], reason: 'GIF test clips are available in the installed macOS/Windows desktop app'
 }));
+app.post('/api/clips/capture-mp4', (_req, res) => res.status(501).json({
+  error: 'Native H.264 MP4 capture requires the installed macOS 15+ application'
+}));
 app.post('/api/clips/capture-avi', (_req, res) => res.status(501).json({
   error: 'Native MJPEG AVI recording is available only in the installed Windows/macOS app'
 }));

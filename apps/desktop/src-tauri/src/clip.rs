@@ -178,12 +178,13 @@ pub fn list_test_clips(app: tauri::AppHandle) -> Result<Vec<ClipInfo>, String> {
     for item in fs::read_dir(directory).map_err(|error| error.to_string())? {
         let entry = item.map_err(|error| error.to_string())?;
         let name = entry.file_name().to_string_lossy().into_owned();
-        // Both capture experiments stay under the private UUID-only clip directory.
+        // Native capture experiments stay under a private UUID-only clips folder.
         let parsed = name
             .strip_prefix("clip-")
             .and_then(|filename| {
                 filename.strip_suffix(".gif").map(|id| (id, "gif", MAX_CLIP_BYTES))
                     .or_else(|| filename.strip_suffix(".avi").map(|id| (id, "avi", 64 * 1024 * 1024)))
+                    .or_else(|| filename.strip_suffix(".mp4").map(|id| (id, "mp4", 256 * 1024 * 1024)))
             });
         if let Some((id, format, max_size)) = parsed {
             if uuid::Uuid::parse_str(id).is_ok_and(|uuid| uuid.to_string() == id) {
@@ -208,6 +209,55 @@ pub fn list_test_clips(app: tauri::AppHandle) -> Result<Vec<ClipInfo>, String> {
     clips.sort_by(|a, b| b.modified_ms.cmp(&a.modified_ms).then_with(|| b.id.cmp(&a.id)));
     clips.truncate(50);
     Ok(clips)
+}
+
+/// Reveal only a clip with a validated UUID inside MooBee's own private
+/// test-clips directory. Never pass arbitrary UI paths to an OS command.
+#[tauri::command]
+pub fn reveal_test_clip(app: tauri::AppHandle, clip_id: String) -> Result<(), String> {
+    let parsed = uuid::Uuid::parse_str(&clip_id)
+        .map_err(|_| "Invalid clip identifier")?;
+    if parsed.to_string() != clip_id {
+        return Err("Invalid clip identifier".into());
+    }
+
+    let folder = clips_folder(&app)?;
+    let mut selected = None;
+    for extension in ["mp4", "avi", "gif"] {
+        let candidate = folder.join(format!("clip-{clip_id}.{extension}"));
+        if let Ok(metadata) = fs::symlink_metadata(&candidate) {
+            if metadata.is_file() && !metadata.file_type().is_symlink() {
+                selected = Some(candidate);
+                break;
+            }
+        }
+    }
+    let path = selected.ok_or_else(|| "This clip is no longer available on this device".to_owned())?;
+    let safe_folder = folder.canonicalize()
+        .map_err(|error| format!("Could not verify clips folder: {error}"))?;
+    let safe_file = path.canonicalize()
+        .map_err(|error| format!("Could not verify clip: {error}"))?;
+    if !safe_file.starts_with(&safe_folder) {
+        return Err("The selected clip is outside MooBee's private storage".into());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let status = std::process::Command::new("open")
+            .arg("-R")
+            .arg(&safe_file)
+            .status()
+            .map_err(|error| format!("Could not open Finder: {error}"))?;
+        if !status.success() {
+            return Err("Finder could not reveal the selected clip".into());
+        }
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = safe_file;
+        Err("Reveal in Finder is available on macOS only; use Copy path on other platforms".into())
+    }
 }
 
 #[tauri::command]
