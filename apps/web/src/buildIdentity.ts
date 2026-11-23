@@ -17,6 +17,6 @@ export function formatBuildIdentity(version: string, reference: string, sha: str
 
 export const buildIdentity = formatBuildIdentity(
   appVersion,
-  __MOOBEE_RELEASE_REF__,
-  __MOOBEE_BUILD_SHA__
+  typeof __MOOBEE_RELEASE_REF__ === 'string' ? __MOOBEE_RELEASE_REF__ : 'dev',
+  typeof __MOOBEE_BUILD_SHA__ === 'string' ? __MOOBEE_BUILD_SHA__ : 'local'
 )
