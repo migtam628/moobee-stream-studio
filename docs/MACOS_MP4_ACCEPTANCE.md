@@ -6,6 +6,39 @@ This experiment adds a **native H.264 MP4 screen recorder on macOS 15+** with op
 
 The Rust command records for a user-selected maximum of **3–120 seconds** (or stops earlier when requested) into a private `.mp4.part` file and publishes the finished `.mp4` only after the ScreenCaptureKit completion delegate, bounded output-size checks, top-level MP4 box validation (`ftyp`, `moov`, non-empty `mdat`, and box sizes), and file synchronization. A successful command means the file was finalized, **not** that microphone/system audio was independently verified.
 
+## Sonoma 14.2 first-party MP4 fallback (experimental)
+
+macOS 14 does **not** provide `SCRecordingOutput`. MooBee's experimental
+fallback registers `SCStreamOutput`, receives ScreenCaptureKit video and
+system-audio sample buffers and writes H.264/AAC MP4 using `AVAssetWriter`.
+The full program scene, webcam overlay and RTMP broadcaster are not included.
+
+- [ ] On the user's **macOS 14.2 Apple Silicon MacBook Pro**, confirm Settings
+  reports OS `14.2.x`, MP4 engine `sonoma-avassetwriter`, and an available
+  test backend. Confirm the microphone checkbox is disabled with a macOS 15+
+  explanation.
+- [ ] Grant macOS Screen Recording permission when requested; restart MooBee
+  when required by the system privacy dialog.
+- [ ] Record a **15-second screen-only MP4**, with microphone and system audio
+  unchecked. Verify H.264, roughly expected duration, motion, full decode,
+  QuickTime playback, and seeking. Do not infer success from file existence.
+- [ ] Start a **60-second maximum MP4** and click **Stop and save MP4**
+  after about 15 seconds. Verify that only a finalized file is published,
+  contains nonzero video frames and remains playable/seekable.
+- [ ] Request **system audio** and separately verify an AAC track and audible
+  synchronized content, then repeat with no audio requested and confirm no
+  unwanted track. Mac 14 does not capture microphone through this pathway.
+- [ ] Repeat recording twice, restart the application, and reopen clips;
+  deny screen permissions and verify the app surfaces an actionable error.
+- [ ] Monitor CPU/dropped frames and memory usage. A two-minute bound is
+  **not** equivalent to a 30-minute/2-hour production recording acceptance.
+- [ ] Keep full studio Record/Go Live gated until composed frames, microphone
+  mixing, secure stream credentials and RTMPS output have been implemented.
+
+If the file fails decoding or a callback reports an error, keep the diagnostic
+log and any partial `.mp4.part` out of the published clips list. Never call the
+experimental recorder beta-ready based only on GitHub compile status.
+
 ## macOS compatibility validation
 
 The MooBee desktop shell is now packaged with macOS **13.0+** minimum deployment
