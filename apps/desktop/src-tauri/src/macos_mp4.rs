@@ -66,7 +66,9 @@ fn record_mp4_to_private_folder(
     let id = uuid::Uuid::new_v4().to_string();
     let destination = folder.join(format!("clip-{id}.mp4"));
     // Same-directory rename prevents an incomplete file from being listed.
-    let temporary = folder.join(format!(".clip-{id}.mp4.part"));
+    // AVAssetWriter on Sonoma expects an MP4 output URL. Keep the temporary
+    // file hidden, with the real .mp4 extension, until full file validation.
+    let temporary = folder.join(format!(".clip-{id}.part.mp4"));
     let path = CString::new(temporary.to_string_lossy().as_bytes())
         .map_err(|_| "Invalid native MP4 destination path".to_owned())?;
     let mut error = [0 as c_char; 512];
