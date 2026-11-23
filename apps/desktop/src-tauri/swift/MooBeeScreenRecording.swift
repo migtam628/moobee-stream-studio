@@ -9,6 +9,54 @@ import CoreMedia
 import Foundation
 import ScreenCaptureKit
 
+/**
+ * Thread-safe stop signal shared with Rust. This asks ScreenCaptureKit to
+ * finalize the current session; it never publishes an unfinalized media file.
+ * The existing Rust capture mutex still prevents concurrent record requests.
+ */
+private final class RecordingStopControl: @unchecked Sendable {
+    private let lock = NSLock()
+    private var active = false
+    private var stopping = false
+
+    func begin() {
+        lock.lock()
+        active = true
+        stopping = false
+        lock.unlock()
+    }
+
+    func requestStop() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard active else { return false }
+        stopping = true
+        return true
+    }
+
+    func shouldStop() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return stopping
+    }
+
+    func end() {
+        lock.lock()
+        active = false
+        stopping = false
+        lock.unlock()
+    }
+}
+
+private let recordingStopControl = RecordingStopControl()
+
+/// Non-blocking Rust-to-Swift cancellation signal. Returns 1 only when
+/// a recording is active; stop completion is reported by the recording task.
+@_cdecl("moobee_macos_request_stop_mp4")
+public func moobee_macos_request_stop_mp4() -> Int32 {
+    recordingStopControl.requestStop() ? 1 : 0
+}
+
 @available(macOS 15.0, *)
 private final class RecordingCompletion: NSObject, SCRecordingOutputDelegate {
     private let lock = NSLock()
@@ -102,7 +150,12 @@ private func recordNativeMP4(
     try stream.addRecordingOutput(output)
     try await stream.startCapture()
     do {
-        try await Task.sleep(nanoseconds: UInt64(seconds) * 1_000_000_000)
+        // Check at quarter-second intervals for explicit user stop requests.
+        // Recording duration remains bounded even without a stop request.
+        let deadline = Date().addingTimeInterval(TimeInterval(seconds))
+        while Date() < deadline && !recordingStopControl.shouldStop() {
+            try await Task.sleep(nanoseconds: 250_000_000)
+        }
     } catch {
         try? await stream.stopCapture()
         throw error
@@ -170,7 +223,7 @@ public func moobee_macos_record_mp4(
     errorText: UnsafeMutablePointer<CChar>?,
     errorLength: Int32
 ) -> Int32 {
-    guard let output, (3...15).contains(durationSeconds),
+    guard let output, (3...120).contains(durationSeconds),
           displayID != 0 else {
         copyError("Invalid native MP4 capture path, display or duration", to: errorText, size: errorLength)
         return -1
@@ -186,7 +239,9 @@ public func moobee_macos_record_mp4(
     }
 
     let result = RecordingBridgeResult()
+    recordingStopControl.begin()
     Task { @MainActor in
+        defer { recordingStopControl.end() }
         do {
             try await recordNativeMP4(
                 url: URL(fileURLWithPath: filePath),
