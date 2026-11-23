@@ -41,6 +41,7 @@ fn validate(seconds: u32, display_id: usize) -> Result<(), String> {
 #[cfg(target_os = "macos")]
 unsafe extern "C" {
     fn moobee_macos_mp4_supported() -> c_int;
+    fn moobee_macos_os_version(major: *mut c_int, minor: *mut c_int, patch: *mut c_int);
     fn moobee_macos_request_stop_mp4() -> c_int;
     fn moobee_macos_record_mp4(
         output_path: *const c_char,
@@ -144,17 +145,39 @@ fn record_mp4_to_private_folder(
 #[serde(rename_all = "camelCase")]
 pub struct MacOsMp4Availability {
     pub(crate) supported: bool,
+    pub(crate) os_version: Option<String>,
+    pub(crate) reason: String,
     required_macos: &'static str,
 }
 
 #[tauri::command]
 pub fn macos_mp4_availability() -> MacOsMp4Availability {
     #[cfg(target_os = "macos")]
-    let supported = unsafe { moobee_macos_mp4_supported() == 1 };
+    {
+        let mut major = 0;
+        let mut minor = 0;
+        let mut patch = 0;
+        unsafe { moobee_macos_os_version(&mut major, &mut minor, &mut patch); }
+        let os_version = format!("{major}.{minor}.{patch}");
+        let supported = unsafe { moobee_macos_mp4_supported() == 1 };
+        let reason = if supported {
+            "Native ScreenCaptureKit MP4 backend is available to test; recording and audio still require device verification".to_owned()
+        } else if major < 15 {
+            format!("This Mac is running macOS {os_version}; native MP4 requires macOS 15 or newer")
+        } else {
+            format!("macOS {os_version} meets the version requirement, but the native Swift recorder reports unavailable; inspect the bundled bridge")
+        };
+        MacOsMp4Availability { supported, os_version: Some(os_version), reason, required_macos: "15.0" }
+    }
     #[cfg(not(target_os = "macos"))]
-    let supported = false;
-
-    MacOsMp4Availability { supported, required_macos: "15.0" }
+    {
+        MacOsMp4Availability {
+            supported: false,
+            os_version: None,
+            reason: "Native ScreenCaptureKit MP4 recording is supported only on macOS 15+".to_owned(),
+            required_macos: "15.0",
+        }
+    }
 }
 
 /// Request a graceful stop for the active macOS MP4 session. The finalization
