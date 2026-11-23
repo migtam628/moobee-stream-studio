@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { CheckCircle2, Copy, Film, FolderOpen, Monitor, Square, Video } from 'lucide-react'
 import { request, runningInTauri } from './api'
 import { isScreenCapturePermissionDenied } from './capturePermission'
-import { singleProgramDisplayId } from './programDisplay'
+import { singleProgramDisplayId, programTestDisplayIds } from './programDisplay'
 
 type Display = { id: number; name: string; width: number; height: number }
 type Availability = { supported: boolean; requiredMacos: string; osVersion?: string | null; reason?: string; microphoneSupported?: boolean; engine?: string }
@@ -14,6 +14,9 @@ type CapturedFile = {
   durationSeconds: number | null
   requestedMaxSeconds?: number
   audioTrackVerified?: boolean
+  displayCount?: number
+  elapsedMs?: number
+  measuredSamplingFps?: number
 }
 
 /**
@@ -31,6 +34,7 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
   const [micSupported, setMicSupported] = useState(false)
   const [mp4AvailabilityReason, setMp4AvailabilityReason] = useState('Native MP4 availability has not been checked')
   const [duration, setDuration] = useState(6)
+  const [programAviDuration, setProgramAviDuration] = useState(4)
   const [systemAudio, setSystemAudio] = useState(false)
   const [microphone, setMicrophone] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -135,6 +139,30 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
     }
   }
 
+  async function captureProgramAviTest() {
+    if (!supportedDesktop || loading || busy) return
+    setBusy(true)
+    setStopRequested(false)
+    setSaved(null)
+    setError('')
+    try {
+      const collection = await request<unknown>('/studio/collection')
+      const displayIds = programTestDisplayIds(collection)
+      if (displayIds.some(id => !displays.some(display => display.id === id))) {
+        throw new Error('One of the Program displays is disconnected. Refresh displays and check the scene.')
+      }
+      const result = await request<CapturedFile>('/clips/capture-program-test-avi', {
+        displayIds, seconds: programAviDuration
+      })
+      setSaved(result)
+      await refreshSavedClips()
+    } catch (cause) {
+      setError('Program AVI test failed: ' + (cause as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function stopCapture() {
     if (!useMp4 || !busy || stopRequested) return
     try {
@@ -174,7 +202,7 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
   return <div className="quick-capture">
     <p className="help-text">
       Save a <strong>bounded test recording of one display</strong> using MooBee's native capture. On supported Macs, request up to 120 seconds and stop early with finalization.
-      This is not the composited Program feed and does not include saved scene overlays or webcam layers. Use Program display only chooses an existing single source; it does not render or record other scene layers.
+      The ordinary screen test records one display, not the composed Program scene. A separate silent Program AVI test below combines up to four display sources, without webcam, overlays or audio.
     </p>
     <div className="quick-capture-options">
       <label>Display
@@ -197,6 +225,20 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
       </button>
       <span className="quick-capture-format"><Video size={15}/>{formatLabel}</span>
     </div>
+    {supportedDesktop && <div className="clip-mp4-options">
+      <p><strong>Experimental Program display composition → AVI</strong> — combines up to four enabled display sources from the current Program scene (not Studio Preview). This is a short, silent 640×360 MJPEG test at a nominal 10 fps, not real-time Program encoding or a live stream.</p>
+      <div className="quick-capture-options">
+        <label>Test length
+          <select aria-label="Composited Program AVI test duration" value={programAviDuration} disabled={busy}
+            onChange={event => setProgramAviDuration(Number(event.target.value))}>
+            {[2, 4, 6, 8].map(seconds => <option key={seconds} value={seconds}>{seconds} seconds</option>)}
+          </select>
+        </label>
+        <button type="button" className="secondary-button" disabled={busy || loading}
+          onClick={() => void captureProgramAviTest()}><Video size={16}/>{busy ? 'Native capture in progress…' : 'Capture Program AVI test'}</button>
+      </div>
+      <small className="help-text">Native screenshots are sampled sequentially; capture can run slower than nominal AVI playback time. Saved output requires independent decode/playback verification. Camera, microphone, audio mixing, alerts, transforms and RTMPS are not included.</small>
+    </div>}
     {useMp4 && <div className="quick-capture-options">
       <label className="quick-capture-check"><input type="checkbox" checked={systemAudio} disabled={busy}
         onChange={event => setSystemAudio(event.target.checked)}/> Request system audio</label>
@@ -251,6 +293,12 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
           {' · '}
           {(saved.bytes / (1024 * 1024)).toFixed(2)} MB
         </small>
+        {saved.displayCount !== undefined && <p className="help-text" role="status">
+          {saved.displayCount} Program display source(s) composed · nominal {10} fps AVI ·
+          {typeof saved.measuredSamplingFps === 'number' ? ` ${saved.measuredSamplingFps.toFixed(1)} fps measured sampling` : ' capture performance unknown'} ·
+          {saved.elapsedMs !== undefined ? ` ${(saved.elapsedMs / 1000).toFixed(2)}s wall-clock capture` : ' elapsed time unknown'}.
+          AVI playback duration may differ from wall-clock capture time when frames arrive late.
+        </p>}
         <code>{saved.path}</code>
         <div className="clip-actions">
           {mac && <button type="button" className="secondary-button" onClick={() => void reveal()}>
