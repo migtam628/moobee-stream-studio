@@ -39,6 +39,7 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
   const [microphone, setMicrophone] = useState(false)
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [captureMode, setCaptureMode] = useState<'screen' | 'program' | null>(null)
   const [stopRequested, setStopRequested] = useState(false)
   const [error, setError] = useState('')
   const [permissionSettingsError, setPermissionSettingsError] = useState('')
@@ -118,6 +119,7 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
   async function capture() {
     if (!canRecord || !durations.includes(duration)) return
     setBusy(true)
+    setCaptureMode('screen')
     setStopRequested(false)
     setSaved(null)
     setError('')
@@ -135,6 +137,7 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
       setError('Native recording failed: ' + (cause as Error).message)
     } finally {
       setBusy(false)
+      setCaptureMode(null)
       setStopRequested(false)
     }
   }
@@ -142,6 +145,7 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
   async function captureProgramAviTest() {
     if (!supportedDesktop || loading || busy) return
     setBusy(true)
+    setCaptureMode('program')
     setStopRequested(false)
     setSaved(null)
     setError('')
@@ -160,11 +164,12 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
       setError('Program AVI test failed: ' + (cause as Error).message)
     } finally {
       setBusy(false)
+      setCaptureMode(null)
     }
   }
 
   async function stopCapture() {
-    if (!useMp4 || !busy || stopRequested) return
+    if (!useMp4 || !busy || captureMode !== 'screen' || stopRequested) return
     try {
       const result = await request<{ stopRequested: boolean }>('/clips/stop-mp4', {})
       if (!result.stopRequested) throw new Error('No active capture was found; retry if recording is still running')
@@ -250,7 +255,7 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
       <button className="primary-button" type="button" disabled={!canRecord} onClick={() => void capture()}>
         <Monitor size={16}/>{busy ? 'Recording and finalizing…' : 'Capture screen test'}
       </button>
-      {useMp4 && busy && <button className="secondary-button" type="button" disabled={stopRequested}
+      {useMp4 && busy && captureMode === 'screen' && <button className="secondary-button" type="button" disabled={stopRequested}
         onClick={() => void stopCapture()}><Square size={15}/>{stopRequested ? 'Stopping and finalizing…' : 'Stop and save MP4'}</button>}
       <button className="secondary-button" type="button" onClick={openClips}><Film size={16}/>Open Clips</button>
     </div>
@@ -283,10 +288,12 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
     {saved && <div className="clip-result" role="status">
       <CheckCircle2 size={18}/>
       <div>
-        <strong>Saved {saved.format.toUpperCase()} locally — playback{useMp4 ? ' and audio' : ''} not yet verified</strong>
+        <strong>Saved {saved.format.toUpperCase()} locally — playback{saved.format === 'mp4' ? ' and audio' : ''} not yet verified</strong>
         <small>
           {saved.durationSeconds !== null && Number.isFinite(saved.durationSeconds)
-            ? `${saved.durationSeconds.toFixed(2)}s recorded (container metadata)`
+            ? saved.displayCount !== undefined
+              ? `${saved.durationSeconds.toFixed(2)}s nominal AVI playback timeline (not independently verified)`
+              : `${saved.durationSeconds.toFixed(2)}s recorded (container metadata)`
             : 'Recorded duration not available from metadata'}
           {' · '}
           {saved.requestedMaxSeconds ?? duration}s maximum requested
@@ -311,7 +318,9 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
             <Film size={15}/>View Clips
           </button>
         </div>
-        <p className="help-text">An MP4 file can be finalized without audible audio. Open it in QuickTime or VLC to confirm playback and seeking. For a Stop-and-Save test, compare the actual duration above with when you pressed Stop. Reopen MooBee and check that the clip remains in Clips.</p>
+        <p className="help-text">{saved.displayCount !== undefined
+          ? 'This silent AVI is an experimental composite of sampled displays, not the encoded live Program feed. Open it in VLC, verify all screens, motion, duration and seeking; compare actual runtime with the requested test length.'
+          : 'A recording file can be finalized without verifying playback or audible audio. Open it in QuickTime or VLC to confirm playback and seeking. For a Stop-and-Save test, compare the actual duration above with when you pressed Stop. Reopen MooBee and check that the clip remains in Clips.'}</p>
       </div>
     </div>}
   </div>
