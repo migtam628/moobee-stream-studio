@@ -54,6 +54,10 @@ unsafe extern "C" {
     ) -> c_int;
 }
 
+fn temporary_mp4_filename(id: &str) -> String {
+    format!(".clip-{id}.part.mp4")
+}
+
 #[cfg(target_os = "macos")]
 fn record_mp4_to_private_folder(
     folder: std::path::PathBuf,
@@ -68,7 +72,7 @@ fn record_mp4_to_private_folder(
     // Same-directory rename prevents an incomplete file from being listed.
     // AVAssetWriter on Sonoma expects an MP4 output URL. Keep the temporary
     // file hidden, with the real .mp4 extension, until full file validation.
-    let temporary = folder.join(format!(".clip-{id}.part.mp4"));
+    let temporary = folder.join(temporary_mp4_filename(&id));
     let path = CString::new(temporary.to_string_lossy().as_bytes())
         .map_err(|_| "Invalid native MP4 destination path".to_owned())?;
     let mut error = [0 as c_char; 512];
@@ -237,13 +241,20 @@ pub async fn capture_macos_mp4(
     #[cfg(not(target_os = "macos"))]
     {
         let _ = (app, system_audio, microphone);
-        Err("This first H.264 MP4 adapter requires the installed macOS 15+ app; Windows native MP4 is still in development".into())
+        Err("This first H.264 MP4 adapter requires the installed macOS 14+ app; Windows native MP4 is still in development".into())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::validate;
+    use super::{temporary_mp4_filename, validate};
+    #[test]
+    fn test_hidden_mp4_temp_filename_for_avassetwriter() {
+        let name = temporary_mp4_filename("1234");
+        assert!(name.starts_with(".clip-"));
+        assert!(name.ends_with(".part.mp4"));
+        assert!(!name.starts_with("clip-"));
+    }
     #[test]
     fn test_recording_limits() {
         assert!(validate(3, 0).is_ok());
