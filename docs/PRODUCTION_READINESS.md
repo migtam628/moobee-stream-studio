@@ -15,7 +15,7 @@ MooBee must operate as its own installation and service. It may **bundle properl
 | Standalone installers | Tauri CI builds macOS ARM64/x64, Windows x64, Linux DEB, Android debug APK and a self-hosted web bundle | Signed/notarized production distribution, secure updates, supported OS hardware acceptance |
 | Scene editing and backup | Local scene state, basic source selection and validated JSON collections | Actual GPU-composited program/preview output |
 | Mac/Windows display capture | Screenshot, bounded GIF experiment and XCap continuous raw-frame diagnostic | OS permissions, capture cadence/latency, multiple displays, hotplug, protected content handling |
-| Native video-file experiment | Short silent 640x360 10fps MJPEG AVI on Mac/Windows; experimental macOS 15+ H.264 MP4 via ScreenCaptureKit | Hardware permission, real video/audio playback and sync, Windows MP4 parity, real scene composition and long-running recovery remain unverified |
+| Native video-file experiment | Short silent 640x360 10fps MJPEG AVI on Mac/Windows; experimental macOS 14+ H.264 MP4 via SCStreamOutput/AVAssetWriter (14.x) or SCRecordingOutput (15+) | Hardware permission, real video/audio playback and sync, Windows MP4 parity, real scene composition and long-running recovery remain unverified |
 | Browser-local recording | Browser canvas + screen, optional PiP webcam/audio via MediaRecorder | Real-browser permission/AV-sync tests; separate from installed native broadcaster |
 | API | Loopback Node control API, events and local persistence | Remote authentication/authorization, TLS, threat model, audit logging, recovery plans |
 | Alerts | Local preview/SSE overlay | Inclusion in actual broadcast-encoded pixels |
@@ -84,9 +84,10 @@ MooBee must operate as its own installation and service. It may **bundle properl
 
 ### 0.3.8 Mac native H.264 MP4 experiment
 
-- [x] Implemented scoped macOS 15+ ScreenCaptureKit video-to-MP4 recording bridge with selectable raw display identity, optional system/mic audio requests and a private atomic clip publish path.
+- [x] Implemented macOS 15+ ScreenCaptureKit recording adapter and compiled a macOS 14+ ScreenCaptureKit/AVAssetWriter H.264 MP4 fallback using a private atomic clip publish path. Sonoma system audio is experimental; microphone capture remains macOS 15+ only. No real Mac 14 MP4 acceptance yet.
 - [x] Apple Silicon and Intel Swift typechecks and native Rust/Tauri compilation passed on PR #16 CI.
 - [x] Added top-level MP4 box validation and unit-test cases before final clip publishing (awaiting latest PR CI).
+- [ ] On **macOS 14.2 Apple Silicon**, verify the Sonoma AVAssetWriter path: 15s silent H.264 MP4; 60s maximum with Stop and Save; real-file playback, seeking, duration and full decode; screen permissions and app relaunch; system audio AAC track only when explicitly requested. This acceptance is **not complete**.
 - [ ] Verify full Apple Silicon/Intel installer packaging and `Info.plist` microphone/screen permission prompts on real installed builds.
 - [ ] Hardware-test video duration, H.264, selected display identity, optional audio tracks and A/V sync on supported machines, including permission refusal.
 - [ ] Windows native H.264/AAC/MP4 output and actual program scene composition remain P0 blockers.
