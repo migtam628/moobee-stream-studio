@@ -73,6 +73,8 @@ jobs:
           fi
       - name: Validate native AVI writer including full video decode
         run: bash scripts/check-avi-muxer.sh
+      - name: Validate synthetic MP4 decode, early-stop and audible-audio QA
+        run: bash scripts/check-mp4-acceptance.sh
 
   web:
     name: Self-hosted web distribution
