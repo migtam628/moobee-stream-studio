@@ -50,9 +50,7 @@ jobs:
         if: startsWith(github.ref, 'refs/heads/release/')
         env:
           GH_TOKEN: ${{ github.token }}
-          ANDROID_JOB_RESULT: ${{ needs.android.result }}
         run: |
-          set -euo pipefail
           TAG="${GITHUB_REF_NAME#release/}"
           # Never overwrite or silently rebuild assets under a published tag.
           if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
@@ -279,7 +277,9 @@ jobs:
       - name: Publish standalone prerelease and checksums
         env:
           GH_TOKEN: ${{ github.token }}
+          ANDROID_JOB_RESULT: ${{ needs.android.result }}
         run: |
+          set -euo pipefail
           TAG="${GITHUB_REF_NAME#release/}"
           case "$TAG" in v*) ;; *) echo 'Release branch must be named release/v*' >&2; exit 1 ;; esac
           ANDROID_THROTTLED=false
@@ -290,14 +290,14 @@ jobs:
               echo "::error::Android failed without a verified Maven 429 marker. Refusing incomplete alpha."
               exit 1
             }
-            MARKER_FILE="$MARKER" node - <<'NODE'
-          const fs = require('node:fs');
-          const marker = JSON.parse(fs.readFileSync(process.env.MARKER_FILE, 'utf8'));
-          if (marker.schemaVersion !== 1 || marker.reason !== 'maven-http-429' ||
-              marker.target !== 'android-arm64-debug') {
-            throw new Error('Invalid Android throttling evidence; refusing incomplete release');
-          }
-          NODE
+            MARKER_FILE="$MARKER" node -e '
+              const fs = require("node:fs");
+              const marker = JSON.parse(fs.readFileSync(process.env.MARKER_FILE, "utf8"));
+              if (marker.schemaVersion !== 1 || marker.reason !== "maven-http-429" ||
+                  marker.target !== "android-arm64-debug") {
+                throw new Error("Invalid Android throttling evidence; refusing incomplete release");
+              }
+            '
             rm -f "$MARKER"
             if find release-assets -type f -name 'moobee-stream-studio-android-arm64-debug.apk' -print -quit | grep -q .; then
               echo "::error::Android APK exists but build is recorded as failed."
@@ -324,18 +324,14 @@ jobs:
           node scripts/build-release-manifest.mjs release-assets "$TAG" "$GITHUB_SHA" "${manifest_args[@]}" > RELEASE-MANIFEST.json
           cp docs/RELEASE_NOTES.md RELEASE-NOTES.txt
           if [[ "$ANDROID_THROTTLED" == 'true' ]]; then
-            cat >> RELEASE-NOTES.txt <<'NOTE'
-
-## Android package not included in this experimental release
-
-The optional Android ARM64 debug APK could not be built because Maven Central
-returned HTTP 429 (rate limiting) on dependency downloads after bounded
-retries. This prerelease contains the verified Mac ARM64/Intel, Windows x64,
-Linux x64 and web distribution artifacts. The manifest lists Android as
-**unavailable**, not tested or shipped. Do not install a differently tagged
-Android APK as if it were built from this release commit. A future alpha
-release can restore Android packaging when its build passes.
-NOTE
+            printf '%s\n' \
+              '' '## Android package not included in this experimental release' \
+              '' 'The optional Android ARM64 debug APK was not built because Maven Central returned' \
+              'HTTP 429 on dependency downloads after three bounded attempts. This release contains' \
+              'Mac ARM64/Intel, Windows x64, Linux x64 and web archives only. The signedness and' \
+              'hardware acceptance of these experimental packages are unchanged. The manifest' \
+              'explicitly identifies Android as unavailable; do not substitute another build tag.' \
+              >> RELEASE-NOTES.txt
           fi
           while IFS= read -r -d '' file; do
             ( cd "$(dirname "$file")" && sha256sum "$(basename "$file")" )
