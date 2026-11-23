@@ -23,7 +23,10 @@ pub struct Mp4CaptureReport {
     path: String,
     format: &'static str,
     bytes: u64,
-    duration_seconds: u32,
+    // Actual movie duration from finalized moov/mvhd; None if unavailable.
+    // Do not substitute the requested limit for an early Stop and Save.
+    duration_seconds: Option<f64>,
+    requested_max_seconds: u32,
     has_requested_system_audio: bool,
     has_requested_microphone: bool,
     // Do not claim an audio track exists before a real media-file probe.
@@ -130,6 +133,8 @@ fn record_mp4_to_private_folder(
         let _ = fs::remove_file(&temporary);
         return Err(format!("Native recording produced an incomplete MP4: {message}"));
     }
+    let actual_duration = crate::mp4_validation::movie_duration_seconds(&mut file, len)
+        .map_err(|error| format!("Could not inspect finalized MP4 duration: {error}"))?;
     file.sync_all().map_err(|error| format!("Could not synchronize recorded MP4: {error}"))?;
     drop(file);
     fs::rename(&temporary, &destination)
@@ -140,7 +145,8 @@ fn record_mp4_to_private_folder(
         path: destination.to_string_lossy().into_owned(),
         format: "mp4",
         bytes: len,
-        duration_seconds: seconds,
+        duration_seconds: actual_duration,
+        requested_max_seconds: seconds,
         has_requested_system_audio: system_audio,
         has_requested_microphone: microphone,
         audio_track_verified: false,
