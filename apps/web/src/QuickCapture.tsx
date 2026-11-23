@@ -3,7 +3,7 @@ import { CheckCircle2, Copy, Film, FolderOpen, Monitor, Square, Video } from 'lu
 import { request, runningInTauri } from './api'
 
 type Display = { id: number; name: string; width: number; height: number }
-type Availability = { supported: boolean; requiredMacos: string; osVersion?: string | null; reason?: string }
+type Availability = { supported: boolean; requiredMacos: string; osVersion?: string | null; reason?: string; microphoneSupported?: boolean; engine?: string }
 type CapturedFile = {
   id: string
   path: string
@@ -25,6 +25,7 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
   const [displays, setDisplays] = useState<Display[]>([])
   const [displayId, setDisplayId] = useState('')
   const [mp4Supported, setMp4Supported] = useState(false)
+  const [micSupported, setMicSupported] = useState(false)
   const [mp4AvailabilityReason, setMp4AvailabilityReason] = useState('Native MP4 availability has not been checked')
   const [duration, setDuration] = useState(6)
   const [systemAudio, setSystemAudio] = useState(false)
@@ -43,7 +44,7 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
       request<{ displays: Display[] }>('/capture/displays'),
       mac
         ? request<Availability>('/clips/macos-mp4-availability')
-        : Promise.resolve<Availability>({ supported: false, requiredMacos: '15.0', reason: 'ScreenCaptureKit MP4 is only available on macOS 15+.' })
+        : Promise.resolve<Availability>({ supported: false, requiredMacos: '14.0', reason: 'Native MP4 recording is available on macOS 14+ only.', microphoneSupported: false })
     ]).then(([list, availability]) => {
       if (!active) return
       setDisplays(list.displays)
@@ -51,6 +52,7 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
         list.displays.some(display => String(display.id) === current)
           ? current : String(list.displays[0]?.id ?? ''))
       setMp4Supported(Boolean(availability.supported))
+      setMicSupported(Boolean(availability.microphoneSupported))
       setMp4AvailabilityReason(availability.reason ||
         (availability.supported ? 'Native MP4 is available for device testing' : 'Native MP4 unavailable on this operating system'))
       setError('')
@@ -66,7 +68,7 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
   const useMp4 = mac && mp4Supported
   const canRecord = supportedDesktop && !!displayId && !loading && !busy
   const durations = useMp4 ? [4, 6, 8, 15, 30, 60, 120] : [4, 6, 8]
-  const formatLabel = useMp4 ? 'H.264 MP4 (macOS 15+)' : 'silent MJPEG AVI (10 fps)'
+  const formatLabel = useMp4 ? 'H.264 MP4 (macOS 14+ experimental)' : 'silent MJPEG AVI (10 fps)'
   async function capture() {
     if (!canRecord || !durations.includes(duration)) return
     setBusy(true)
@@ -141,8 +143,8 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
     {useMp4 && <div className="quick-capture-options">
       <label className="quick-capture-check"><input type="checkbox" checked={systemAudio} disabled={busy}
         onChange={event => setSystemAudio(event.target.checked)}/> Request system audio</label>
-      <label className="quick-capture-check"><input type="checkbox" checked={microphone} disabled={busy}
-        onChange={event => setMicrophone(event.target.checked)}/> Request microphone audio</label>
+      <label className="quick-capture-check"><input type="checkbox" checked={microphone} disabled={busy || !micSupported}
+        onChange={event => setMicrophone(event.target.checked)}/> Request microphone audio {micSupported ? '' : '(macOS 15+ only)'}</label>
       <small className="help-text">Audio availability and synchronization are unverified. Permissions may be required.</small>
     </div>}
     <div className="clip-actions">
