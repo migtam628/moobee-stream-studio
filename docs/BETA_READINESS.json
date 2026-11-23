@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "target": "v0.4.0-beta.1",
+  "reviewDate": "2026-11-23",
+  "note": "Statuses are engineering tracking claims, not proof of device acceptance. Do not set verified without linked real-device evidence, human review, and required signoffs.",
+  "gates": [
+    {
+      "id": "mac-native-mp4",
+      "status": "needs-hardware-qa",
+      "details": "macOS 14.2 Sonoma native H.264 screen-only MP4 path has user-reported capture success; validate playable, seekable repeated 15s/early-stop and system-audio recordings with FFprobe and QuickTime. This is not Program output.",
+      "evidence": []
+    },
+    {
+      "id": "program-video-compositor",
+      "status": "in-progress",
+      "details": "Rust still-frame multi-display snapshot exists. Sustained timestamped 1080p30 Program frames feeding encoder not implemented.",
+      "evidence": []
+    },
+    {
+      "id": "camera-and-overlays",
+      "status": "blocked",
+      "details": "Webcam, overlays, scene transitions, source transforms and Program video parity need integration.",
+      "evidence": []
+    },
+    {
+      "id": "audio-mix-and-sync",
+      "status": "blocked",
+      "details": "Native microphone/system audio capture, faders, meters and A/V drift measurement are not production ready.",
+      "evidence": []
+    },
+    {
+      "id": "windows-h264-aac",
+      "status": "blocked",
+      "details": "Windows Graphics Capture + Media Foundation native H.264/AAC recording not validated; silent MJPEG AVI is diagnostic only.",
+      "evidence": []
+    },
+    {
+      "id": "rtmps-broadcast",
+      "status": "blocked",
+      "details": "No user-authorized RTMP/RTMPS broadcast transport, receiving-side evidence, reconnect, 2-hour soak or credential-safe lifecycle.",
+      "evidence": []
+    },
+    {
+      "id": "secure-credentials-and-api",
+      "status": "blocked",
+      "details": "Secure OS keychain stream-key storage and public API authorization/TLS are incomplete; API must remain loopback-only.",
+      "evidence": []
+    },
+    {
+      "id": "signed-desktop-and-hardware-acceptance",
+      "status": "blocked",
+      "details": "Mac Developer ID notarization, Windows Authenticode signing, 30-minute A/V recording QA and 2-hour stream QA have not passed; Android debug APK excluded from desktop beta scope.",
+      "evidence": []
+    }
+  ]
+}

@@ -63,6 +63,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - name: Audit beta blockers (informational; beta publishing remains disabled)
+        run: node scripts/check-beta-readiness.mjs
       - run: npm run build
       - uses: dtolnay/rust-toolchain@stable
       - name: Install FFmpeg for CI-only media verification
@@ -147,7 +149,8 @@ jobs:
       - name: Validate native Swift-linked MP4 box tests on macOS
         if: runner.os == 'macOS'
         working-directory: apps/desktop/src-tauri
-        run: cargo test --lib mp4_validation::tests
+        run: |
+          cargo test --lib mp4_validation::tests
           cargo test --lib scene_compositor::tests
       - name: Build desktop installer
         uses: tauri-apps/tauri-action@v1
