@@ -1,3 +1,25 @@
+# MooBee Stream Studio v0.3.9-alpha.2 — Native MP4 Availability Diagnostics
+
+**Diagnostic prerelease, not a complete broadcaster.** This update does not bypass macOS requirements or enable unfinished streaming controls.
+
+## Changes since v0.3.9-alpha.1
+
+- macOS native Swift bridge now reports the actual operating-system version used to decide whether the ScreenCaptureKit H.264 MP4 recorder is available.
+- Settings → Runtime Service Diagnostics and Clips → Capture MP4 explain whether the device is below macOS 15 or whether the native bridge unexpectedly rejected an otherwise supported Mac.
+- Studio → Quick Screen Capture shows the same native availability reason and preserves silent AVI fallback when MP4 is disabled.
+- Test evidence: one user-provided four-second 640×360/10fps MJPEG AVI successfully decoded all 40 frames; no audio was expected or present. This does not verify MP4 capability, video/audio sync, or complete scene recording.
+
+## Acceptance required
+
+1. In Terminal run `sw_vers -productVersion` and confirm the actual Mac operating-system version.
+2. In Settings refresh the diagnostic report. It should identify a matching OS version and give a reason for MP4 being disabled if it is.
+3. On a supported macOS 15+ device, try a 15-second silent MP4 from Studio, then Stop/Save and independently check actual MP4 duration, playback and audio tracks.
+4. Keep the main Record and Go Live controls disabled until real program composition, audio mixing, and broadcasting pass separate hardware tests.
+
+No production readiness or beta claim is implied.
+
+---
+
 # MooBee Stream Studio v0.3.9-alpha.1 — Mac Recording Sessions & Service Diagnostics
 
 **Experimental alpha.** This is a functional expansion of the native Mac capture workflow, not a production broadcaster. The primary program **Record** and **Go Live** actions remain disabled.
