@@ -2,9 +2,9 @@
 
 ## Purpose and scope
 
-This experiment adds a **native H.264 MP4 screen recorder on macOS 15+** with optional system audio and optional microphone requested through ScreenCaptureKit. It compiles Swift into the installed Tauri binary, without OBS, Streamlabs or an FFmpeg capture executable. It does **not** yet record the MooBee program scene, webcam layer or RTMP stream.
+This experiment adds a **native H.264 MP4 screen recorder on macOS 14+**, using ScreenCaptureKit frames + AVAssetWriter on Sonoma 14.x and SCRecordingOutput on macOS 15+. System audio is optional and still needs audible verification; ScreenCaptureKit microphone recording is available to request only on macOS 15+. It compiles Swift into the installed Tauri binary, without OBS, Streamlabs or an FFmpeg capture executable. It does **not** yet record the MooBee program scene, webcam layer or RTMP stream.
 
-The Rust command records for a user-selected maximum of **3–120 seconds** (or stops earlier when requested) into a private `.mp4.part` file and publishes the finished `.mp4` only after the ScreenCaptureKit completion delegate, bounded output-size checks, top-level MP4 box validation (`ftyp`, `moov`, non-empty `mdat`, and box sizes), and file synchronization. A successful command means the file was finalized, **not** that microphone/system audio was independently verified.
+The Rust command records for a user-selected maximum of **3–120 seconds** (or stops earlier when requested) into a private `.part.mp4` file and publishes the finished `.mp4` only after the ScreenCaptureKit completion delegate, bounded output-size checks, top-level MP4 box validation (`ftyp`, `moov`, non-empty `mdat`, and box sizes), and file synchronization. A successful command means the file was finalized, **not** that microphone/system audio was independently verified.
 
 ## Screen Recording permission recovery (Sonoma 14.2)
 
@@ -86,8 +86,9 @@ metadata. Native `SCRecordingOutput` MP4 remains available only on **macOS 15+**
 - [ ] Test **Apple Silicon and Intel** separately if both are supported. Record OS version, CPU, screen resolution/scale and connected display IDs.
 - [ ] In Clips choose one display and a **4-second** capture. Leave microphone off first; system audio may be enabled while playing known, permitted sound.
 - [ ] In **Studio → Quick screen capture**, test 15-, 30-, 60-, and 120-second maximum recording sessions in sequence. Observe requested vs actual runtime; stop the 120-second session early (after approximately 15 seconds) with **Stop and save MP4**, wait for finalization, then open the resulting file.
-- [ ] Verify that an early stop produces a finalized, seekable MP4 and that pressing Stop before or after a session does not leave a corrupted public file. Actual file duration must be measured independently and must not be inferred from the requested maximum.
-- [ ] Repeat start/stop several times and test low disk space, permission rejection, screen disconnect, and forced app closure. A transient `.mp4.part` must never be presented as a completed clip.
+- [ ] Verify that an early stop produces a finalized, seekable MP4 and that pressing Stop before or after a session does not leave a corrupted public file. **MooBee now reads the actual MP4 movie duration from moov/mvhd** rather than showing the requested maximum; compare it against FFprobe.
+- [ ] Restart MooBee, open Studio → Quick Screen Capture, and press **Refresh saved clips**. Confirm the original recording is still in the private Clips directory and playable. An inventory count by itself does not prove playback.
+- [ ] Repeat start/stop several times and test low disk space, permission rejection, screen disconnect, and forced app closure. A transient `.part.mp4` must never be presented as a completed clip.
 - [ ] Open the saved `.mp4` in QuickTime and VLC. Ensure correct monitor captured, recognizable motion, duration and seekability.
 - [ ] Probe video/audio using a separate diagnostic copy of FFprobe (not needed to record):
 
@@ -102,11 +103,22 @@ ffprobe -v error -show_entries format=duration,size:stream=index,codec_type,code
 node scripts/verify-native-mp4.mjs --file "/path/to/clip-UUID.mp4" --seconds 4 --expect-audio --report macos-mp4-evidence.json
 ```
 
+  For an **early stop** (e.g., 60-second maximum stopped after 15 seconds), use:
+```bash
+node scripts/verify-native-mp4.mjs --file "/path/to/clip-UUID.mp4" --seconds 60 --stopped-early --report stopped-evidence.json
+```
+
+  For **audible system-audio testing**, play a permitted, clearly audible source on the Mac while recording with system audio enabled, then run:
+```bash
+node scripts/verify-native-mp4.mjs --file "/path/to/audio-clip.mp4" --seconds 15 --expect-audible --report audio-evidence.json
+```
+  The `--expect-audible` flag checks an AAC track and measures its peak level using local FFmpeg. An AAC track with peak below -50 dBFS fails as effectively silent. This is *not* proof that the intended source was recorded or that A/V is synchronized; listen in QuickTime and check against on-screen events.
+
   The JSON report contains the base filename, stream details, duration, decode result and explicit `hardwarePlaybackVerified: false` / `audioSyncVerified: false` fields. Do not claim those last two checks passed until you manually watch/listen. The script does **not upload** footage or evidence and refuses to overwrite an existing report. Redact local filenames and machine details before sharing evidence.
 - [ ] Record again with a microphone enabled after granting microphone permission; confirm both expected audio sources and measure sync against on-screen clicks and spoken taps. Report missing or corrupted audio.
 - [ ] Connect two monitors and confirm MooBee records exactly the selected display. The bridge maps XCap monitor identity to ScreenCaptureKit's macOS display ID rather than relying on array ordering.
 - [ ] Deny/revoke screen or mic permission, unplug a selected display, interrupt capture and repeat capture. Confirm errors do not produce a completed file or a false-success UI message.
-- [ ] Confirm a failed capture doesn't leave a public `.mp4`; hidden `.mp4.part` files may require manual cleanup after abrupt termination/timeouts.
+- [ ] Confirm a failed capture doesn't leave a public `.mp4`; hidden `.part.mp4` files may require manual cleanup after abrupt termination/timeouts.
 - [ ] Inspect CPU/GPU, memory and thermal use; the maximum is a bounded two-minute test and is **not** proof of a 30-minute production recording or thermal stability.
 
 ## Important limitations
