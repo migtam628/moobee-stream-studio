@@ -182,6 +182,8 @@ struct NativeServiceReport {
     display_enumeration_error: Option<String>,
     overlay_health_responding: bool,
     native_mp4_supported: bool,
+    native_mp4_os_version: Option<String>,
+    native_mp4_reason: String,
     native_recording_verified: bool,
     audio_mixer_available: bool,
     scene_compositor_available: bool,
@@ -208,11 +210,14 @@ async fn native_service_diagnostics() -> NativeServiceReport {
         Ok(monitors) => (monitors.len(), None),
         Err(message) => (0, Some(message)),
     };
+    let native_mp4 = macos_mp4::macos_mp4_availability();
     NativeServiceReport {
         displays_detected,
         display_enumeration_error,
         overlay_health_responding: probe_overlay_health().await,
-        native_mp4_supported: macos_mp4::macos_mp4_availability().supported,
+        native_mp4_supported: native_mp4.supported,
+        native_mp4_os_version: native_mp4.os_version,
+        native_mp4_reason: native_mp4.reason,
         // Not ready until completed media and real device tests prove otherwise.
         native_recording_verified: false,
         audio_mixer_available: false,
