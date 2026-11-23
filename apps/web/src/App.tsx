@@ -8,6 +8,7 @@ import {
 import type { LucideIcon } from 'lucide-react'
 import { isStaticPreview, request, runningInTauri, subscribeEvents } from './api'
 import { version as appVersion } from '../../../package.json'
+import { buildIdentity } from './buildIdentity'
 import BrowserRecorder from './BrowserRecorder'
 import QuickCapture from './QuickCapture'
 import ServiceDiagnostics from './ServiceDiagnostics'
@@ -238,6 +239,7 @@ function Settings({ status }: { status: StudioStatus }) {
       <p className="help-text">The web preview has no local device permission. macOS needs Screen Recording access; Windows may request screen or device permissions.</p>
     </Panel><Panel title="GitHub Releases & Updates" icon={RefreshCcw}>
       <GithubUpdates appVersion={appVersion}/>
+      <p className="help-text">Installed frontend build: <code>{buildIdentity}</code>. Include this identifier when reporting recording errors or hardware-test results.</p>
     </Panel><Panel title="Scene Collection Backup" icon={Layers}>
       <div className="collection-backup">
         <p>Back up, restore or move scenes between MooBee installations. Imports are validated before replacing your current collection.</p>
@@ -541,7 +543,7 @@ export default function App() {
   const go = (target: Tab) => { setTab(target); setDrawerOpen(false) }
   return <div className="app-shell">
     <header className="app-topbar"><div className="brand"><RadioTower size={27}/><span>MooBee <em>Studio</em></span></div><div className="top-divider"/><div className="project-select"><span>Workspace</span><strong>My Studio</strong></div><div className="top-spacer"/><div className="destination-pills"><span className="dest-label">Destinations</span><span className="destination"><span className="dest-icon twitch">T</span>Twitch <small>Not linked</small></span><span className="destination"><span className="dest-icon youtube">▶</span>YouTube <small>Not linked</small></span><span className="destination"><span className="dest-icon kick">K</span>Kick <small>Not linked</small></span></div><div className="top-divider"/><span className="profile">MT</span><button className="mobile-menu" type="button" aria-label={drawerOpen ? 'Close navigation' : 'Open navigation'} aria-expanded={drawerOpen} onClick={() => setDrawerOpen(!drawerOpen)}><LayoutGrid size={22}/></button></header>
-    <aside className={`sidebar ${drawerOpen ? 'drawer-open' : ''}`}><nav>{navigation.map(({ label, icon: Icon }) => <button key={label} className={`nav-item ${tab === label ? 'active' : ''}`} onClick={() => go(label)}><Icon size={19}/><span>{label}</span></button>)}</nav><div className="sidebar-bottom"><div className="release-label">ALPHA {appVersion} (DEV)</div><button onClick={() => go('Settings')}><CircleHelp size={16}/>Engine guide</button></div></aside>
+    <aside className={`sidebar ${drawerOpen ? 'drawer-open' : ''}`}><nav>{navigation.map(({ label, icon: Icon }) => <button key={label} className={`nav-item ${tab === label ? 'active' : ''}`} onClick={() => go(label)}><Icon size={19}/><span>{label}</span></button>)}</nav><div className="sidebar-bottom"><div className="release-label" title="Release tag and immutable GitHub commit"><span>BUILD {buildIdentity}</span></div><button onClick={() => go('Settings')}><CircleHelp size={16}/>Engine guide</button></div></aside>
     <main className="workspace">
       {error && <div className="error-banner" role="alert"><span>{error}</span><button onClick={() => setError('')}><X size={17}/></button></div>}
       {(tab === 'Studio' || tab === 'Scenes') && <Studio status={status} perform={perform} pending={pending} setTab={go}/>}
