@@ -10,7 +10,8 @@ type CapturedFile = {
   path: string
   bytes: number
   format: string
-  durationSeconds: number
+  durationSeconds: number | null
+  requestedMaxSeconds?: number
   audioTrackVerified?: boolean
 }
 
@@ -186,7 +187,15 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
       <CheckCircle2 size={18}/>
       <div>
         <strong>Saved {saved.format.toUpperCase()} locally — playback{useMp4 ? ' and audio' : ''} not yet verified</strong>
-        <small>{saved.durationSeconds}s requested · {(saved.bytes / (1024 * 1024)).toFixed(2)} MB</small>
+        <small>
+          {saved.durationSeconds !== null && Number.isFinite(saved.durationSeconds)
+            ? `${saved.durationSeconds.toFixed(2)}s recorded (container metadata)`
+            : 'Recorded duration not available from metadata'}
+          {' · '}
+          {saved.requestedMaxSeconds ?? duration}s maximum requested
+          {' · '}
+          {(saved.bytes / (1024 * 1024)).toFixed(2)} MB
+        </small>
         <code>{saved.path}</code>
         <div className="clip-actions">
           {mac && <button type="button" className="secondary-button" onClick={() => void reveal()}>
@@ -199,7 +208,7 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
             <Film size={15}/>View Clips
           </button>
         </div>
-        <p className="help-text">Open the saved file in QuickTime or VLC to confirm image, duration and sound.</p>
+        <p className="help-text">An MP4 file can be finalized without audible audio. Open it in QuickTime or VLC to confirm playback and seeking. For a Stop-and-Save test, compare the actual duration above with when you pressed Stop. Reopen MooBee and check that the clip remains in Clips.</p>
       </div>
     </div>}
   </div>
