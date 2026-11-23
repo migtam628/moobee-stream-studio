@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { CheckCircle2, Copy, Film, FolderOpen, Monitor, Square, Video } from 'lucide-react'
 import { request, runningInTauri } from './api'
+import { isScreenCapturePermissionDenied } from './capturePermission'
 
 type Display = { id: number; name: string; width: number; height: number }
 type Availability = { supported: boolean; requiredMacos: string; osVersion?: string | null; reason?: string; microphoneSupported?: boolean; engine?: string }
@@ -34,6 +35,7 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
   const [busy, setBusy] = useState(false)
   const [stopRequested, setStopRequested] = useState(false)
   const [error, setError] = useState('')
+  const [permissionSettingsError, setPermissionSettingsError] = useState('')
   const [saved, setSaved] = useState<CapturedFile | null>(null)
 
   useEffect(() => {
@@ -75,6 +77,7 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
     setStopRequested(false)
     setSaved(null)
     setError('')
+    setPermissionSettingsError('')
     try {
       const result = await request<CapturedFile>(
         useMp4 ? '/clips/capture-mp4' : '/clips/capture-avi',
@@ -99,6 +102,15 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
       setStopRequested(true)
     } catch (cause) {
       setError('Could not request a graceful stop: ' + (cause as Error).message)
+    }
+  }
+
+  async function openScreenRecordingSettings() {
+    setPermissionSettingsError('')
+    try {
+      await request('/macos/open-screen-recording-settings', {})
+    } catch (cause) {
+      setPermissionSettingsError('Could not open Screen Recording settings: ' + (cause as Error).message)
     }
   }
 
@@ -159,6 +171,16 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
     {mac && !mp4Supported && desktop && <p className="help-text">
       {mp4AvailabilityReason} · Silent AVI capture remains available as a fallback.
     </p>}
+    {error && isScreenCapturePermissionDenied(error) && <div className="capture-permission-help" role="alert">
+      <strong>macOS blocked screen recording permission</strong>
+      <p>Quit MooBee and enable it in System Settings → Privacy &amp; Security → Screen Recording.
+        Then reopen MooBee from Applications and retry without audio. Only macOS can grant access.</p>
+      <button type="button" className="secondary-button" onClick={() => void openScreenRecordingSettings()}>
+        Open Screen Recording Settings
+      </button>
+      <small>If it is already enabled, toggle it off and back on, quit MooBee completely and retry.</small>
+      {permissionSettingsError && <small role="status">{permissionSettingsError}</small>}
+    </div>}
     {error && <p className="clip-error" role="alert">{error}</p>}
     {saved && <div className="clip-result" role="status">
       <CheckCircle2 size={18}/>
