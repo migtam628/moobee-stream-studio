@@ -177,6 +177,7 @@ function collection() {
 export async function nativeRequest(path: string, body: Body = {}): Promise<unknown> {
   if (path === '/health') return { ok: true, name: 'MooBee Studio', version: appVersion, engine: 'in-house' }
   if (path === '/services/diagnostics') return await invoke('native_service_diagnostics')
+  if (path === '/macos/open-screen-recording-settings') return await invoke('open_screen_recording_settings')
   if (path === '/activity') return history
   if (path === '/studio/status') return refresh()
   if (path === '/studio/collection') return Object.keys(body).length ? replaceCollection(body) : collection()
