@@ -127,3 +127,14 @@ test('web API does not fabricate a native macOS H.264 MP4 recording', async () =
   const payload = await response.json();
   assert.match(payload.error, /installed macOS 15\+ application/);
 });
+
+
+test('web API cannot claim native composited Program AVI recording', async () => {
+  const response = await fetch(root + '/api/clips/capture-program-test-avi', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ displayIds: [0, 1], seconds: 4 })
+  });
+  assert.equal(response.status, 501);
+  const data = await response.json();
+  assert.match(data.error, /installed Mac\/Windows app/);
+});

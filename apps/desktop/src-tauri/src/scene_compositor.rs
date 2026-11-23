@@ -13,15 +13,16 @@ const MAX_PREVIEW_SOURCES: usize = 4;
 const OUTPUT_WIDTH: u32 = 960;
 const OUTPUT_HEIGHT: u32 = 540;
 
-fn validate_ids(ids: &[usize]) -> Result<(), String> {
-    if ids.is_empty() || ids.len() > MAX_PREVIEW_SOURCES || ids.iter().any(|id| *id > 24) {
+pub(crate) fn validate_ids(ids: &[usize]) -> Result<(), String> {
+    if ids.is_empty() || ids.len() > MAX_PREVIEW_SOURCES || ids.iter().any(|id| *id > 24) ||
+        ids.iter().enumerate().any(|(index, id)| ids[..index].contains(id)) {
         return Err("Native scene preview supports one to four valid display sources".into());
     }
     Ok(())
 }
 
 #[cfg(any(target_os = "windows", target_os = "macos"))]
-fn composite_grid(frames: &[RgbaImage], width: u32, height: u32) -> Result<RgbaImage, String> {
+pub(crate) fn composite_grid(frames: &[RgbaImage], width: u32, height: u32) -> Result<RgbaImage, String> {
     if frames.is_empty() || frames.len() > MAX_PREVIEW_SOURCES ||
        width < 16 || height < 16 || width > 1920 || height > 1080 {
         return Err("Invalid scene preview dimensions or source count".into());
@@ -98,6 +99,7 @@ mod tests {
         assert!(validate_ids(&[0, 1, 2, 3]).is_ok());
         assert!(validate_ids(&[0, 1, 2, 3, 4]).is_err());
         assert!(validate_ids(&[25]).is_err());
+        assert!(validate_ids(&[0, 0]).is_err());
     }
 
     #[cfg(any(target_os = "windows", target_os = "macos"))]

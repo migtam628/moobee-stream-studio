@@ -125,6 +125,9 @@ app.get('/api/clips', (_req, res) => res.json({
 app.post('/api/clips/capture-mp4', (_req, res) => res.status(501).json({
   error: 'Native H.264 MP4 capture requires the installed macOS 15+ application'
 }));
+app.post('/api/clips/capture-program-test-avi', (_req, res) => res.status(501).json({
+  error: 'Composited Program AVI capture runs only inside the installed Mac/Windows app'
+}));
 app.post('/api/clips/capture-avi', (_req, res) => res.status(501).json({
   error: 'Native MJPEG AVI recording is available only in the installed Windows/macOS app'
 }));

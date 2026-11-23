@@ -1,0 +1,50 @@
+name: Validate Windows native Program AVI test
+
+on:
+  pull_request:
+    paths:
+      - 'apps/desktop/src-tauri/**'
+      - 'apps/web/src/**'
+      - '.github/workflows/native-program-windows.yml'
+  push:
+    branches: [main, 'release/**']
+    paths:
+      - 'apps/desktop/src-tauri/**'
+      - '.github/workflows/native-program-windows.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  windows-program-capture:
+    name: Windows — composed Program AVI native compilation and tests
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+      - name: Install locked JS dependencies
+        run: npm ci
+      - name: Build frontend assets for Tauri compile
+        run: npm run build
+      - name: Validate native Program source selection and synthetic composition
+        working-directory: apps/desktop/src-tauri
+        run: cargo test --lib program_test_avi::tests
+      - name: Compile Windows Tauri native media commands
+        working-directory: apps/desktop/src-tauri
+        run: cargo check
+      # This runner cannot verify a user's monitor, capture consent, audio,
+      # sustained frame timing, H.264/AAC encoding, or RTMP receiver.
+      # Device acceptance is tracked separately in docs/PROGRAM_AVI_ACCEPTANCE.md.

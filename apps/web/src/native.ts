@@ -211,6 +211,17 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
       systemAudio: body.systemAudio, microphone: body.microphone
     })
   }
+  if (path === '/clips/capture-program-test-avi') {
+    const ids = body.displayIds
+    if (!Array.isArray(ids) || ids.length < 1 || ids.length > 4 ||
+        !ids.every(id => typeof id === 'number' && Number.isSafeInteger(id) && id >= 0 && id <= 24) ||
+        new Set(ids).size !== ids.length ||
+        typeof body.seconds !== 'number' || !Number.isSafeInteger(body.seconds) ||
+        body.seconds < 2 || body.seconds > 8) {
+      throw new Error('Choose one to four unique Program displays and a 2–8 second test duration')
+    }
+    return await invoke('capture_program_test_avi', { displayIds: ids, seconds: body.seconds })
+  }
   if (path === '/clips/capture-avi') {
     if (typeof body.displayId !== 'number' || !Number.isSafeInteger(body.displayId) ||
         typeof body.seconds !== 'number' || !Number.isInteger(body.seconds) ||
