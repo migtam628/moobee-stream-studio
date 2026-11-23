@@ -1,3 +1,30 @@
+# MooBee Stream Studio v0.3.9-alpha.4 — Sonoma MP4 Error Visibility and Temp-file Hardening
+
+**Diagnostic alpha for macOS 14.2.** This release addresses a user-observed failure, but actual MP4 capture success is not yet verified on the affected Mac.
+
+## Changes from alpha.3
+
+- Fixed the **“Native recording failed: undefined”** message in Studio. Tauri `invoke()` can reject with a plain Rust error string; the frontend now safely normalizes strings, JavaScript Errors, and structured error objects so the actual failure reaches the screen. Regression tests cover these cases.
+- Changed native recording's hidden temporary output from `.clip-ID.mp4.part` to `.clip-ID.part.mp4`. It remains hidden and unpublished during recording, while presenting a proper `.mp4` extension to the Sonoma `AVAssetWriter` backend. The Rust pipeline still validates the complete file and atomically renames it to the visible `clip-ID.mp4`.
+- Added Swift native error domain/code and underlying OS error when the Sonoma or Sequoia recorder fails. This is local-only diagnostic information and does not upload recordings.
+- Preserved the experimental macOS 14 H.264 MP4 backend and macOS 15+ recorder, including explicit early Stop and Save controls.
+- No recorded video, audio, screenshots or credentials are uploaded to GitHub by these changes.
+
+## What to verify on macOS 14.2 Apple Silicon
+
+1. Download the alpha.4 **ARM64 DMG** from this release only after GitHub checks and artifact publication complete. Replace the old installed application and reopen MooBee.
+2. Open Studio → Quick screen capture, choose the Built-in Retina Display, select **15 seconds**, leave both audio options disabled, and click **Capture screen test**.
+3. If recording fails, copy the **complete error text** (including native domain/code) and report it; it should no longer say `undefined`. Do not repeatedly retry after a timeout without checking whether a recording is still finalizing.
+4. If a file is saved, verify correct motion, 15-second approximate duration, H.264 codec and QuickTime seek/playback; then test a 60-second maximum with an early Stop and Save.
+5. Test system audio only after silent recording works. The Sonoma microphone control remains disabled.
+6. Repeat after reopening the application and check Clips persistence.
+
+## Still unavailable
+
+Program scene composition, microphone/system audio mixing, Windows MP4 parity, RTMP/RTMPS streaming, signed automatic updates, and long-duration soak acceptance have **not** passed. Record and Go Live remain disabled.
+
+---
+
 # MooBee Stream Studio v0.3.9-alpha.3 — Sonoma 14 H.264 Test Recorder
 
 **Experimental prerelease for macOS 14.2 compatibility testing. Not a complete broadcasting studio.**
