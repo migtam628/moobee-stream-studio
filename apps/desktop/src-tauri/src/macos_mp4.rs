@@ -143,7 +143,7 @@ fn record_mp4_to_private_folder(
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MacOsMp4Availability {
-    supported: bool,
+    pub(crate) supported: bool,
     required_macos: &'static str,
 }
 
