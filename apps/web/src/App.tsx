@@ -296,6 +296,7 @@ function ClipLab() {
   const [error, setError] = useState('')
   const [macMp4Working, setMacMp4Working] = useState(false)
   const [macMp4Supported, setMacMp4Supported] = useState(false)
+  const [macMicSupported, setMacMicSupported] = useState(false)
   const [macMp4Reason, setMacMp4Reason] = useState('Checking native MP4 compatibility…')
   const [captureSystemAudio, setCaptureSystemAudio] = useState(true)
   const [captureMicrophone, setCaptureMicrophone] = useState(false)
@@ -320,10 +321,11 @@ function ClipLab() {
   useEffect(() => {
     if (!isMacDesktop) return
     let active = true
-    void request<{ supported: boolean; requiredMacos: string; osVersion?: string; reason?: string }>('/clips/macos-mp4-availability')
+    void request<{ supported: boolean; requiredMacos: string; osVersion?: string; reason?: string; microphoneSupported?: boolean }>('/clips/macos-mp4-availability')
       .then(result => {
         if (active) {
           setMacMp4Supported(result.supported)
+          setMacMicSupported(Boolean(result.microphoneSupported))
           setMacMp4Reason(result.reason || 'Native MP4 availability not confirmed')
         }
       })
@@ -432,11 +434,11 @@ function ClipLab() {
             </select>
           </label>
           {isMacDesktop && <div className="clip-mp4-options">
-            <p><strong>Experimental native H.264 MP4 (macOS 15+)</strong> — display capture using ScreenCaptureKit. It does not yet capture MooBee’s saved scenes, webcam overlay, or provide streaming.</p>
+            <p><strong>Experimental native H.264 MP4 (macOS 14+)</strong> — display capture using ScreenCaptureKit. It does not yet capture MooBee’s saved scenes, webcam overlay, or provide streaming.</p>
             <label><input type="checkbox" checked={captureSystemAudio} disabled={working || probing || macMp4Working}
               onChange={event => setCaptureSystemAudio(event.target.checked)}/> Include system audio when available</label>
-            <label><input type="checkbox" checked={captureMicrophone} disabled={working || probing || macMp4Working}
-              onChange={event => setCaptureMicrophone(event.target.checked)}/> Request microphone audio (experimental)</label>
+            <label><input type="checkbox" checked={captureMicrophone} disabled={working || probing || macMp4Working || !macMicSupported}
+              onChange={event => setCaptureMicrophone(event.target.checked)}/> Request microphone audio (macOS 15+ only)</label>
             <small>Mac screen and microphone permissions may be required. Requesting audio does not guarantee an audio track; check the saved file independently.</small>
           </div>}
           <div className="clip-actions">
@@ -447,8 +449,8 @@ function ClipLab() {
               <Video size={17}/>Capture Video AVI
             </button>
             {isMacDesktop && <button className="secondary-button" disabled={!macMp4Supported || !displayId || working || probing || macMp4Working || seconds < 3 || seconds > 15}
-              onClick={() => void captureMacMP4()} title={!macMp4Supported ? macMp4Reason : seconds < 3 ? 'Select 4–10 seconds' : 'Native ScreenCaptureKit H.264 MP4 test'}>
-              <Video size={17}/>{macMp4Working ? 'Capturing native MP4…' : 'Capture MP4 (macOS 15+ test)'}
+              onClick={() => void captureMacMP4()} title={!macMp4Supported ? macMp4Reason : seconds < 3 ? 'Select 4–10 seconds' : 'Native H.264 MP4 test'}>
+              <Video size={17}/>{macMp4Working ? 'Capturing native MP4…' : 'Capture MP4 (macOS 14+ test)'}
             </button>}
             {isMacDesktop && !macMp4Supported && <small role="status">{macMp4Reason} · GIF and silent AVI capture remain available.</small>}
             <button className="secondary-button" disabled={!desktop || working} onClick={() => void reload()}><RefreshCcw size={16}/>Refresh</button>
