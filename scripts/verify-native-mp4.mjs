@@ -28,8 +28,8 @@ export function assessNativeMp4(probe, { targetSeconds = 4, expectAudio = false 
     errors.push('Video dimensions are missing or exceed the 1080p prototype limit');
   }
   const requested = numeric(targetSeconds);
-  if (!Number.isFinite(requested) || requested < 3 || requested > 15) {
-    errors.push('Expected test duration must be between 3 and 15 seconds');
+  if (!Number.isFinite(requested) || requested < 3 || requested > 120) {
+    errors.push('Expected test duration must be between 3 and 120 seconds');
   } else if (!Number.isFinite(duration) || Math.abs(duration - requested) > Math.max(1.5, requested * 0.25)) {
     errors.push('Recorded duration differs materially from requested duration');
   }
