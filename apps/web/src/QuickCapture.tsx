@@ -3,7 +3,7 @@ import { CheckCircle2, Copy, Film, FolderOpen, Monitor, Square, Video } from 'lu
 import { request, runningInTauri } from './api'
 
 type Display = { id: number; name: string; width: number; height: number }
-type Availability = { supported: boolean; requiredMacos: string }
+type Availability = { supported: boolean; requiredMacos: string; osVersion?: string | null; reason?: string }
 type CapturedFile = {
   id: string
   path: string
@@ -25,6 +25,7 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
   const [displays, setDisplays] = useState<Display[]>([])
   const [displayId, setDisplayId] = useState('')
   const [mp4Supported, setMp4Supported] = useState(false)
+  const [mp4AvailabilityReason, setMp4AvailabilityReason] = useState('Native MP4 availability has not been checked')
   const [duration, setDuration] = useState(6)
   const [systemAudio, setSystemAudio] = useState(false)
   const [microphone, setMicrophone] = useState(false)
@@ -50,9 +51,14 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
         list.displays.some(display => String(display.id) === current)
           ? current : String(list.displays[0]?.id ?? ''))
       setMp4Supported(Boolean(availability.supported))
+      setMp4AvailabilityReason(availability.reason ||
+        (availability.supported ? 'Native MP4 is available for device testing' : 'Native MP4 unavailable on this operating system'))
       setError('')
     }).catch(cause => {
-      if (active) setError('Could not enumerate capture devices: ' + (cause as Error).message)
+      if (active) {
+        setMp4AvailabilityReason('Could not check native recorder: ' + (cause as Error).message)
+        setError('Could not initialize native capture: ' + (cause as Error).message)
+      }
     }).finally(() => { if (active) setLoading(false) })
     return () => { active = false }
   }, [desktop, mac])
@@ -149,7 +155,7 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
     </div>
     {!supportedDesktop && <p className="help-text">Native screen capture requires the Mac/Windows desktop application. Android and browser editions cannot record local desktop screens.</p>}
     {mac && !mp4Supported && desktop && <p className="help-text">
-      Native MP4 requires macOS 15+. Silent AVI capture is available as a fallback.
+      {mp4AvailabilityReason} · Silent AVI capture remains available as a fallback.
     </p>}
     {error && <p className="clip-error" role="alert">{error}</p>}
     {saved && <div className="clip-result" role="status">
