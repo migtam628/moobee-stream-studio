@@ -1,3 +1,35 @@
+# MooBee Stream Studio v0.3.9-alpha.9 — Continuous Native Program Input Diagnostics
+
+**Experimental hardware-test alpha. Not beta, not full Program recording, and not a functioning livestream broadcaster.**
+
+## Changes since v0.3.9-alpha.8
+
+- Adds **Studio → Quick Screen Capture → Continuous-source Program AVI** on supported Mac/Windows desktops. Unlike the previous snapshot-sampling test, this experimental path starts native XCap video frame receivers on up to four enabled display sources in the current **Program** scene (not Studio Mode Preview).
+- Keeps only the latest complete source image in MooBee's own compositor, encodes a grid into a private **2–8 second silent MJPEG AVI** at nominal 640×360/10fps, and publishes only after the AVI index, file sync and atomic move succeed.
+- Adds bounded source drain and a 36-million-pixel combined native input budget, rejects disconnected or stale inputs, and reports source frames received, repeated slots, late output ticks, arrival-time skew, and actual wall-clock elapsed duration. These measurements are **not** native presentation timestamps or proof of frame synchronization.
+- Adds automated Mac and Windows native source validation tests, browser/API regression checks and a dedicated device acceptance guide: [Continuous Program input](CONTINUOUS_PROGRAM_CAPTURE.md).
+- Integrates the prior beta-readiness evidence audit into main and hardens Android APK CI against transient Maven Central dependency HTTP 429 errors using dependency caching and bounded retries. Android remains an **experimental debug/test APK**, not a mobile livestream engine.
+- Preserves the alpha.8 composed-display AVI experiment and macOS 14+ direct-screen H.264 MP4 testing. These are **separate limited test recorders** and are not the complete synchronized Program recording engine.
+
+## Limitations and required acceptance
+
+- No synchronized live 1080p Program encoder, webcam/overlay/video-text layers in final encoded output, microphone/system-audio mixer, native Windows H.264/AAC Program parity, RTMP/RTMPS broadcasting, trusted signed updates, or completed hardware soak tests.
+- The new continuous-input AVI uses nominal encoded timing and unsynchronized source arrival clocks; slow native capture can differ from playback duration. No real-device performance is inferred from successful CI compilation.
+- Main **Record** and **Go Live** remain disabled. **No beta-ready claim.**
+
+## Mac / Windows test procedure
+
+1. Install the new **alpha.9** build and confirm the installed sidebar/Settings build identifier matches this exact release tag and commit. On macOS, authorize Screen Recording as needed and restart MooBee.
+2. In Studio, configure a Program scene with one or two enabled displays, optionally choose a different Studio Mode Preview scene, and select **Continuous-source Program AVI** for four seconds.
+3. Confirm the saved AVI comes from the selected Program, shows motion and both screens in the expected layout, and can be played/searched in VLC. For detailed checks, use [the continuous capture guide](CONTINUOUS_PROGRAM_CAPTURE.md).
+4. Check source frame counts, repeated slots, late output frames, reported arrival skew and wall-clock duration. Compare a second run using **Sampled Program AVI**. Neither should be described as real-time recording proof.
+5. Independently inspect with `ffprobe` and full `ffmpeg` decode; expected four-second AVI: MJPEG, 640×360, nominal 10fps, 40 frames, **no audio**. Verify failure cleanup on permission revocation or monitor disconnect.
+6. Separately re-test macOS direct-screen experimental MP4, early Stop and Save, seeking and audible audio, where supported. Do not assume the two recorders share audio/video paths.
+
+Record sanitized evidence in [hardware acceptance issue #14](https://github.com/migtam628/moobee-stream-studio/issues/14) and update the [beta go/no-go tracker #18](https://github.com/migtam628/moobee-stream-studio/issues/18). Do not upload personal footage, screen content or credentials.
+
+---
+
 # MooBee Stream Studio v0.3.9-alpha.8 — Program Display Composition Test
 
 **Experimental, unsigned hardware-test prerelease. Not a beta or a working livestream broadcaster.**
