@@ -1,3 +1,35 @@
+# MooBee Stream Studio v0.3.9-alpha.8 — Program Display Composition Test
+
+**Experimental, unsigned hardware-test prerelease. Not a beta or a working livestream broadcaster.**
+
+## What's new since alpha.6
+
+- Adds **Studio → Quick Screen Capture → Capture Program AVI test** on Mac/Windows: select the currently active **Program** scene, with one to four unique enabled display sources, and produce a private local **2–8 second silent MJPEG AVI** after sequential native screen captures and bounded grid compositing. The test output is a nominal 640×360 at 10 fps; this is not timestamp-synchronized 1080p Program capture.
+- Uses the first-party scene-grid compositor and incremental indexed AVI writer with a unique unpublished temporary file, disk synchronization, and finalized-only publication. If capture fails, do not mark the file complete.
+- Reports wall-clock elapsed capture and measured sampling FPS separately from the nominal AVI playback timeline, so a slow multi-display test is not mistaken for real-time output.
+- Prevents the recorder from mistakenly capturing Studio Mode **Preview** rather than **Program**. Rejects invalid/duplicate/unsupported display sources. Web/API callers receive an explicit unavailable response.
+- Reuses alpha.7 still-frame multi-display Preview/Program diagnostics, correct build release identity, Sonoma 14+ experimental H.264 direct-display MP4 recording, privacy recovery, and prior validation hardening.
+- Fixes macOS release-build test scripting: separate Rust unit-test commands run individually rather than being folded into one invalid Cargo invocation. Adds macOS and Windows native compilation/test gates for the composed AVI path.
+
+## What alpha.8 does NOT provide
+
+- This test captures **screenshots sequentially**, not a continuously synchronized, encoded Program video stream. It does not include camera/webcam PiP, image/text/alert layers, scene transitions, microphone/system audio, H.264/AAC Program encoding, or RTMP/RTMPS broadcasting.
+- Windows native H.264/AAC recording parity, secure stream keys, signed/notarized desktop installers, sustained capture and beta hardware acceptance are unverified.
+- The main **Record** and **Go Live** buttons remain disabled. The self-hosted web and Android editions do not acquire native Mac/Windows display captures; Android remains a debug/test package.
+
+## Real-device acceptance
+
+1. On a compatible Mac or Windows PC, install the matching **experimental** desktop package and approve Screen Recording access as needed. Note OS version, architecture and exact release tag/commit.
+2. Add one or two display sources to a Program scene. If possible, enable Studio Mode and select a different Preview scene. Record a four-second **Program AVI test** and verify that the saved file shows the Program sources only.
+3. Open the AVI in VLC. Test actual moving pixels, aspect ratios, duration, seeking and EOF playback. Run `ffprobe` and full-file `ffmpeg -f null -` decode; expected: MJPEG 640×360, 10 fps nominal timeline, 40 frames/4 seconds, no audio.
+4. Disable a display source and repeat. Verify errors for no sources, duplicate/unsupported sources, disconnected monitors and revoked screen permission. Reopen MooBee and verify saved clips persist.
+5. Test experimental Sonoma H.264 **direct-display** MP4 separately, including early Stop and Save, QuickTime playback and real audio-track inspection. MP4 direct-display and AVI composed tests are independent proof-of-concept paths.
+
+Full test protocol: [Program AVI acceptance](PROGRAM_AVI_ACCEPTANCE.md), [Mac MP4 acceptance](MACOS_MP4_ACCEPTANCE.md).
+Track actual evidence in [Issue #14](https://github.com/migtam628/moobee-stream-studio/issues/14) and beta requirements in [Issue #18](https://github.com/migtam628/moobee-stream-studio/issues/18).
+
+---
+
 # MooBee Stream Studio v0.3.9-alpha.7 — Native Multi-Display Preview & Exact Build Identity
 
 **Experimental prerelease, not full Program recording or livestreaming.**
