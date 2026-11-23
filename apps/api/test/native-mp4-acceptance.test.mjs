@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { assessNativeMp4, parseOptions } from '../../../scripts/verify-native-mp4.mjs';
+import { assessNativeMp4, parseOptions, parseAudioPeakDbfs } from '../../../scripts/verify-native-mp4.mjs';
 
 const probe = {
   format: { duration: '4.03', size: '1320000' },
@@ -47,4 +47,27 @@ test('acceptance CLI parses explicit files and protects against partial options'
   assert.equal(options.report, '/tmp/evidence.json');
   assert.throws(() => parseOptions([]), /--file/);
   assert.throws(() => parseOptions(['--file']), /Usage/);
+});
+
+test('an early Stop and Save uses actual duration instead of the requested maximum', () => {
+  const short = { ...probe, format: { duration: '15.25' } };
+  const accepted = assessNativeMp4(short, { targetSeconds: 60, stoppedEarly: true });
+  assert.equal(accepted.passed, true);
+  assert.equal(accepted.stoppedEarly, true);
+  assert.equal(accepted.durationSeconds, 15.25);
+  assert.equal(assessNativeMp4(short, { targetSeconds: 60 }).passed, false);
+  assert.equal(assessNativeMp4({ ...probe, format: { duration: '69.8' } },
+    { targetSeconds: 60, stoppedEarly: true }).passed, false);
+});
+
+test('audible audio QA recognizes FFmpeg levels including effectively silent AAC', () => {
+  assert.equal(parseAudioPeakDbfs('[Parsed_volumedetect_0] max_volume: -91.0 dB'), -91);
+  assert.equal(parseAudioPeakDbfs('[Parsed_volumedetect_0] max_volume: -12.5 dB'), -12.5);
+  assert.equal(parseAudioPeakDbfs('max_volume: -inf dB'), -Infinity);
+  assert.equal(parseAudioPeakDbfs('no audio data'), null);
+  const parsed = parseOptions(['--file', '/tmp/test.mp4', '--seconds', '60', '--stopped-early',
+    '--expect-audible']);
+  assert.equal(parsed.stoppedEarly, true);
+  assert.equal(parsed.expectAudio, true);
+  assert.equal(parsed.expectAudible, true);
 });
