@@ -243,8 +243,12 @@ public func moobee_macos_record_mp4(
         return -1
     }
     let filePath = String(cString: output)
-    guard filePath.hasSuffix(".mp4.part"), filePath.utf8.count < 4096 else {
-        copyError("Native recorder requires a private temporary MP4 path", to: errorText, size: errorLength)
+    // The file must be hidden until atomically published by Rust. Preserve a
+    // genuine .mp4 suffix for AVAssetWriter's file-type detection on Sonoma.
+    let temporaryName = URL(fileURLWithPath: filePath).lastPathComponent
+    guard temporaryName.hasPrefix(".clip-"), temporaryName.hasSuffix(".part.mp4"),
+          filePath.utf8.count < 4096 else {
+        copyError("Native recorder requires a private temporary .part.mp4 path", to: errorText, size: errorLength)
         return -1
     }
     guard #available(macOS 14.0, *) else {
