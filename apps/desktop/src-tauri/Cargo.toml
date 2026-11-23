@@ -1,6 +1,6 @@
 [package]
 name = "moobee-live-desktop"
-version = "0.3.8"
+version = "0.3.9"
 description = "MooBee Stream Studio standalone native production center"
 edition = "2021"
 
