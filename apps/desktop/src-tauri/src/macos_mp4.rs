@@ -14,7 +14,7 @@ use std::{
 };
 
 const MIN_SECONDS: u32 = 3;
-const MAX_SECONDS: u32 = 15;
+const MAX_SECONDS: u32 = 120;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -32,7 +32,7 @@ pub struct Mp4CaptureReport {
 
 fn validate(seconds: u32, display_id: usize) -> Result<(), String> {
     if !(MIN_SECONDS..=MAX_SECONDS).contains(&seconds) || display_id > 24 {
-        Err("Experimental macOS MP4 duration must be 3–15 seconds and display must be valid".into())
+        Err("Native macOS MP4 recording duration must be 3–120 seconds and display must be valid".into())
     } else {
         Ok(())
     }
@@ -41,6 +41,7 @@ fn validate(seconds: u32, display_id: usize) -> Result<(), String> {
 #[cfg(target_os = "macos")]
 unsafe extern "C" {
     fn moobee_macos_mp4_supported() -> c_int;
+    fn moobee_macos_request_stop_mp4() -> c_int;
     fn moobee_macos_record_mp4(
         output_path: *const c_char,
         display_id: u32,
@@ -156,6 +157,20 @@ pub fn macos_mp4_availability() -> MacOsMp4Availability {
     MacOsMp4Availability { supported, required_macos: "15.0" }
 }
 
+/// Request a graceful stop for the active macOS MP4 session. The finalization
+/// and atomic publish still occur in the original capture command.
+#[tauri::command]
+pub fn stop_macos_mp4() -> Result<bool, String> {
+    #[cfg(target_os = "macos")]
+    {
+        Ok(unsafe { moobee_macos_request_stop_mp4() != 0 })
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err("Native MP4 stop is available only on macOS".into())
+    }
+}
+
 #[tauri::command]
 pub async fn capture_macos_mp4(
     app: tauri::AppHandle,
@@ -197,8 +212,9 @@ mod tests {
     fn test_recording_limits() {
         assert!(validate(3, 0).is_ok());
         assert!(validate(15, 1).is_ok());
+        assert!(validate(120, 1).is_ok());
         assert!(validate(2, 0).is_err());
-        assert!(validate(16, 0).is_err());
+        assert!(validate(121, 0).is_err());
         assert!(validate(10, 25).is_err());
     }
 }
