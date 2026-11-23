@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { CheckCircle2, Copy, Film, FolderOpen, Monitor, Square, Video } from 'lucide-react'
 import { request, runningInTauri } from './api'
 import { isScreenCapturePermissionDenied } from './capturePermission'
+import { singleProgramDisplayId } from './programDisplay'
 
 type Display = { id: number; name: string; width: number; height: number }
 type Availability = { supported: boolean; requiredMacos: string; osVersion?: string | null; reason?: string; microphoneSupported?: boolean; engine?: string }
@@ -96,6 +97,20 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
   const canRecord = supportedDesktop && !!displayId && !loading && !busy
   const durations = useMp4 ? [4, 6, 8, 15, 30, 60, 120] : [4, 6, 8]
   const formatLabel = useMp4 ? 'H.264 MP4 (macOS 14+ experimental)' : 'silent MJPEG AVI (10 fps)'
+  async function selectProgramDisplay() {
+    setError('')
+    try {
+      const collection = await request<unknown>('/studio/collection')
+      const id = singleProgramDisplayId(collection)
+      if (!displays.some(display => display.id === id)) {
+        throw new Error('The Program display is not connected. Refresh capture devices or choose a display manually.')
+      }
+      setDisplayId(String(id))
+    } catch (cause) {
+      setError('Program display selection: ' + (cause as Error).message)
+    }
+  }
+
   async function capture() {
     if (!canRecord || !durations.includes(duration)) return
     setBusy(true)
@@ -159,7 +174,7 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
   return <div className="quick-capture">
     <p className="help-text">
       Save a <strong>bounded test recording of one display</strong> using MooBee's native capture. On supported Macs, request up to 120 seconds and stop early with finalization.
-      This is not the composited Program feed and does not include saved scene overlays or webcam layers.
+      This is not the composited Program feed and does not include saved scene overlays or webcam layers. Use Program display only chooses an existing single source; it does not render or record other scene layers.
     </p>
     <div className="quick-capture-options">
       <label>Display
@@ -176,6 +191,10 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
           {durations.map(seconds => <option key={seconds} value={seconds}>{seconds} seconds</option>)}
         </select>
       </label>
+      <button className="secondary-button" type="button" disabled={!supportedDesktop || loading || busy}
+        onClick={() => void selectProgramDisplay()} title="Select the one enabled screen source of the current Program scene; this does not composite other scene layers.">
+        Use Program display
+      </button>
       <span className="quick-capture-format"><Video size={15}/>{formatLabel}</span>
     </div>
     {useMp4 && <div className="quick-capture-options">
