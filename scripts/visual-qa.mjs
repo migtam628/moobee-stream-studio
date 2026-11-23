@@ -31,6 +31,10 @@ try {
     throw new Error('Native Quick Capture must be disabled in the browser-only edition');
   }
   await page.screenshot({ path: new URL('desktop.png', dir).pathname, fullPage: true });
+  await page.getByRole('button', { name: 'Settings', exact: true }).first().click();
+  await page.getByText('Runtime Service Diagnostics').waitFor();
+  await page.getByText('RTMP / RTMPS broadcast').waitFor();
+  await page.getByText('Not implemented', { exact: true }).first().waitFor();
   await page.getByRole('button', { name: 'Overlays' }).first().click();
   await page.getByRole('heading', { name: 'Overlays' }).waitFor();
   await page.getByRole('button', { name: 'Open alert test bench' }).click();
