@@ -127,3 +127,6 @@
   border:1px solid #3f3b4d;border-radius:8px;padding:10px 12px;font-size:11px;color:#c8bfd5}
 .clip-inventory-status>span{flex:1 1 180px}
 .clip-inventory-status>small{flex:1 1 100%;color:#e2a799}
+
+/* A still-frame compositor error must be visible; never imply a blank canvas is live output. */
+.preview-error{display:block;padding:8px 10px;color:#efadad;font-size:11px;line-height:1.4;overflow-wrap:anywhere}
