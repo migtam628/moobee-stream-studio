@@ -1,3 +1,34 @@
+# MooBee Stream Studio v0.3.9-alpha.6 — Measured Recording Duration & Beta Acceptance Tools
+
+**Experimental prerelease.** This update hardens the working first-party macOS H.264 MP4 recording workflow on Sonoma 14.2; it is not full Program recording or RTMP broadcasting.
+
+## Recording reliability
+
+- After MP4 finalization, MooBee now reads the **actual movie duration** from `moov/mvhd` instead of displaying the selected recording maximum as if it were the clip's duration. Early Stop and Save (for example, 60-second maximum stopped after 15 seconds) can now show an independently reported length.
+- Studio Quick Screen Capture now displays the measured duration, requested maximum, file size, and a refreshed **saved local clips inventory**. The inventory reloads when Studio is opened again, making restart-persistence checks easier.
+- The native MP4 duration probe reads only the metadata boxes; no video footage needs to be uploaded or copied to the cloud. Rust tests cover both common MP4 movie-header versions and missing timing information.
+
+## Audio and automated verification
+
+- The offline `scripts/verify-native-mp4.mjs` test supports `--stopped-early` so early stop recordings are not incorrectly rejected for being shorter than the chosen maximum.
+- Added optional `--expect-audible` verification. FFmpeg locally checks AAC track presence and measures peak level; an effectively silent track (below -50 dBFS) fails. **A measured signal is not proof of intended audio-source identity or A/V synchronization**.
+- GitHub CI now synthesizes an H.264/AAC test MP4, checks full-file decoding, simulates early-stop duration validation, and confirms silent AAC is rejected when audible audio was requested.
+- Recording hardware acceptance still requires **real macOS 14.2 tests**. CI synthesis is not a substitute for actual ScreenCaptureKit capture.
+
+## Still blocking streaming beta
+
+Real scene composition (display/webcam/overlay layers), continuous Program recording, synchronized microphone/system-audio mixing, native Windows H.264/AAC parity, RTMP/RTMPS streaming, and secure signed production updates remain unimplemented or unverified. The main Studio **Record** and **Go Live** buttons remain disabled.
+
+## Suggested next device tests
+
+1. On the installed Mac build, select a **60-second maximum** and click **Stop and save MP4** after approximately 15 seconds. Compare the reported *actual* MP4 duration with QuickTime.
+2. Restart MooBee, open Studio, and use **Refresh saved clips**. Open the previous MP4 in QuickTime to confirm playback and seeking, not merely its presence.
+3. Play permitted, clearly audible system sound while selecting **Request system audio**. Record ~15 seconds, listen to playback, and independently inspect the AAC audio track and signal. Do not enable mic on macOS 14; that requires a separate implementation.
+
+See `docs/MACOS_MP4_ACCEPTANCE.md` for complete tests. No automation transmits user's media to GitHub.
+
+---
+
 # MooBee Stream Studio v0.3.9-alpha.5 — Sonoma Screen Recording Permission Recovery
 
 **Experimental alpha — user consent remains required.** This update helps diagnose and recover from macOS screen recording permission denial.
