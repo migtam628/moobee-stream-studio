@@ -1,5 +1,8 @@
 # MooBee Stream Studio — Production Release Gates
 
+> **Beta transition tracking:** [v0.4.0 beta promotion plan](BETA_RELEASE_PLAN.md) and [machine-readable gate status](BETA_READINESS.json). The current experimental alpha is **not** a verified full-streaming beta. Run `node scripts/check-beta-readiness.mjs` for the latest checked-in inventory.
+
+
 _Last audited against the source and CI in November 2026. Distinguish code presence from device acceptance. This is a living release checklist, not a claim of shipped features._
 
 ## Product contract
