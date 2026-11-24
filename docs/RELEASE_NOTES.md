@@ -1,3 +1,26 @@
+# MooBee Stream Studio v0.3.9-alpha.11 — Composed H.264 MP4 test
+
+**Experimental unsigned desktop hardware-test alpha. Not a broadcasting beta.**
+
+## New native media work
+
+- Adds a separate **Composed H.264 MP4 (Mac test)** control in Studio Quick Screen Capture. It sends composed RGBA frames from up to four enabled Program displays to MooBee's in-process AVFoundation H.264 encoder. No external OBS, Streamlabs or FFmpeg capture process is used.
+- Both continuous AVI and composed MP4 tests support baseline 640×360/10fps and higher-detail 1280×720/15fps profiles. These are short 2–8 second silent tests with a nominal frame clock, 120-frame limit and bounded output file validation.
+- MP4 is finalized in private storage, checked for complete container boxes and valid duration, synchronized and published only on success. Capture and container-finalization durations are reported separately.
+- Windows retains experimental sampled and continuous MJPEG AVI capture. Windows H.264/AAC is not implemented by this release.
+- Native Mac Intel/ARM64 and Windows builds are gated by the automated workflows. Actual device encoding, playback and source-capture performance require separate verification. See [composed MP4 acceptance](COMPOSED_MP4_ACCEPTANCE.md).
+- Desktop and web distribution can publish despite the specifically documented Maven HTTP 429 exception for the optional Android debug APK; the manifest discloses any unavailable target.
+
+## Required hardware tests
+
+On Mac, select a Program scene with one or two enabled displays, choose 4 seconds and either profile, then use **Composed H.264 MP4 (Mac test)**. Open the result in QuickTime or VLC; confirm actual display motion, composition, seeking, H.264 video, expected resolution/duration and complete decode. These clips contain no audio. Compare elapsed time and late/repeated frame diagnostics with the continuous AVI test.
+
+On Windows, verify both continuous AVI profiles and independent full-file playback. Do not infer Windows H.264 support from Mac output.
+
+Main **Record** and **Go Live** remain disabled. Webcam/overlay composition, synchronized audio, sustained timestamp-aware recording, Windows H.264, RTMPS, signing and real-device acceptance remain beta blockers.
+
+---
+
 # MooBee Stream Studio v0.3.9-alpha.10 — Native Capture Test + Reliable Desktop Distribution
 
 **Experimental hardware-test alpha. Not a beta, not full Program recording, and not a livestream broadcaster.**
