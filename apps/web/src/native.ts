@@ -1,10 +1,11 @@
+import { validateSceneLayout, type SceneLayout } from './programDisplay'
 import { invoke } from '@tauri-apps/api/core'
 import { version as appVersion } from '../../../package.json'
 import { offline, type Activity, type Alert, type StudioStatus } from './types'
 
 type Body = Record<string, unknown>
 type Source = StudioStatus['sources'][number]
-type Scene = { name: string; sources: Source[] }
+type Scene = { name: string; layout?: SceneLayout; sources: Source[] }
 type Display = { id: number; name: string; width: number; height: number }
 type Saved = { version: 1; scenes: Scene[]; currentScene: string; previewScene: string; studioMode: boolean }
 const STORAGE_KEY = 'moobee-native-studio.v1'
@@ -35,7 +36,8 @@ function validateCollection(value: unknown): Saved {
       ids.add(source.id)
       return { id: source.id, name: source.name.trim(), kind: 'display', deviceId: source.deviceId, enabled: source.enabled }
     })
-    return { name, sources }
+    const layout = validateSceneLayout(scene.layout)
+    return { name, sources, ...(scene.layout === undefined ? {} : { layout }) }
   })
   if (!scenes.some(s => s.name === raw.currentScene) || !scenes.some(s => s.name === raw.previewScene) ||
       typeof raw.studioMode !== 'boolean') throw new Error('Invalid current/preview scene selection')
@@ -77,6 +79,7 @@ function snapshot(): StudioStatus {
     recordAvailable: false, broadcastAvailable: false,
     scenes: draft.scenes.map(scene => scene.name),
     currentScene: draft.currentScene, previewScene: draft.previewScene, studioMode: draft.studioMode,
+    sceneLayout: active?.layout ?? 'grid',
     sources: active?.sources.map(source => ({ ...source })) ?? [], inputs: []
   }
 }
@@ -125,7 +128,7 @@ function perform(body: Body) {
     let n = 2
     while (draft.scenes.some(s => s.name.toLowerCase() === name.toLowerCase())) name = `${base} Copy ${n++}`
     let nextId = Math.max(0, ...draft.scenes.flatMap(s => s.sources.map(item => item.id))) + 1
-    draft.scenes.push({ name, sources: scene.sources.map(src => ({ ...src, id: nextId++ })) })
+    draft.scenes.push({ name, ...(scene.layout ? { layout: scene.layout } : {}), sources: scene.sources.map(src => ({ ...src, id: nextId++ })) })
   } else if (action === 'scene') {
     if (typeof sceneName !== 'string' || !draft.scenes.some(s => s.name === sceneName)) throw new Error('Unknown scene')
     if (draft.studioMode) draft.previewScene = sceneName
@@ -144,6 +147,16 @@ function perform(body: Body) {
     if (active.sources.length >= 30) throw new Error('Source limit reached')
     const id = Math.max(0, ...draft.scenes.flatMap(s => s.sources.map(item => item.id))) + 1
     active.sources.push({ id, name: body.name.trim(), kind: 'display', deviceId: body.deviceId, enabled: true })
+  } else if (action === 'sceneLayout') {
+    if (!active) throw new Error('No active scene')
+    if (body.layout === undefined) throw new Error('Choose a scene layout')
+    active.layout = validateSceneLayout(body.layout)
+  } else if (action === 'moveSource') {
+    const index = active?.sources.findIndex(src => src.id === body.sceneItemId) ?? -1
+    if (!active || index < 0 || (body.direction !== 'up' && body.direction !== 'down')) throw new Error('Invalid source order')
+    const next = index + (body.direction === 'up' ? -1 : 1)
+    if (next < 0 || next >= active.sources.length) throw new Error('Source is already at the edge')
+    ;[active.sources[index], active.sources[next]] = [active.sources[next], active.sources[index]]
   } else if (action === 'source') {
     const source = active?.sources.find(item => item.id === body.sceneItemId)
     if (!source || typeof body.enabled !== 'boolean') throw new Error('Invalid source')
@@ -222,7 +235,7 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
       throw new Error('Choose 1–4 unique Program displays, a 2–8 second duration and a supported capture profile')
     }
     return await invoke(path.endsWith('-mp4') ? 'capture_continuous_program_mp4' : 'capture_continuous_program_avi', {
-      displayIds: ids, seconds: body.seconds, profile: body.profile
+      displayIds: ids, seconds: body.seconds, profile: body.profile, layout: validateSceneLayout(body.layout)
     })
   }
   if (path === '/clips/capture-program-test-avi') {
@@ -234,7 +247,7 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
         body.seconds < 2 || body.seconds > 8) {
       throw new Error('Choose one to four unique Program displays and a 2–8 second test duration')
     }
-    return await invoke('capture_program_test_avi', { displayIds: ids, seconds: body.seconds })
+    return await invoke('capture_program_test_avi', { displayIds: ids, seconds: body.seconds, layout: validateSceneLayout(body.layout) })
   }
   if (path === '/clips/capture-avi') {
     if (typeof body.displayId !== 'number' || !Number.isSafeInteger(body.displayId) ||
@@ -279,7 +292,7 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
     if (ids.some(id => !Number.isSafeInteger(id) || id < 0 || id > 24)) {
       throw new Error('Scene includes an invalid display identity')
     }
-    return { image: await invoke<string>('capture_scene_snapshot', { displayIds: ids }) }
+    return { image: await invoke<string>('capture_scene_snapshot', { displayIds: ids, layout: validateSceneLayout(scene.layout) }) }
   }
   if (path === '/alerts/test') {
     const alert = await invoke<Alert>('emit_test_alert', { alert: { type: body.type, name: body.name, message: body.message } })
