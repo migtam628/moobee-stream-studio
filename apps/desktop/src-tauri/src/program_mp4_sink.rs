@@ -4,9 +4,10 @@ use std::{ffi::{CStr, CString, c_void}, fs::OpenOptions, os::raw::{c_char,c_int}
 
 unsafe extern "C" {
     fn moobee_program_writer_create(path: *const c_char, width: c_int, height: c_int,
-        fps: c_int, error: *mut c_char, capacity: c_int) -> *mut c_void;
+        fps: c_int, microphone: c_int, error: *mut c_char, capacity: c_int) -> *mut c_void;
     fn moobee_program_writer_append(handle: *mut c_void, rgba: *const u8, length: usize,
         error: *mut c_char, capacity: c_int) -> c_int;
+    fn moobee_program_writer_append_audio(handle: *mut c_void, pcm: *const f32, frames: usize, error: *mut c_char, capacity: c_int) -> c_int;
     fn moobee_program_writer_finish(handle: *mut c_void, error: *mut c_char, capacity: c_int) -> c_int;
     fn moobee_program_writer_destroy(handle: *mut c_void);
 }
@@ -18,10 +19,13 @@ fn message(error: &[c_char; 512]) -> String {
 }
 impl ProgramMp4Sink {
     pub(crate) fn new(path: &Path, width: u32, height: u32, fps: u32) -> Result<Self, String> {
+        Self::new_with_audio(path,width,height,fps,false)
+    }
+    pub(crate) fn new_with_audio(path: &Path, width: u32, height: u32, fps: u32, microphone: bool) -> Result<Self,String> {
         let path = CString::new(path.to_string_lossy().as_bytes()).map_err(|_| "Invalid MP4 path")?;
         let mut error = [0; 512];
         let handle = unsafe { moobee_program_writer_create(path.as_ptr(), width as c_int,
-            height as c_int, fps as c_int, error.as_mut_ptr(), 512) };
+            height as c_int, fps as c_int, if microphone { 1 } else { 0 }, error.as_mut_ptr(), 512) };
         if handle.is_null() { Err(message(&error)) } else { Ok(Self(handle)) }
     }
 
@@ -32,6 +36,12 @@ impl ProgramMp4Sink {
         if result == 0 { Ok(()) } else { Err(message(&error)) }
     }
 
+    pub(crate) fn append_audio(&mut self, pcm: &[f32]) -> Result<(), String> {
+        if pcm.is_empty() || pcm.len() % 2 != 0 || pcm.len() > 9600 { return Err("Invalid stereo PCM block".into()); }
+        let mut error = [0;512];
+        let result = unsafe { moobee_program_writer_append_audio(self.0, pcm.as_ptr(), pcm.len()/2, error.as_mut_ptr(),512) };
+        if result == 0 { Ok(()) } else { Err(message(&error)) }
+    }
     pub(crate) fn finish(&mut self) -> Result<(), (String, bool)> {
         let mut error = [0; 512];
         let result = unsafe { moobee_program_writer_finish(self.0, error.as_mut_ptr(), 512) };
