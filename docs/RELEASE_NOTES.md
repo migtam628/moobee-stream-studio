@@ -1,3 +1,26 @@
+# MooBee Stream Studio v0.3.9-alpha.12 — Combined native A/V integration
+
+**Experimental hardware-test alpha; not a production broadcasting release.**
+
+## Changes since alpha.11
+
+- Saved per-scene Grid and Picture-in-picture layouts, ordered display sources, and shared native preview/recording composition.
+- Mac composed H.264 MP4 can opt into the default webcam (forces PiP with one to three displays) and the default microphone (AAC). Camera and microphone access are requested only for the selected recording test.
+- Static PNG graphics in continuous AVI and MP4, bounded native RGBA overlay, microphone gain and clipping diagnostics.
+- Shared rational video frame/audio sample timeline; actual device-clock synchronization and audible playback require hardware validation.
+- Experimental Mac MP4 Full HD 1920×1080/nominal 30 fps profile (2–4 seconds, 120-frame cap); baseline 360p10 and 720p15 remain available for 2–8 seconds. Windows retains silent continuous AVI with graphic overlay support.
+- H.264/AAC FLV packet framing foundation, not a live transport or published stream.
+
+All five PR #39 CI workflows passed. This does not prove real-device A/V performance. Main Record and Go Live remain disabled. System audio mixing, Windows H.264/AAC, live scene transitions, sustained recording, animated overlays and authenticated RTMPS remain incomplete.
+
+## Installed-device test sequence
+
+In Studio → Quick screen capture, use a Program scene containing an enabled display. Test composed MP4 at baseline with all options off, then webcam, microphone, PNG separately, then combine them. Test 1080p30 only after lower profiles succeed. Verify clips with independent playback and full decode; compare actual elapsed time, late frames and audible audio against the intended timeline.
+
+[Native A/V integration acceptance](NATIVE_AV_INTEGRATION.md) · [Scene layouts](NATIVE_SCENE_LAYOUTS.md). Report sanitized test evidence in issue #14. Android debug APK remains experimental and may be absent only under the documented Maven HTTP 429 exception.
+
+---
+
 # MooBee Stream Studio v0.3.9-alpha.11 — Composed H.264 MP4 test
 
 **Experimental unsigned desktop hardware-test alpha. Not a broadcasting beta.**
