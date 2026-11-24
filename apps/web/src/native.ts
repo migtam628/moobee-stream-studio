@@ -234,8 +234,11 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
         (body.profile !== 'baseline' && body.profile !== '720p15')) {
       throw new Error('Choose 1–4 unique Program displays, a 2–8 second duration and a supported capture profile')
     }
-    return await invoke(path.endsWith('-mp4') ? 'capture_continuous_program_mp4' : 'capture_continuous_program_avi', {
-      displayIds: ids, seconds: body.seconds, profile: body.profile, layout: validateSceneLayout(body.layout)
+    const mp4 = path.endsWith('-mp4')
+    if (body.webcam !== undefined && typeof body.webcam !== 'boolean') throw new Error('Invalid webcam selection')
+    if (body.webcam && (!mp4 || ids.length > 3)) throw new Error('Webcam PiP requires macOS MP4 and one to three displays')
+    return await invoke(mp4 ? 'capture_continuous_program_mp4' : 'capture_continuous_program_avi', {
+      displayIds: ids, seconds: body.seconds, profile: body.profile, layout: validateSceneLayout(body.layout), ...(mp4 ? { webcam: body.webcam === true } : {})
     })
   }
   if (path === '/clips/capture-program-test-avi') {
