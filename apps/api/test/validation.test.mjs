@@ -109,3 +109,30 @@ test('invalid scene imports leave existing collection unchanged', () => {
     assert.deepEqual(studio.collection(), original);
   }
 });
+
+test('scene layout and ordered sources persist in exports, copies and studio transitions', () => {
+  const studio = createStudio();
+  studio.perform({ action: 'studioMode', studioModeEnabled: true });
+  studio.perform({ action: 'scene', sceneName: 'Gameplay' });
+  studio.perform({ action: 'addSource', kind: 'display', deviceId: '0', name: 'Primary' });
+  studio.perform({ action: 'addSource', kind: 'display', deviceId: '1', name: 'Inset' });
+  studio.perform({ action: 'sceneLayout', layout: 'pip' });
+  const secondId = studio.status().sources[1].id;
+  studio.perform({ action: 'moveSource', sceneItemId: secondId, direction: 'up' });
+  assert.equal(studio.status().sceneLayout, 'pip');
+  assert.equal(studio.status().sources[0].deviceId, '1');
+  assert.equal(studio.collection().scenes.find(s => s.name === 'Starting Soon').layout, undefined);
+  const restored = createStudio({ initial: studio.collection() });
+  assert.equal(restored.status().sceneLayout, 'pip');
+  assert.equal(restored.status().sources[0].deviceId, '1');
+  restored.perform({ action: 'transition' });
+  assert.equal(restored.status().currentScene, 'Gameplay');
+  restored.perform({ action: 'duplicateScene', sceneName: 'Gameplay' });
+  assert.equal(restored.collection().scenes.find(s => s.name === 'Gameplay Copy').layout, 'pip');
+  assert.throws(() => restored.perform({ action: 'sceneLayout', layout: 'invalid' }), /Invalid scene layout/);
+  assert.throws(() => restored.perform({ action: 'moveSource', sceneItemId: secondId, direction: 'up' }), /edge/);
+  const invalid = restored.collection();
+  invalid.scenes[0].layout = 'invalid';
+  assert.throws(() => restored.replaceCollection(invalid), /Unsupported native scene layout/);
+  assert.equal(restored.status().sceneLayout, 'pip');
+});
