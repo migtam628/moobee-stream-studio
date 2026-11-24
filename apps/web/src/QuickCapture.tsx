@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { CheckCircle2, Copy, Film, FolderOpen, Monitor, Square, Video } from 'lucide-react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { CheckCircle2, Copy, Film, FolderOpen, Monitor, Square, Video, AudioLines, Settings2, X, Volume2, Image as ImageIcon } from 'lucide-react'
 import { request, runningInTauri } from './api'
 import { isScreenCapturePermissionDenied } from './capturePermission'
 import { singleProgramDisplayId, programTestDisplayIds, programTestLayout } from './programDisplay'
@@ -43,7 +43,11 @@ type CapturedFile = {
  * No synthetic status flags or fake broadcast controls are changed here.
  * The full Record/Go Live outputs remain gated on native A/V/RTMP acceptance.
  */
-export default function QuickCapture({ openClips }: { openClips: () => void }) {
+export default function QuickCapture({ openClips, scenes, sources, otherAudio, streamControl, openSettings }: {
+  openClips: () => void; scenes: ReactNode; sources: ReactNode; otherAudio?: ReactNode;
+  streamControl: ReactNode; openSettings: () => void
+}) {
+  const diagnostics = useRef<HTMLDialogElement>(null)
   const desktop = runningInTauri()
   const mac = desktop && /Macintosh|Mac OS X/i.test(navigator.userAgent)
   const supportedDesktop = desktop && (mac || /Windows/i.test(navigator.userAgent))
@@ -260,11 +264,69 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
     catch { setError('Could not copy automatically. Select the file path below to copy it.') }
   }
 
-  return <div className="quick-capture">
-    <p className="help-text">
-      Save a <strong>bounded test recording of one display</strong> using MooBee's native capture. On supported Macs, request up to 120 seconds and stop early with finalization.
-      The ordinary screen test records one display, not the composed Program scene. Separate silent Program video tests below combine up to four display sources, without webcam, overlays or audio.
-    </p>
+  const isMacProgram = mac
+  const canProgram = supportedDesktop && !busy && !loading && !graphicLoading && displays.length > 0
+  const peak = saved?.microphoneIncluded && typeof saved.audioPeak === 'number' ? saved.audioPeak : null
+  const openDiagnostics = () => { if (!diagnostics.current?.open) diagnostics.current?.showModal() }
+  return <div className="production-capture">
+    <div className="production-docks" aria-label="Production docks">
+      <div className="production-dock scenes-dock">{scenes}</div>
+      <div className="production-dock sources-dock">
+        {sources}
+        <div className="dock-extra">
+          <div className="dock-subtitle">Recording layers <small>Program tests</small></div>
+          <label className="layer-switch"><Video size={15}/><span>Webcam inset <small>{mac ? 'Default camera · Mac MP4' : 'Mac MP4 only'}</small></span><input type="checkbox" aria-label="Webcam inset" checked={programWebcam} disabled={!mac || busy} onChange={e => setProgramWebcam(e.target.checked)}/></label>
+          <label className="layer-switch"><ImageIcon size={15}/><span>PNG graphic <small>{graphicName || 'Static overlay · continuous recording'}</small></span><input type="file" aria-label="Import PNG overlay" accept="image/png" disabled={!supportedDesktop || busy || graphicLoading} onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; void loadProgramGraphic(file) }}/></label>
+          {graphic && <button className="text-button dock-remove" disabled={busy} onClick={() => { setGraphic(null); setGraphicName('') }}>Remove graphic</button>}
+          <p className="dock-note">Webcam and graphic render into recording tests, not the still preview.</p>
+        </div>
+      </div>
+      <section className="production-dock mixer-dock panel" aria-label="Audio Mixer">
+        <div className="panel-head"><div className="panel-title"><AudioLines size={17}/>Audio Mixer</div><span className="subdued">Test inputs</span></div>
+        <div className="dock-body">
+          <label className="layer-switch"><Volume2 size={16}/><span>Mic / Aux <small>Default microphone</small></span><input type="checkbox" aria-label="Enable microphone" checked={programMic} disabled={!mac || busy} onChange={e => setProgramMic(e.target.checked)}/></label>
+          <div className="meter-caption"><span>Last recorded peak</span><b>{peak === null ? '—' : `${Math.round(peak*100)}%`}</b></div>
+          <div className="production-meter" role="meter" aria-label="Last recorded microphone peak" aria-valuemin={0} aria-valuemax={100} aria-valuenow={peak === null ? 0 : Math.round(Math.min(1,peak)*100)} aria-valuetext={peak === null ? 'No recording measured' : `${Math.round(peak*100)} percent`}>
+            <span style={{width: `${peak === null ? 0 : Math.min(1,peak)*100}%`}}/>
+          </div>
+          <label className="gain-label">Gain <b>{Math.round(micGain*100)}%</b><input type="range" aria-label="Microphone gain" min="0" max="2" step="0.1" value={micGain} disabled={!mac || !programMic || busy} onChange={e => setMicGain(Number(e.target.value))}/></label>
+          <button className="secondary-button mute-button" disabled={!mac || !programMic || busy} onClick={() => setMicGain(micGain === 0 ? 1 : 0)}>{micGain === 0 ? 'Unmute mic' : 'Mute mic'}</button>
+          <div className="desktop-audio-row"><span>Desktop Audio</span><small>Not connected to Program</small></div>
+          <p className="dock-note">Mic AAC is available in Mac MP4 tests. Meter reports the last capture, not a live signal.</p>
+          {otherAudio}
+        </div>
+      </section>
+      <section className="production-dock output-dock panel" aria-label="Controls">
+        <div className="panel-head"><div className="panel-title"><Settings2 size={17}/>Controls</div><span className="subdued">{busy ? 'Working' : 'Local'}</span></div>
+        <div className="dock-body">
+          <label className="dock-field">Video profile
+            <select aria-label="Continuous Program test profile" value={continuousProfile} disabled={busy} onChange={event => { const profile = event.target.value as 'baseline' | '720p15' | '1080p30'; setContinuousProfile(profile); if (profile === '1080p30' && programAviDuration > 4) setProgramAviDuration(4) }}>
+              <option value="baseline">360p · 10 fps</option><option value="720p15">720p · 15 fps</option>{mac && <option value="1080p30">1080p · 30 fps (test)</option>}
+            </select>
+          </label>
+          <label className="dock-field">Recording length
+            <select aria-label="Composed Program video test duration" value={programAviDuration} disabled={busy} onChange={event => setProgramAviDuration(Number(event.target.value))}>
+              {(continuousProfile === '1080p30' ? [2,4] : [2,4,6,8]).map(seconds => <option key={seconds} value={seconds}>{seconds} seconds</option>)}
+            </select>
+          </label>
+          <button className="primary-button program-record" type="button" disabled={!canProgram} onClick={() => void captureProgramVideoTest(isMacProgram ? 'mp4' : 'continuous')}><span className="record-dot"/>{busy ? 'Capturing / finalizing…' : 'Record Program test'}</button>
+          <small className="dock-note">{mac ? 'H.264 MP4 · optional AAC' : supportedDesktop ? 'Silent MJPEG AVI' : 'Requires Mac/Windows app'} · bounded diagnostic</small>
+          {streamControl}
+          <div className="dock-action-row"><button className="secondary-button" onClick={openClips}><Film size={14}/>Clips</button><button className="secondary-button" onClick={openSettings}><Settings2 size={14}/>Settings</button></div>
+          <button className="secondary-button diagnostics-button" onClick={openDiagnostics}><Monitor size={14}/>Capture diagnostics</button>
+          {saved && <button className="dock-result" onClick={openDiagnostics}><CheckCircle2 size={15}/>Saved {saved.format.toUpperCase()} · View result</button>}
+          {error && <button className="dock-error" onClick={openDiagnostics} title={error}>Capture failed · View details</button>}
+        </div>
+      </section>
+    </div>
+    <dialog ref={diagnostics} className="capture-dialog" aria-labelledby="capture-diagnostics-heading">
+      <div className="dialog-head"><div><h2 id="capture-diagnostics-heading">Quick screen capture — native test</h2><p>Direct-display diagnostics, comparison captures and detailed results.</p></div><button className="icon-button" aria-label="Close capture diagnostics" onClick={() => diagnostics.current?.close()}><X size={20}/></button></div>
+      <div className="quick-capture">
+        <p className="help-text">The direct screen test records one display. Program recordings use the selected scene and recording layers from the production docks.</p>
+        {supportedDesktop && <div className="clip-actions">
+          <button className="secondary-button" disabled={!canProgram} onClick={() => void captureProgramVideoTest('sampled')}>Sampled Program AVI</button>
+          <button className="secondary-button" disabled={!canProgram || continuousProfile === '1080p30'} onClick={() => void captureProgramVideoTest('continuous')}>Continuous-source Program AVI</button>
+        </div>}
     <div className="quick-capture-options">
       <label>Display
         <select aria-label="Screen to record" value={displayId} disabled={!desktop || loading || busy}
@@ -286,39 +348,6 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
       </button>
       <span className="quick-capture-format"><Video size={15}/>{formatLabel}</span>
     </div>
-    {supportedDesktop && <div className="clip-mp4-options">
-      <p><strong>Experimental Program display composition</strong> — combines up to four enabled display sources from the current Program scene (not Studio Preview). Short silent AVI tests, plus composed H.264/AAC MP4 on Mac; not production Program recording or a live stream.</p>
-      <div className="quick-capture-options">
-        <label>Test length
-          <select aria-label="Composed Program video test duration" value={programAviDuration} disabled={busy}
-            onChange={event => setProgramAviDuration(Number(event.target.value))}>
-            {(continuousProfile === '1080p30' ? [2, 4] : [2, 4, 6, 8]).map(seconds => <option key={seconds} value={seconds}>{seconds} seconds</option>)}
-          </select>
-        </label>
-        <label>Continuous test profile
-          <select aria-label="Continuous Program test profile" value={continuousProfile} disabled={busy}
-            onChange={event => { const profile = event.target.value as 'baseline' | '720p15' | '1080p30'; setContinuousProfile(profile); if (profile === '1080p30' && programAviDuration > 4) setProgramAviDuration(4) }}>
-            <option value="baseline">Baseline · 640×360 / 10 fps</option>
-            <option value="720p15">Higher detail · 1280×720 / 15 fps</option>
-            {mac && <option value="1080p30">Full HD · 1920×1080 / 30 fps (Mac MP4, max 4s)</option>}
-          </select>
-        </label>
-        <button type="button" className="secondary-button" disabled={busy || loading}
-          onClick={() => void captureProgramVideoTest('sampled')}><Video size={16}/>{busy ? 'Native capture in progress…' : 'Sampled Program AVI'}</button>
-        <button type="button" className="secondary-button" disabled={busy || loading || graphicLoading || continuousProfile === '1080p30'}
-          onClick={() => void captureProgramVideoTest('continuous')}><Video size={16}/>{busy ? 'Native capture in progress…' : 'Continuous-source Program AVI'}</button>
-        {mac && <label><input type="checkbox" checked={programWebcam} disabled={busy} onChange={e => setProgramWebcam(e.target.checked)}/> Default webcam in Mac MP4 (forces PiP, up to 3 displays)</label>}
-        {mac && <label className="quick-capture-check"><input type="checkbox" checked={programMic} disabled={busy} onChange={e => setProgramMic(e.target.checked)}/> Include default microphone (AAC test)</label>}
-        {mac && programMic && <label>Microphone gain <input type="range" min="0" max="2" step="0.1" value={micGain} disabled={busy} onChange={e => setMicGain(Number(e.target.value))}/>{Math.round(micGain*100)}%</label>}
-        <label>Static PNG overlay (continuous AVI / MP4)
-          <input type="file" accept="image/png" disabled={busy || graphicLoading} onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; void loadProgramGraphic(file) }}/>
-        </label>
-        {graphic && <button type="button" className="secondary-button" disabled={busy} onClick={() => { setGraphic(null); setGraphicName('') }}>Remove {graphicName}</button>}
-        {mac && <button type="button" className="secondary-button" disabled={busy || loading || graphicLoading}
-          onClick={() => void captureProgramVideoTest('mp4')}><Video size={16}/>{busy ? 'Native capture in progress…' : 'Composed H.264 MP4 (Mac test)'}</button>}
-      </div>
-      <small className="help-text">The sampled-screenshot test always produces 640×360/10fps AVI. The continuous native-frame input tests use the selected profile (up to 1280×720/15fps for AVI and nominal 1920×1080/30fps for Mac MP4). The Mac MP4 path feeds the same composed frames into AVFoundation H.264 encoding; AVI uses MJPEG. AVI stays silent; Mac MP4 can explicitly include the default webcam and default microphone (AAC). A static PNG overlay is supported in both continuous formats. Video and PCM sample slots share a nominal rational timeline; real-device latency, drift, audio playback, animated overlays, transitions and RTMPS remain unverified or unimplemented.</small>
-    </div>}
     {useMp4 && <div className="quick-capture-options">
       <label className="quick-capture-check"><input type="checkbox" checked={systemAudio} disabled={busy}
         onChange={event => setSystemAudio(event.target.checked)}/> Request system audio</label>
@@ -409,5 +438,7 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
           : 'A recording file can be finalized without verifying playback or audible audio. Open it in QuickTime or VLC to confirm playback and seeking. For a Stop-and-Save test, compare the actual duration above with when you pressed Stop. Reopen MooBee and check that the clip remains in Clips.'}</p>
       </div>
     </div>}
+      </div>
+    </dialog>
   </div>
 }
