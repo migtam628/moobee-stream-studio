@@ -43,6 +43,7 @@ fn capture_program_test_to_dir(
     directory: PathBuf,
     display_ids: Vec<usize>,
     seconds: u32,
+    layout: crate::scene_compositor::SceneLayout,
 ) -> Result<ProgramTestAviReport, String> {
     use image::{codecs::jpeg::JpegEncoder, DynamicImage};
 
@@ -85,8 +86,8 @@ fn capture_program_test_to_dir(
                 }
                 images.push(image);
             }
-            let composite = crate::scene_compositor::composite_grid(
-                &images, TEST_WIDTH, TEST_HEIGHT
+            let composite = crate::scene_compositor::composite_layout(
+                &images, TEST_WIDTH, TEST_HEIGHT, layout
             )?;
             let mut jpeg = Vec::new();
             let rgb = DynamicImage::ImageRgba8(composite).to_rgb8();
@@ -132,8 +133,10 @@ pub async fn capture_program_test_avi(
     app: tauri::AppHandle,
     display_ids: Vec<usize>,
     seconds: u32,
+    layout: Option<String>,
 ) -> Result<ProgramTestAviReport, String> {
     check_program_test(&display_ids, seconds)?;
+    let layout = crate::scene_compositor::SceneLayout::parse(layout.as_deref())?;
     #[cfg(any(target_os = "windows", target_os = "macos"))]
     {
         use crate::clip::{CaptureLock, CAPTURE_BUSY};
@@ -149,7 +152,7 @@ pub async fn capture_program_test_avi(
         };
         tauri::async_runtime::spawn_blocking(move || {
             let _capture_guard = CaptureLock;
-            capture_program_test_to_dir(directory, display_ids, seconds)
+            capture_program_test_to_dir(directory, display_ids, seconds, layout)
         }).await.map_err(|error| format!("Program AVI test worker stopped: {error}"))?
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
