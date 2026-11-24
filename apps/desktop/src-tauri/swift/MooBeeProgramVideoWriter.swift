@@ -35,7 +35,8 @@ private final class ProgramVideoWriter {
 
     init(path: String, width: Int, height: Int, fps: Int32, microphone: Bool) throws {
         guard (width == 640 && height == 360 && fps == 10) ||
-              (width == 1280 && height == 720 && fps == 15) else {
+              (width == 1280 && height == 720 && fps == 15) ||
+              (width == 1920 && height == 1080 && fps == 30) else {
             throw writerError("Unsupported composed H.264 test profile")
         }
         self.width = width
@@ -47,7 +48,7 @@ private final class ProgramVideoWriter {
             AVVideoWidthKey: width,
             AVVideoHeightKey: height,
             AVVideoCompressionPropertiesKey: [
-                AVVideoAverageBitRateKey: 3_000_000,
+                AVVideoAverageBitRateKey: width == 1920 ? 6_000_000 : 3_000_000,
                 AVVideoExpectedSourceFrameRateKey: Int(fps),
                 AVVideoMaxKeyFrameIntervalKey: Int(fps) * 2,
                 AVVideoAllowFrameReorderingKey: false
