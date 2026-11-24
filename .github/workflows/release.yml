@@ -158,6 +158,7 @@ jobs:
           cargo test --lib media_clock::tests
           cargo test --lib audio_mix::tests
           cargo test --lib program_overlay::tests
+          cargo test --lib stream_mux::tests
       - name: Build desktop installer
         uses: tauri-apps/tauri-action@v1
         env:
