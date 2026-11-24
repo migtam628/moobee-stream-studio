@@ -1,3 +1,25 @@
+# MooBee Stream Studio v0.3.9-alpha.13 — Production workspace redesign
+
+**Experimental desktop hardware-test alpha; not a production streaming release.**
+
+## What's new
+
+- Replaces the dashboard-style Studio with an OBS-inspired production console: one large Program monitor or dual Preview/Program monitors in Studio Mode, compact horizontal navigation, bottom-docked Scenes, Sources, Audio Mixer and Controls, and an optional Activity rail.
+- Brings camera PiP, local PNG overlay, microphone enable/gain/mute, video profile and recording duration into the primary workspace, rather than hiding them in a lower diagnostics panel.
+- **Record Program test** directly calls the native Mac H.264 MP4 (optional AAC) or Windows continuous AVI backend introduced in earlier builds. Saved result and error buttons open capture diagnostics. Direct screen recording, comparison recordings, and permission recovery are retained.
+- Audio meter shows the peak measured during the last successful microphone recording, not a live or simulated audio signal.
+- Adds browser layout and simulated Mac native IPC tests, including correct Program scene versus Preview selection, webcam, microphone, gain, PNG and 1080p30 arguments. Release verification now requires the browser suite before packaging.
+
+## Hardware verification
+
+Install the matching DMG or Windows installer and confirm the build label. Add a display to the Program scene. Record a baseline clip, then opt into microphone, webcam, PNG individually and together. Use Capture diagnostics to inspect errors and saved-file details, and play back the actual local clip.
+
+The preview remains a still display composite refreshed every five seconds. Camera/PNG are recording layers, not live preview layers. Mac Full HD remains bounded to 2–4 seconds; Windows still uses silent AVI. Native hardware playback and A/V drift require device testing. System audio in composed Program, Windows H.264/AAC, freeform source transforms, continuous recording and RTMPS remain incomplete. Go Live stays gated. No beta-ready claim.
+
+Prior A/V integration: [acceptance guide](NATIVE_AV_INTEGRATION.md). Android debug APK may be absent under the existing verified Maven 429 exception.
+
+---
+
 # MooBee Stream Studio v0.3.9-alpha.11 — Composed H.264 MP4 test
 
 **Experimental unsigned desktop hardware-test alpha. Not a broadcasting beta.**
