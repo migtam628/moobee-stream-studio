@@ -21,6 +21,10 @@ type CapturedFile = {
   repeatedSourceSlots?: number[]
   lateOutputFrames?: number
   maxSourceArrivalSkewMs?: number
+  profile?: 'baseline' | '720p15'
+  width?: number
+  height?: number
+  fps?: number
 }
 
 /**
@@ -39,6 +43,7 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
   const [mp4AvailabilityReason, setMp4AvailabilityReason] = useState('Native MP4 availability has not been checked')
   const [duration, setDuration] = useState(6)
   const [programAviDuration, setProgramAviDuration] = useState(4)
+  const [continuousProfile, setContinuousProfile] = useState<'baseline' | '720p15'>('baseline')
   const [systemAudio, setSystemAudio] = useState(false)
   const [microphone, setMicrophone] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -161,7 +166,8 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
       }
       const result = await request<CapturedFile>(mode === 'continuous'
         ? '/clips/capture-program-continuous-avi' : '/clips/capture-program-test-avi', {
-        displayIds, seconds: programAviDuration
+        displayIds, seconds: programAviDuration,
+        ...(mode === 'continuous' ? { profile: continuousProfile } : {})
       })
       setSaved(result)
       await refreshSavedClips()
@@ -236,7 +242,7 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
       <span className="quick-capture-format"><Video size={15}/>{formatLabel}</span>
     </div>
     {supportedDesktop && <div className="clip-mp4-options">
-      <p><strong>Experimental Program display composition → AVI</strong> — combines up to four enabled display sources from the current Program scene (not Studio Preview). This is a short, silent 640×360 MJPEG test at a nominal 10 fps, not real-time Program encoding or a live stream.</p>
+      <p><strong>Experimental Program display composition → AVI</strong> — combines up to four enabled display sources from the current Program scene (not Studio Preview). Short, silent MJPEG tests only; not production Program encoding or a live stream.</p>
       <div className="quick-capture-options">
         <label>Test length
           <select aria-label="Composited Program AVI test duration" value={programAviDuration} disabled={busy}
@@ -244,12 +250,19 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
             {[2, 4, 6, 8].map(seconds => <option key={seconds} value={seconds}>{seconds} seconds</option>)}
           </select>
         </label>
+        <label>Continuous test profile
+          <select aria-label="Continuous Program test profile" value={continuousProfile} disabled={busy}
+            onChange={event => setContinuousProfile(event.target.value as 'baseline' | '720p15')}>
+            <option value="baseline">Baseline · 640×360 / 10 fps</option>
+            <option value="720p15">Higher detail · 1280×720 / 15 fps</option>
+          </select>
+        </label>
         <button type="button" className="secondary-button" disabled={busy || loading}
           onClick={() => void captureProgramAviTest('sampled')}><Video size={16}/>{busy ? 'Native capture in progress…' : 'Sampled Program AVI'}</button>
         <button type="button" className="secondary-button" disabled={busy || loading}
           onClick={() => void captureProgramAviTest('continuous')}><Video size={16}/>{busy ? 'Native capture in progress…' : 'Continuous-source Program AVI'}</button>
       </div>
-      <small className="help-text">Compare the sampled-screenshot test with the continuous native-frame input test. Both produce silent 640×360 nominal 10fps AVIs and may fall behind wall-clock time. Continuous source frames are received asynchronously but have no native PTS or synchronization guarantee. Neither includes camera, microphone, overlays, audio mixing, scene transitions or RTMPS.</small>
+      <small className="help-text">The sampled-screenshot test always produces 640×360/10fps AVI. The continuous native-frame input test supports the selected profile (up to 1280×720/15fps), but both are silent diagnostics with nominal AVI timing and may fall behind wall-clock time. No native capture PTS, camera, microphone, overlays, scene transitions or RTMPS.</small>
     </div>}
     {useMp4 && <div className="quick-capture-options">
       <label className="quick-capture-check"><input type="checkbox" checked={systemAudio} disabled={busy}
@@ -308,7 +321,7 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
           {(saved.bytes / (1024 * 1024)).toFixed(2)} MB
         </small>
         {saved.displayCount !== undefined && <p className="help-text" role="status">
-          {saved.displayCount} Program display source(s) composed · nominal {10} fps AVI ·
+          {saved.displayCount} Program display source(s) composed · {saved.width ?? 640}×{saved.height ?? 360} · nominal {saved.fps ?? 10} fps AVI ·
           {typeof saved.measuredSamplingFps === 'number' ? ` ${saved.measuredSamplingFps.toFixed(1)} fps measured sampling` : ' capture performance unknown'} ·
           {saved.elapsedMs !== undefined ? ` ${(saved.elapsedMs / 1000).toFixed(2)}s wall-clock capture` : ' elapsed time unknown'}.
           AVI playback duration may differ from wall-clock capture time when frames arrive late.
@@ -333,7 +346,7 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
           </button>
         </div>
         <p className="help-text">{saved.displayCount !== undefined
-          ? 'This silent AVI is an experimental composite of sampled displays, not the encoded live Program feed. Open it in VLC, verify all screens, motion, duration and seeking; compare actual runtime with the requested test length.'
+          ? 'This silent AVI is an experimental Program display composite, not live Program output. Open it in VLC; check that all screens appear, verify motion, duration and seeking, and compare playback timeline with actual wall-clock capture.'
           : 'A recording file can be finalized without verifying playback or audible audio. Open it in QuickTime or VLC to confirm playback and seeking. For a Stop-and-Save test, compare the actual duration above with when you pressed Stop. Reopen MooBee and check that the clip remains in Clips.'}</p>
       </div>
     </div>}

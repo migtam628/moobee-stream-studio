@@ -217,10 +217,13 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
         !ids.every(id => typeof id === 'number' && Number.isSafeInteger(id) && id >= 0 && id <= 24) ||
         new Set(ids).size !== ids.length ||
         typeof body.seconds !== 'number' || !Number.isSafeInteger(body.seconds) ||
-        body.seconds < 2 || body.seconds > 8) {
-      throw new Error('Choose 1–4 unique Program displays and a 2–8 second continuous input test duration')
+        body.seconds < 2 || body.seconds > 8 ||
+        (body.profile !== 'baseline' && body.profile !== '720p15')) {
+      throw new Error('Choose 1–4 unique Program displays, a 2–8 second duration and a supported capture profile')
     }
-    return await invoke('capture_continuous_program_avi', { displayIds: ids, seconds: body.seconds })
+    return await invoke('capture_continuous_program_avi', {
+      displayIds: ids, seconds: body.seconds, profile: body.profile
+    })
   }
   if (path === '/clips/capture-program-test-avi') {
     const ids = body.displayIds

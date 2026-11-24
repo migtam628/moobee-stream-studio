@@ -16,6 +16,27 @@ const MAX_TOTAL_SOURCE_PIXELS: u64 = 36_000_000;
 const MAX_STALE_MS: u64 = 1_500;
 const MAX_DRAIN_PER_SOURCE_PER_TICK: usize = 64;
 
+#[derive(Copy, Clone)]
+struct EncodingProfile {
+    label: &'static str,
+    width: u32,
+    height: u32,
+    fps: u32,
+}
+
+fn encoding_profile(value: &str) -> Result<EncodingProfile, String> {
+    match value {
+        "baseline" => Ok(EncodingProfile {
+            label: "baseline", width: WIDTH, height: HEIGHT, fps: FPS,
+        }),
+        "720p15" => Ok(EncodingProfile {
+            label: "720p15", width: 1280, height: 720, fps: 15,
+        }),
+        _ => Err("Unsupported Program test profile; choose baseline or 720p15".into()),
+    }
+}
+
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ContinuousProgramReport {
@@ -29,6 +50,7 @@ pub struct ContinuousProgramReport {
     width: u32,
     height: u32,
     fps: u32,
+    profile: &'static str,
     display_count: usize,
     elapsed_ms: u64,
     measured_sampling_fps: f64,
@@ -38,12 +60,16 @@ pub struct ContinuousProgramReport {
     max_source_arrival_skew_ms: u64,
 }
 
-fn validate_request(display_ids: &[usize], seconds: u32) -> Result<(), String> {
+fn validate_request(display_ids: &[usize], seconds: u32, selected_profile: &str) -> Result<EncodingProfile, String> {
     crate::scene_compositor::validate_ids(display_ids)?;
     if !(2..=8).contains(&seconds) {
         return Err("Continuous Program AVI tests support 2–8 seconds".into());
     }
-    Ok(())
+    let profile = encoding_profile(selected_profile)?;
+    if seconds.saturating_mul(profile.fps) > 120 {
+        return Err("Requested Program test exceeds AVI's 120-frame safety budget".into());
+    }
+    Ok(profile)
 }
 
 fn validate_frame_geometry(width: u32, height: u32, cumulative: u64) -> Result<u64, String> {
@@ -87,7 +113,7 @@ fn receive_first_frame(receiver: &Receiver<xcap::Frame>) -> Result<image::RgbaIm
 
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 fn capture_to_dir(
-    directory: PathBuf, ids: Vec<usize>, seconds: u32,
+    directory: PathBuf, ids: Vec<usize>, seconds: u32, profile: EncodingProfile,
 ) -> Result<ContinuousProgramReport, String> {
     use image::{codecs::jpeg::JpegEncoder, DynamicImage};
     let available = xcap::Monitor::all()
@@ -131,15 +157,15 @@ fn capture_to_dir(
         .map_err(|error| format!("Unable to create private continuous capture output: {error}"))?;
 
     let started = Instant::now();
-    let total_frames = FPS * seconds;
+    let total_frames = profile.fps * seconds;
     let mut received = vec![1u32; ids.len()];
     let mut repeats = vec![0u32; ids.len()];
     let mut late_frames = 0u32;
     let mut max_skew_ms = 0u64;
     let recording = (|| -> Result<u64, String> {
-        let mut writer = crate::avi::AviWriter::new(&mut file, WIDTH, HEIGHT, FPS)?;
+        let mut writer = crate::avi::AviWriter::new(&mut file, profile.width, profile.height, profile.fps)?;
         for tick in 0..total_frames {
-            let target = started + Duration::from_millis(u64::from(tick) * 1000 / u64::from(FPS));
+            let target = started + Duration::from_millis(u64::from(tick) * 1000 / u64::from(profile.fps));
             std::thread::sleep(target.saturating_duration_since(Instant::now()));
             for (index, receiver) in receivers.iter().enumerate() {
                 let mut was_updated = false;
@@ -174,14 +200,14 @@ fn capture_to_dir(
             if last_received.iter().any(|last| now.duration_since(*last).as_millis() as u64 > MAX_STALE_MS) {
                 return Err("Program video input stalled for over 1.5 seconds; incomplete file discarded".into());
             }
-            let composed = crate::scene_compositor::composite_grid(&latest, WIDTH, HEIGHT)?;
+            let composed = crate::scene_compositor::composite_grid(&latest, profile.width, profile.height)?;
             let rgb = DynamicImage::ImageRgba8(composed).to_rgb8();
             let mut jpeg = Vec::new();
             JpegEncoder::new_with_quality(&mut jpeg, 72)
                 .encode_image(&DynamicImage::ImageRgb8(rgb))
                 .map_err(|error| format!("Program frame JPEG encoding failed: {error}"))?;
             writer.write_frame(&jpeg)?;
-            if Instant::now() > target + Duration::from_millis(1000 / u64::from(FPS)) {
+            if Instant::now() > target + Duration::from_millis(1000 / u64::from(profile.fps)) {
                 late_frames = late_frames.saturating_add(1);
             }
         }
@@ -209,7 +235,8 @@ fn capture_to_dir(
     Ok(ContinuousProgramReport {
         id, path: final_path.to_string_lossy().into_owned(), format: "avi",
         bytes, duration_seconds: seconds, requested_max_seconds: seconds,
-        frame_count: total_frames, width: WIDTH, height: HEIGHT, fps: FPS,
+        frame_count: total_frames, width: profile.width, height: profile.height, fps: profile.fps,
+        profile: profile.label,
         display_count: ids.len(), elapsed_ms,
         measured_sampling_fps: if elapsed_ms == 0 { 0.0 }
             else { f64::from(total_frames) * 1000.0 / elapsed_ms as f64 },
@@ -222,9 +249,9 @@ fn capture_to_dir(
 
 #[tauri::command]
 pub async fn capture_continuous_program_avi(
-    app: tauri::AppHandle, display_ids: Vec<usize>, seconds: u32,
+    app: tauri::AppHandle, display_ids: Vec<usize>, seconds: u32, profile: String,
 ) -> Result<ContinuousProgramReport, String> {
-    validate_request(&display_ids, seconds)?;
+    let selected_profile = validate_request(&display_ids, seconds, &profile)?;
     #[cfg(any(target_os = "windows", target_os = "macos"))]
     {
         use crate::clip::{CaptureLock, CAPTURE_BUSY};
@@ -239,12 +266,12 @@ pub async fn capture_continuous_program_avi(
         };
         tauri::async_runtime::spawn_blocking(move || {
             let _guard = CaptureLock;
-            capture_to_dir(directory, display_ids, seconds)
+            capture_to_dir(directory, display_ids, seconds, selected_profile)
         }).await.map_err(|error| format!("Continuous Program capture worker stopped: {error}"))?
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
-        let _ = (app, display_ids);
+        let _ = (app, display_ids, selected_profile);
         Err("Continuous Program AVI capture requires a Mac or Windows desktop build".into())
     }
 }
@@ -254,13 +281,47 @@ mod tests {
     use super::{validate_request, validate_frame_geometry, MAX_TOTAL_SOURCE_PIXELS};
     #[test]
     fn validates_display_count_uniqueness_and_duration() {
-        assert!(validate_request(&[0], 2).is_ok());
-        assert!(validate_request(&[0, 1, 2, 3], 8).is_ok());
-        assert!(validate_request(&[], 4).is_err());
-        assert!(validate_request(&[1, 1], 4).is_err());
-        assert!(validate_request(&[0, 1, 2, 3, 4], 4).is_err());
-        assert!(validate_request(&[0], 9).is_err());
+        assert!(validate_request(&[0], 2, "baseline").is_ok());
+        assert!(validate_request(&[0, 1, 2, 3], 8, "baseline").is_ok());
+        assert!(validate_request(&[], 4, "baseline").is_err());
+        assert!(validate_request(&[1, 1], 4, "baseline").is_err());
+        assert!(validate_request(&[0, 1, 2, 3, 4], 4, "baseline").is_err());
+        assert!(validate_request(&[0], 9, "baseline").is_err());
+        let high = validate_request(&[0, 1], 8, "720p15").unwrap();
+        assert_eq!((high.width, high.height, high.fps), (1280, 720, 15));
+        assert_eq!(high.label, "720p15");
+        assert_eq!(8 * high.fps, 120);
+        assert!(validate_request(&[0], 3, "1080p60").is_err());
+        assert_eq!(validate_request(&[0], 4, "baseline").unwrap().fps, 10);
     }
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    #[test]
+    fn high_detail_profile_composes_and_encodes_real_720p_jpeg_frames() {
+        use image::{codecs::jpeg::JpegEncoder, DynamicImage, Rgba, RgbaImage};
+        let profile = validate_request(&[0, 1], 4, "720p15").unwrap();
+        let red = RgbaImage::from_pixel(64, 64, Rgba([240, 10, 10, 255]));
+        let blue = RgbaImage::from_pixel(64, 64, Rgba([10, 10, 240, 255]));
+        let composed = crate::scene_compositor::composite_grid(
+            &[red, blue], profile.width, profile.height
+        ).unwrap();
+        assert_eq!(composed.dimensions(), (1280, 720));
+        assert!(composed.get_pixel(320, 360)[0] > 200);
+        assert!(composed.get_pixel(960, 360)[2] > 200);
+        let mut jpeg = Vec::new();
+        JpegEncoder::new_with_quality(&mut jpeg, 72)
+            .encode_image(&DynamicImage::ImageRgb8(
+                DynamicImage::ImageRgba8(composed).to_rgb8()
+            )).unwrap();
+        let decoded = image::load_from_memory(&jpeg).unwrap();
+        assert_eq!((decoded.width(), decoded.height()), (1280, 720));
+        let avi = crate::avi::encode_silent_mjpeg_avi(
+            &vec![jpeg; 4], profile.width, profile.height, profile.fps
+        ).unwrap();
+        assert_eq!(&avi[0..4], b"RIFF");
+        assert_eq!(&avi[8..12], b"AVI ");
+        assert!(avi.windows(4).any(|window| window == b"idx1"));
+    }
+
     #[test]
     fn frames_have_bounded_pixel_budget() {
         assert_eq!(validate_frame_geometry(1920, 1080, 0).unwrap(), 2_073_600);

@@ -4,8 +4,11 @@
 
 The installed Mac/Windows app now has two independent Program AVI diagnostics
 under Studio → Quick Screen Capture. Both select the **current Program** scene,
-not the Studio Mode Preview scene. Both are 2–8 second, silent,
-640×360, nominal-10fps MJPEG AVIs; neither requires OBS or Streamlabs.
+not the Studio Mode Preview scene. Both are 2–8 second, silent MJPEG AVIs:
+the sampled snapshot recorder stays at 640×360 / nominal 10 fps; the
+continuous-input recorder offers two explicitly bounded test profiles:
+**baseline (640×360 / nominal 10 fps)** and **720p15 (1280×720 /
+nominal 15 fps)**. Neither requires OBS or Streamlabs.
 
 | Diagnostic | Native input | What it proves |
 | --- | --- | --- |
@@ -14,7 +17,7 @@ not the Studio Mode Preview scene. Both are 2–8 second, silent,
 
 For the continuous-input test, MooBee starts one native frame receiver per
 display, waits for initial data, then encodes the newest complete frame from
-each input at a nominal ten-frame-per-second output schedule. On every tick it
+each input at the selected nominal 10- or 15-frame-per-second output schedule. On every tick it
 drains at most 64 queued frames per source. It keeps only the latest selected
 source frames for rendering and the current encoded JPEG frame, and it refuses
 to publish an AVI if an input disconnects or becomes stale (over 1.5 seconds).
@@ -27,8 +30,10 @@ source frame counts, repeated input slots, late composite frames, and maximum
 skew between **frame arrival times**. Arrival times are not source capture
 presentation timestamps. No native video clock, cross-device synchronization,
 accurate dropped-frame count, 1080p60 capability, or sound has been verified.
-The AVI header retains a nominal 10fps playback timeline even if wall-clock
-capture runs longer.
+The AVI header retains the selected nominal 10- or 15fps playback timeline
+even if wall-clock capture runs longer. The quality profile changes output
+resolution and nominal frame rate, not the underlying source synchronization
+or the 64 MiB / 120-frame AVI safety limits.
 
 ## Hardware acceptance
 
@@ -47,8 +52,11 @@ capture runs longer.
    publish a completed clip. Restart MooBee and confirm saved clips persist.
 6. Run `ffprobe -v error -show_entries format=duration,size:stream=codec_name,width,height,avg_frame_rate,nb_frames -of json "/path/to/clip-ID.avi"`
    then `ffmpeg -v error -xerror -i "/path/to/clip-ID.avi" -f null -`.
-   For four seconds expect nominal 10fps, 40 MJPEG frames at 640×360,
-   no audio. Report any actual duration discrepancy separately.
+   For a four-second baseline capture expect nominal 10fps, 40 MJPEG
+   frames at 640×360; for **720p15** expect nominal 15fps, 60 MJPEG
+   frames at 1280×720; both have **no audio**. Compare late frames,
+   repeated slots, actual capture duration and motion quality for both
+   profiles. Report any actual duration discrepancy separately.
 7. Share only sanitized QA metadata under
    [hardware acceptance #14](https://github.com/migtam628/moobee-stream-studio/issues/14),
    with a link from [beta tracker #18](https://github.com/migtam628/moobee-stream-studio/issues/18).
