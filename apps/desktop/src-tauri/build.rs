@@ -4,6 +4,7 @@ fn main() {
     println!("cargo:rerun-if-changed=swift/MooBeeScreenRecording.swift");
     println!("cargo:rerun-if-changed=swift/MooBeeSonomaRecording.swift");
     println!("cargo:rerun-if-changed=swift/MooBeeProgramVideoWriter.swift");
+    println!("cargo:rerun-if-changed=swift/MooBeeProgramCamera.swift");
 
     if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
         let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo OUT_DIR missing"));
@@ -35,6 +36,7 @@ fn main() {
             .arg("swift/MooBeeScreenRecording.swift")
             .arg("swift/MooBeeSonomaRecording.swift")
             .arg("swift/MooBeeProgramVideoWriter.swift")
+            .arg("swift/MooBeeProgramCamera.swift")
             .status()
             .expect("Swift compiler unavailable");
         assert!(result.success(), "Failed to compile native ScreenCaptureKit recording bridge");
