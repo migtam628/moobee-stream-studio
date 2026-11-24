@@ -25,12 +25,37 @@ try {
   page.on('pageerror', error => errors.push(error.message));
   await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'domcontentloaded' });
   await page.getByRole('heading', { name: 'Studio' }).waitFor();
-  await page.getByText('Quick screen capture — native test').waitFor();
-  const nativeQuickCapture = page.locator('.quick-capture').getByRole('button', { name: 'Capture screen test' });
-  if (await nativeQuickCapture.isEnabled()) {
-    throw new Error('Native Quick Capture must be disabled in the browser-only edition');
+  await page.getByRole('button', { name: 'Record Program test' }).waitFor();
+  await page.getByText('Local workspace', { exact: true }).waitFor();
+  const program = page.getByRole('button', { name: 'Record Program test', exact: true });
+  if (await program.isEnabled()) throw new Error('Native Program record must be disabled in browser-only edition');
+  if (await page.getByRole('button', { name: 'Go Live (unavailable)', exact: true }).isEnabled()) throw new Error('Streaming gate must remain disabled');
+  if (await page.getByRole('checkbox', { name: 'Enable microphone', exact: true }).isEnabled()) throw new Error('Native microphone cannot run in browser');
+  const dockBounds = await page.locator('.production-docks').boundingBox();
+  const recordBounds = await program.boundingBox();
+  if (!dockBounds || !recordBounds || dockBounds.y + dockBounds.height > 901 || recordBounds.y + recordBounds.height > 901) {
+    throw new Error('Production controls should fit in the desktop viewport');
   }
+  const studioMode = page.getByRole('button', { name: 'Studio Mode', exact: true });
+  if (await studioMode.getAttribute('aria-pressed') === 'true') await studioMode.click();
+  await page.locator('.single-monitor').waitFor();
+  if (await page.locator('.production-monitor').count() !== 1) throw new Error('Single Program monitor layout incorrect');
   await page.screenshot({ path: new URL('desktop.png', dir).pathname, fullPage: true });
+  await studioMode.click();
+  await page.locator('.dual-monitor').waitFor();
+  if (await page.locator('.production-monitor').count() !== 2) throw new Error('Studio mode requires two monitors');
+  await page.getByRole('button', { name: 'Take', exact: true }).waitFor();
+  await page.screenshot({ path: new URL('desktop-studio-mode.png', dir).pathname, fullPage: true });
+  await page.getByRole('button', { name: 'Activity', exact: true }).click();
+  await page.getByRole('complementary', { name: 'Activity dock' }).waitFor();
+  await page.getByRole('button', { name: 'Close activity', exact: true }).click();
+  await page.getByRole('button', { name: 'Capture diagnostics', exact: true }).click();
+  await page.getByRole('heading', { name: 'Quick screen capture — native test' }).waitFor();
+  const nativeQuickCapture = page.locator('.quick-capture').getByRole('button', { name: 'Capture screen test' });
+  if (await nativeQuickCapture.isEnabled()) throw new Error('Native Quick Capture must be disabled in browser-only edition');
+  await page.getByRole('button', { name: 'Close capture diagnostics' }).click();
+  if (await page.locator('dialog[open]').count()) throw new Error('Diagnostics dialog did not close');
+
   await page.getByRole('button', { name: 'Settings', exact: true }).first().click();
   await page.getByText('Runtime Service Diagnostics').waitFor();
   await page.getByText('RTMP / RTMPS broadcast').waitFor();
@@ -114,6 +139,7 @@ try {
   await mobile.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'domcontentloaded' });
   await mobile.getByRole('heading', { name: 'Studio' }).waitFor();
   await mobile.screenshot({ path: new URL('mobile.png', dir).pathname, fullPage: true });
+  if (await mobile.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 2)) throw new Error('Studio mobile horizontal overflow');
   await mobile.getByRole('button', { name: 'Open navigation' }).click();
   await mobile.getByRole('button', { name: 'Clips', exact: true }).click();
   await mobile.getByRole('heading', { name: 'Browser screen recording' }).waitFor();
