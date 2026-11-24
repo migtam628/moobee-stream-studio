@@ -125,6 +125,9 @@ app.get('/api/clips', (_req, res) => res.json({
 app.post('/api/clips/capture-mp4', (_req, res) => res.status(501).json({
   error: 'Native H.264 MP4 capture requires the installed macOS 15+ application'
 }));
+app.post('/api/clips/capture-program-continuous-mp4', (_req, res) => res.status(501).json({
+  error: 'Composed H.264 MP4 capture requires the installed macOS desktop application'
+}));
 app.post('/api/clips/capture-program-continuous-avi', (_req, res) => res.status(501).json({
   error: 'Continuous Program AVI capture requires the installed Mac/Windows application; browser API cannot access native video sources'
 }));
