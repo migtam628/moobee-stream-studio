@@ -7,6 +7,8 @@ mod mp4_validation;
 mod scene_compositor;
 mod program_test_avi;
 mod program_continuous_avi;
+#[cfg(target_os = "macos")]
+mod program_mp4_sink;
 
 use axum::{
     extract::State,
