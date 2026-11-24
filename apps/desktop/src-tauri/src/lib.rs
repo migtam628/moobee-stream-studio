@@ -16,6 +16,7 @@ mod program_microphone;
 mod program_overlay;
 mod media_clock;
 mod audio_mix;
+mod stream_mux;
 
 use axum::{
     extract::State,
