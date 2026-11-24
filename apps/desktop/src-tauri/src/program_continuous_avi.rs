@@ -52,6 +52,10 @@ pub struct ContinuousProgramReport {
     fps: u32,
     profile: &'static str,
     display_count: usize,
+    webcam_included: bool,
+    webcam_frames: u32,
+    webcam_repeated_slots: u32,
+    planned_audio_samples_48khz: u64,
     elapsed_ms: u64,
     finalization_ms: u64,
     audio_track_verified: bool,
@@ -176,8 +180,18 @@ impl FrameSink {
 
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 fn capture_to_dir(
-    directory: PathBuf, ids: Vec<usize>, seconds: u32, profile: EncodingProfile, format: ProgramFormat, layout: crate::scene_compositor::SceneLayout,
+    directory: PathBuf, ids: Vec<usize>, seconds: u32, profile: EncodingProfile, format: ProgramFormat, layout: crate::scene_compositor::SceneLayout, webcam: bool,
 ) -> Result<ContinuousProgramReport, String> {
+    let clock = crate::media_clock::MediaClock::new(profile.fps)?;
+    // Explicit opt-in; permission is resolved before starting the display receivers.
+    #[cfg(target_os = "macos")]
+    let mut camera = if webcam {
+        let mut camera = crate::program_camera::ProgramCamera::start()?;
+        let frame = camera.first_frame()?;
+        Some((camera, frame, Instant::now()))
+    } else { None };
+    let mut webcam_frames = if webcam { 1u32 } else { 0 };
+    let mut webcam_repeated_slots = 0u32;
     let available = xcap::Monitor::all()
         .map_err(|error| format!("Unable to enumerate Program displays: {error}"))?;
     let mut recorders = Vec::with_capacity(ids.len());
@@ -229,7 +243,7 @@ fn capture_to_dir(
     let mut max_skew_ms = 0u64;
     let recording = (|| -> Result<(), String> {
         for tick in 0..total_frames {
-            let target = started + Duration::from_millis(u64::from(tick) * 1000 / u64::from(profile.fps));
+            let target = started + clock.time(tick);
             std::thread::sleep(target.saturating_duration_since(Instant::now()));
             for (index, receiver) in receivers.iter().enumerate() {
                 let mut was_updated = false;
@@ -264,9 +278,31 @@ fn capture_to_dir(
             if last_received.iter().any(|last| now.duration_since(*last).as_millis() as u64 > MAX_STALE_MS) {
                 return Err("Program video input stalled for over 1.5 seconds; incomplete file discarded".into());
             }
+            #[cfg(target_os = "macos")]
+            if let Some((camera, frame, last)) = camera.as_mut() {
+                if let Some(new_frame) = camera.poll()? {
+                    *frame = new_frame;
+                    *last = Instant::now();
+                    webcam_frames = webcam_frames.saturating_add(1);
+                } else {
+                    webcam_repeated_slots = webcam_repeated_slots.saturating_add(1);
+                }
+                if last.elapsed() > Duration::from_millis(MAX_STALE_MS) {
+                    return Err("Webcam stopped delivering frames; incomplete recording discarded".into());
+                }
+                validate_frame_geometry(frame.width(), frame.height(), total_pixels)?;
+            }
+            #[cfg(target_os = "macos")]
+            let composed = if let Some((_, frame, _)) = camera.as_ref() {
+                // Borrow all display/camera images; no full-resolution source clone.
+                crate::scene_compositor::composite_with_camera(&latest, frame, profile.width, profile.height)?
+            } else {
+                crate::scene_compositor::composite_layout(&latest, profile.width, profile.height, layout)?
+            };
+            #[cfg(not(target_os = "macos"))]
             let composed = crate::scene_compositor::composite_layout(&latest, profile.width, profile.height, layout)?;
             writer.append(composed)?;
-            if Instant::now() > target + Duration::from_millis(1000 / u64::from(profile.fps)) {
+            if Instant::now() > started + clock.time(tick + 1) {
                 late_frames = late_frames.saturating_add(1);
             }
         }
@@ -276,6 +312,8 @@ fn capture_to_dir(
     // Stop native input before waiting on the final container writer.
     drop(guard);
     drop(receivers);
+    #[cfg(target_os = "macos")]
+    drop(camera);
     if let Err(error) = recording {
         drop(writer);
         let _ = fs::remove_file(&temporary);
@@ -322,6 +360,8 @@ fn capture_to_dir(
         frame_count: total_frames, width: profile.width, height: profile.height, fps: profile.fps,
         profile: profile.label,
         display_count: ids.len(), elapsed_ms, finalization_ms, audio_track_verified: false,
+        webcam_included: webcam, webcam_frames, webcam_repeated_slots,
+        planned_audio_samples_48khz: clock.audio_range(total_frames - 1, 48_000)?.end,
         measured_sampling_fps: if elapsed_ms == 0 { 0.0 }
             else { f64::from(total_frames) * 1000.0 / elapsed_ms as f64 },
         source_frames_received: received,
@@ -335,23 +375,26 @@ fn capture_to_dir(
 pub async fn capture_continuous_program_avi(
     app: tauri::AppHandle, display_ids: Vec<usize>, seconds: u32, profile: String, layout: Option<String>,
 ) -> Result<ContinuousProgramReport, String> {
-    capture_continuous_program(app, display_ids, seconds, profile, ProgramFormat::Avi, layout).await
+    capture_continuous_program(app, display_ids, seconds, profile, ProgramFormat::Avi, layout, false).await
 }
 
 #[tauri::command]
 pub async fn capture_continuous_program_mp4(
-    app: tauri::AppHandle, display_ids: Vec<usize>, seconds: u32, profile: String, layout: Option<String>,
+    app: tauri::AppHandle, display_ids: Vec<usize>, seconds: u32, profile: String, layout: Option<String>, webcam: Option<bool>,
 ) -> Result<ContinuousProgramReport, String> {
     #[cfg(target_os = "macos")]
-    { capture_continuous_program(app, display_ids, seconds, profile, ProgramFormat::Mp4, layout).await }
+    { capture_continuous_program(app, display_ids, seconds, profile, ProgramFormat::Mp4, layout, webcam.unwrap_or(false)).await }
     #[cfg(not(target_os = "macos"))]
-    { let _ = (app, display_ids, seconds, profile); Err("Composed H.264 MP4 is a macOS-only experimental test".into()) }
+    { let _ = (app, display_ids, seconds, profile, layout, webcam); Err("Composed H.264 MP4 is a macOS-only experimental test".into()) }
 }
 
 async fn capture_continuous_program(
-    app: tauri::AppHandle, display_ids: Vec<usize>, seconds: u32, profile: String, format: ProgramFormat, layout: Option<String>,
+    app: tauri::AppHandle, display_ids: Vec<usize>, seconds: u32, profile: String, format: ProgramFormat, layout: Option<String>, webcam: bool,
 ) -> Result<ContinuousProgramReport, String> {
     let selected_profile = validate_request(&display_ids, seconds, &profile)?;
+    if webcam && (!cfg!(target_os = "macos") || display_ids.len() > 3) {
+        return Err("Webcam PiP requires macOS and at most three displays".into());
+    }
     let layout = crate::scene_compositor::SceneLayout::parse(layout.as_deref())?;
     #[cfg(any(target_os = "windows", target_os = "macos"))]
     {
@@ -367,7 +410,7 @@ async fn capture_continuous_program(
         };
         tauri::async_runtime::spawn_blocking(move || {
             let _guard = CaptureLock;
-            capture_to_dir(directory, display_ids, seconds, selected_profile, format, layout)
+            capture_to_dir(directory, display_ids, seconds, selected_profile, format, layout, webcam)
         }).await.map_err(|error| format!("Continuous Program capture worker stopped: {error}"))?
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
