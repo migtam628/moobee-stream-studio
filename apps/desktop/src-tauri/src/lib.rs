@@ -263,7 +263,7 @@ pub fn run() {
             tauri::async_runtime::spawn(serve_overlays(runner_state));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![emit_test_alert, list_displays, capture_display, scene_compositor::capture_scene_snapshot, clip::capture_test_clip, clip::list_test_clips, clip::read_test_clip, clip::reveal_test_clip, capture_probe::probe_native_capture, native_avi::capture_silent_avi, program_test_avi::capture_program_test_avi, program_continuous_avi::capture_continuous_program_avi, macos_mp4::capture_macos_mp4, macos_mp4::stop_macos_mp4, macos_mp4::macos_mp4_availability, native_service_diagnostics, open_screen_recording_settings])
+        .invoke_handler(tauri::generate_handler![emit_test_alert, list_displays, capture_display, scene_compositor::capture_scene_snapshot, clip::capture_test_clip, clip::list_test_clips, clip::read_test_clip, clip::reveal_test_clip, capture_probe::probe_native_capture, native_avi::capture_silent_avi, program_test_avi::capture_program_test_avi, program_continuous_avi::capture_continuous_program_avi, program_continuous_avi::capture_continuous_program_mp4, macos_mp4::capture_macos_mp4, macos_mp4::stop_macos_mp4, macos_mp4::macos_mp4_availability, native_service_diagnostics, open_screen_recording_settings])
         .run(tauri::generate_context!())
         .expect("failed to run MooBee Live desktop");
 }
