@@ -32,7 +32,10 @@ fn encoding_profile(value: &str) -> Result<EncodingProfile, String> {
         "720p15" => Ok(EncodingProfile {
             label: "720p15", width: 1280, height: 720, fps: 15,
         }),
-        _ => Err("Unsupported Program test profile; choose baseline or 720p15".into()),
+        "1080p30" => Ok(EncodingProfile {
+            label: "1080p30", width: 1920, height: 1080, fps: 30,
+        }),
+        _ => Err("Unsupported Program test profile".into()),
     }
 }
 
@@ -435,6 +438,9 @@ async fn capture_continuous_program(
     overlay: Option<crate::program_overlay::OverlayInput>,
 ) -> Result<ContinuousProgramReport, String> {
     let selected_profile = validate_request(&display_ids, seconds, &profile)?;
+    if selected_profile.label == "1080p30" && (!cfg!(target_os = "macos") || !matches!(format, ProgramFormat::Mp4)) {
+        return Err("1080p30 diagnostic requires the Mac H.264 MP4 encoder".into());
+    }
     if webcam && (!cfg!(target_os = "macos") || display_ids.len() > 3) {
         return Err("Webcam PiP requires macOS and at most three displays".into());
     }
@@ -480,6 +486,9 @@ mod tests {
         assert_eq!(high.label, "720p15");
         assert_eq!(8 * high.fps, 120);
         assert!(validate_request(&[0], 3, "1080p60").is_err());
+        let full_hd = validate_request(&[0], 4, "1080p30").unwrap();
+        assert_eq!((full_hd.width, full_hd.height, full_hd.fps),(1920,1080,30));
+        assert!(validate_request(&[0], 6, "1080p30").is_err());
         assert_eq!(validate_request(&[0], 4, "baseline").unwrap().fps, 10);
     }
     #[cfg(any(target_os = "windows", target_os = "macos"))]
