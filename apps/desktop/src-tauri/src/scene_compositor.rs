@@ -41,6 +41,21 @@ pub(crate) fn composite_grid(frames: &[RgbaImage], width: u32, height: u32) -> R
 
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 pub(crate) fn composite_layout(frames: &[RgbaImage], width: u32, height: u32, layout: SceneLayout) -> Result<RgbaImage, String> {
+    let layers: Vec<&RgbaImage> = frames.iter().collect();
+    composite_layers(&layers, width, height, layout)
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn composite_with_camera(displays: &[RgbaImage], camera: &RgbaImage, width: u32, height: u32) -> Result<RgbaImage, String> {
+    if displays.is_empty() || displays.len() > 3 { return Err("Webcam PiP needs one to three displays".into()); }
+    // Camera becomes the last inset. All source buffers remain borrowed.
+    let mut layers: Vec<&RgbaImage> = displays.iter().collect();
+    layers.push(camera);
+    composite_layers(&layers, width, height, SceneLayout::PictureInPicture)
+}
+
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+fn composite_layers(frames: &[&RgbaImage], width: u32, height: u32, layout: SceneLayout) -> Result<RgbaImage, String> {
     if frames.is_empty() || frames.len() > MAX_PREVIEW_SOURCES ||
        width < 16 || height < 16 || width > 1920 || height > 1080 {
         return Err("Invalid scene dimensions or source count".into());
@@ -72,7 +87,7 @@ pub(crate) fn composite_layout(frames: &[RgbaImage], width: u32, height: u32, la
             f64::from(tile_height) / f64::from(frame.height()));
         let w = (f64::from(frame.width()) * scale).round().max(1.0) as u32;
         let h = (f64::from(frame.height()) * scale).round().max(1.0) as u32;
-        let scaled = imageops::resize(frame, w.min(tile_width), h.min(tile_height), imageops::FilterType::Triangle);
+        let scaled = imageops::resize(*frame, w.min(tile_width), h.min(tile_height), imageops::FilterType::Triangle);
         if layout == SceneLayout::PictureInPicture && i > 0 {
             for y in top..top + tile_height {
                 for x in left..left + tile_width {
@@ -129,6 +144,19 @@ mod tests {
         assert_eq!(SceneLayout::parse(None).unwrap(), SceneLayout::Grid);
         assert_eq!(SceneLayout::parse(Some("pip")).unwrap(), SceneLayout::PictureInPicture);
         assert!(SceneLayout::parse(Some("unknown")).is_err());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn webcam_layer_is_borrowed_and_visible_in_pip() {
+        use super::composite_with_camera;
+        use image::{Rgba, RgbaImage};
+        let display = RgbaImage::from_pixel(160, 90, Rgba([240,0,0,255]));
+        let camera = RgbaImage::from_pixel(64, 48, Rgba([0,240,0,255]));
+        let canvas = composite_with_camera(&[display], &camera, 640, 360).unwrap();
+        assert_eq!(canvas.get_pixel(100,180)[0], 240);
+        assert_eq!(canvas.get_pixel(520,300)[1], 240);
+        assert!(composite_with_camera(&[], &camera, 640, 360).is_err());
     }
 
     #[cfg(any(target_os = "windows", target_os = "macos"))]
