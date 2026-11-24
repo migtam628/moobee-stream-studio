@@ -4,6 +4,7 @@ export class StudioError extends Error {
   constructor(message, statusCode = 400) { super(message); this.statusCode = statusCode; }
 }
 const validName = value => typeof value === 'string' && value.trim().length >= 1 && value.trim().length <= 64 && !/[<>\r\n]/.test(value);
+const validLayout = value => value === 'grid' || value === 'pip';
 const validId = value => Number.isSafeInteger(value) && value > 0 && value <= 1_000_000_000;
 
 export function validateCollection(value) {
@@ -30,7 +31,8 @@ export function validateCollection(value) {
       ids.add(source.id);
       return { id: source.id, kind: 'display', deviceId: source.deviceId, name: source.name.trim(), enabled: source.enabled };
     });
-    return { name, sources };
+    if (scene.layout !== undefined && !validLayout(scene.layout)) throw new StudioError('Unsupported native scene layout');
+    return { name, sources, ...(scene.layout === undefined ? {} : { layout: scene.layout }) };
   });
   if (typeof value.currentScene !== 'string' || !scenes.some(s => s.name === value.currentScene) ||
       typeof value.previewScene !== 'string' || !scenes.some(s => s.name === value.previewScene) ||
@@ -56,6 +58,7 @@ export function createStudio({ onChange = () => {}, initial = null } = {}) {
       captureAvailable: false, recordAvailable: false, broadcastAvailable: false,
       currentScene: draft.currentScene, previewScene: draft.previewScene, studioMode: draft.studioMode,
       scenes: draft.scenes.map(scene => scene.name),
+      sceneLayout: selected()?.layout ?? 'grid',
       sources: selected()?.sources.map(source => ({ ...source })) || [], inputs: [],
       streaming: false, recording: false, streamSeconds: 0,
       bitrateKbps: null, droppedFrames: null, fps: null, lastError: ''
@@ -108,7 +111,7 @@ export function createStudio({ onChange = () => {}, initial = null } = {}) {
         name = `${base} Copy ${n++}`;
       }
       let nextId = Math.max(0, ...draft.scenes.flatMap(s => s.sources.map(src => src.id))) + 1;
-      draft.scenes.push({ name, sources: scene.sources.map(src => ({ ...src, id: nextId++ })) });
+      draft.scenes.push({ name, ...(scene.layout ? { layout: scene.layout } : {}), sources: scene.sources.map(src => ({ ...src, id: nextId++ })) });
     } else if (action === 'scene') {
       if (typeof sceneName !== 'string' || !draft.scenes.some(s => s.name === sceneName)) throw new StudioError('Unknown scene');
       if (draft.studioMode) draft.previewScene = sceneName;
@@ -129,6 +132,15 @@ export function createStudio({ onChange = () => {}, initial = null } = {}) {
       if (active.sources.length >= 30) throw new StudioError('Source limit reached');
       const id = Math.max(0, ...draft.scenes.flatMap(s => s.sources.map(src => src.id))) + 1;
       active.sources.push({ id, kind: 'display', deviceId: body.deviceId, name: body.name.trim(), enabled: true });
+    } else if (action === 'sceneLayout') {
+      if (!active || !validLayout(body.layout)) throw new StudioError('Invalid scene layout');
+      active.layout = body.layout;
+    } else if (action === 'moveSource') {
+      const index = active?.sources.findIndex(src => src.id === body.sceneItemId) ?? -1;
+      if (!active || index < 0 || !['up', 'down'].includes(body.direction)) throw new StudioError('Invalid source order');
+      const next = index + (body.direction === 'up' ? -1 : 1);
+      if (next < 0 || next >= active.sources.length) throw new StudioError('Source is already at the edge');
+      [active.sources[index], active.sources[next]] = [active.sources[next], active.sources[index]];
     } else if (action === 'source') {
       const source = active?.sources.find(src => src.id === body.sceneItemId);
       if (!source || typeof body.enabled !== 'boolean') throw new StudioError('Invalid source');
