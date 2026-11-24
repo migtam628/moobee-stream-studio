@@ -231,10 +231,11 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
         new Set(ids).size !== ids.length ||
         typeof body.seconds !== 'number' || !Number.isSafeInteger(body.seconds) ||
         body.seconds < 2 || body.seconds > 8 ||
-        (body.profile !== 'baseline' && body.profile !== '720p15')) {
+        (body.profile !== 'baseline' && body.profile !== '720p15' && body.profile !== '1080p30')) {
       throw new Error('Choose 1–4 unique Program displays, a 2–8 second duration and a supported capture profile')
     }
     const mp4 = path.endsWith('-mp4')
+    if (body.profile === '1080p30' && (!mp4 || Number(body.seconds) > 4)) throw new Error('1080p30 requires Mac MP4 and a 2–4 second test')
     if (body.webcam !== undefined && typeof body.webcam !== 'boolean') throw new Error('Invalid webcam selection')
     if (body.webcam && (!mp4 || ids.length > 3)) throw new Error('Webcam PiP requires macOS MP4 and one to three displays')
     if (body.microphone !== undefined && typeof body.microphone !== 'boolean') throw new Error('Invalid microphone selection')
