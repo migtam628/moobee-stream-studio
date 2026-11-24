@@ -1,5 +1,5 @@
 //! Mac-only synchronous AVFoundation sink used by the native capture worker.
-//! This writes composed display video only; no audio track is requested.
+//! Composed H.264 with optional AAC from aligned 48kHz stereo PCM.
 use std::{ffi::{CStr, CString, c_void}, fs::OpenOptions, os::raw::{c_char,c_int}, path::Path};
 
 unsafe extern "C" {
@@ -105,4 +105,35 @@ mod tests {
         if result.is_ok() { std::fs::remove_dir_all(&dir).unwrap(); }
         result.unwrap();
     }
+
+    #[test]
+    #[ignore = "requires macOS H.264/AAC encoder; real-device validation"]
+    fn synthetic_full_hd_video_and_aac_share_two_second_timeline() {
+        let dir = std::env::temp_dir().join(format!("moobee-av-{}",uuid::Uuid::new_v4()));
+        std::fs::create_dir(&dir).unwrap();
+        let path = dir.join("test.mp4");
+        let result = (|| -> Result<(),String> {
+            let mut sink = ProgramMp4Sink::new_with_audio(&path,1920,1080,30,true)?;
+            let clock = crate::media_clock::MediaClock::new(30)?;
+            for tick in 0..60u32 {
+                let canvas = image::RgbaImage::from_fn(1920,1080,|x,y| image::Rgba([((x+tick*3)%256) as u8,(y%256) as u8,60,255]));
+                sink.append(canvas.as_raw())?;
+                let samples = clock.audio_range(tick,48_000)?;
+                let mut pcm = Vec::new();
+                for n in samples {
+                    let value = 0.1 * (2.0 * std::f32::consts::PI * 440.0 * n as f32 / 48_000.0).sin();
+                    pcm.extend_from_slice(&[value,value]);
+                }
+                sink.append_audio(&pcm)?;
+            }
+            sink.finish().map_err(|(message,_)| message)?;
+            drop(sink);
+            let (_,duration) = validate_finished(&path)?;
+            assert!((duration-2.0).abs()<0.2);
+            Ok(())
+        })();
+        if result.is_ok() { std::fs::remove_dir_all(&dir).unwrap(); }
+        result.unwrap();
+    }
+
 }
