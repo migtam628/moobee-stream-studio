@@ -32,7 +32,7 @@ type CapturedFile = {
   repeatedSourceSlots?: number[]
   lateOutputFrames?: number
   maxSourceArrivalSkewMs?: number
-  profile?: 'baseline' | '720p15'
+  profile?: 'baseline' | '720p15' | '1080p30'
   width?: number
   height?: number
   fps?: number
@@ -54,7 +54,7 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
   const [mp4AvailabilityReason, setMp4AvailabilityReason] = useState('Native MP4 availability has not been checked')
   const [duration, setDuration] = useState(6)
   const [programAviDuration, setProgramAviDuration] = useState(4)
-  const [continuousProfile, setContinuousProfile] = useState<'baseline' | '720p15'>('baseline')
+  const [continuousProfile, setContinuousProfile] = useState<'baseline' | '720p15' | '1080p30'>('baseline')
   const [programWebcam, setProgramWebcam] = useState(false)
   const [programMic, setProgramMic] = useState(false)
   const [micGain, setMicGain] = useState(1)
@@ -292,19 +292,20 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
         <label>Test length
           <select aria-label="Composed Program video test duration" value={programAviDuration} disabled={busy}
             onChange={event => setProgramAviDuration(Number(event.target.value))}>
-            {[2, 4, 6, 8].map(seconds => <option key={seconds} value={seconds}>{seconds} seconds</option>)}
+            {(continuousProfile === '1080p30' ? [2, 4] : [2, 4, 6, 8]).map(seconds => <option key={seconds} value={seconds}>{seconds} seconds</option>)}
           </select>
         </label>
         <label>Continuous test profile
           <select aria-label="Continuous Program test profile" value={continuousProfile} disabled={busy}
-            onChange={event => setContinuousProfile(event.target.value as 'baseline' | '720p15')}>
+            onChange={event => { const profile = event.target.value as 'baseline' | '720p15' | '1080p30'; setContinuousProfile(profile); if (profile === '1080p30' && programAviDuration > 4) setProgramAviDuration(4) }}>
             <option value="baseline">Baseline · 640×360 / 10 fps</option>
             <option value="720p15">Higher detail · 1280×720 / 15 fps</option>
+            {mac && <option value="1080p30">Full HD · 1920×1080 / 30 fps (Mac MP4, max 4s)</option>}
           </select>
         </label>
         <button type="button" className="secondary-button" disabled={busy || loading}
           onClick={() => void captureProgramVideoTest('sampled')}><Video size={16}/>{busy ? 'Native capture in progress…' : 'Sampled Program AVI'}</button>
-        <button type="button" className="secondary-button" disabled={busy || loading || graphicLoading}
+        <button type="button" className="secondary-button" disabled={busy || loading || graphicLoading || continuousProfile === '1080p30'}
           onClick={() => void captureProgramVideoTest('continuous')}><Video size={16}/>{busy ? 'Native capture in progress…' : 'Continuous-source Program AVI'}</button>
         {mac && <label><input type="checkbox" checked={programWebcam} disabled={busy} onChange={e => setProgramWebcam(e.target.checked)}/> Default webcam in Mac MP4 (forces PiP, up to 3 displays)</label>}
         {mac && <label className="quick-capture-check"><input type="checkbox" checked={programMic} disabled={busy} onChange={e => setProgramMic(e.target.checked)}/> Include default microphone (AAC test)</label>}
@@ -316,7 +317,7 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
         {mac && <button type="button" className="secondary-button" disabled={busy || loading || graphicLoading}
           onClick={() => void captureProgramVideoTest('mp4')}><Video size={16}/>{busy ? 'Native capture in progress…' : 'Composed H.264 MP4 (Mac test)'}</button>}
       </div>
-      <small className="help-text">The sampled-screenshot test always produces 640×360/10fps AVI. The continuous native-frame input tests use the selected profile (up to 1280×720/15fps). The Mac MP4 path feeds the same composed frames into AVFoundation H.264 encoding; AVI uses MJPEG. AVI stays silent; Mac MP4 can explicitly include the default webcam and default microphone (AAC). A static PNG overlay is supported in both continuous formats. Video and PCM sample slots share a nominal rational timeline; real-device latency, drift, audio playback, animated overlays, transitions and RTMPS remain unverified or unimplemented.</small>
+      <small className="help-text">The sampled-screenshot test always produces 640×360/10fps AVI. The continuous native-frame input tests use the selected profile (up to 1280×720/15fps for AVI and nominal 1920×1080/30fps for Mac MP4). The Mac MP4 path feeds the same composed frames into AVFoundation H.264 encoding; AVI uses MJPEG. AVI stays silent; Mac MP4 can explicitly include the default webcam and default microphone (AAC). A static PNG overlay is supported in both continuous formats. Video and PCM sample slots share a nominal rational timeline; real-device latency, drift, audio playback, animated overlays, transitions and RTMPS remain unverified or unimplemented.</small>
     </div>}
     {useMp4 && <div className="quick-capture-options">
       <label className="quick-capture-check"><input type="checkbox" checked={systemAudio} disabled={busy}
