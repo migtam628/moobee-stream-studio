@@ -17,6 +17,10 @@ type CapturedFile = {
   displayCount?: number
   elapsedMs?: number
   finalizationMs?: number
+  webcamIncluded?: boolean
+  webcamFrames?: number
+  webcamRepeatedSlots?: number
+  plannedAudioSamples48khz?: number
   measuredSamplingFps?: number
   sourceFramesReceived?: number[]
   repeatedSourceSlots?: number[]
@@ -45,6 +49,7 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
   const [duration, setDuration] = useState(6)
   const [programAviDuration, setProgramAviDuration] = useState(4)
   const [continuousProfile, setContinuousProfile] = useState<'baseline' | '720p15'>('baseline')
+  const [programWebcam, setProgramWebcam] = useState(false)
   const [systemAudio, setSystemAudio] = useState(false)
   const [microphone, setMicrophone] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -169,7 +174,8 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
         ? '/clips/capture-program-continuous-mp4'
         : mode === 'continuous' ? '/clips/capture-program-continuous-avi' : '/clips/capture-program-test-avi', {
         displayIds, seconds: programAviDuration, layout: programTestLayout(collection),
-        ...(mode !== 'sampled' ? { profile: continuousProfile } : {})
+        ...(mode !== 'sampled' ? { profile: continuousProfile } : {}),
+        ...(mode === 'mp4' ? { webcam: programWebcam } : {})
       })
       setSaved(result)
       await refreshSavedClips()
@@ -263,10 +269,11 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
           onClick={() => void captureProgramVideoTest('sampled')}><Video size={16}/>{busy ? 'Native capture in progress…' : 'Sampled Program AVI'}</button>
         <button type="button" className="secondary-button" disabled={busy || loading}
           onClick={() => void captureProgramVideoTest('continuous')}><Video size={16}/>{busy ? 'Native capture in progress…' : 'Continuous-source Program AVI'}</button>
+        {mac && <label><input type="checkbox" checked={programWebcam} disabled={busy} onChange={e => setProgramWebcam(e.target.checked)}/> Default webcam in Mac MP4 (forces PiP, up to 3 displays)</label>}
         {mac && <button type="button" className="secondary-button" disabled={busy || loading}
           onClick={() => void captureProgramVideoTest('mp4')}><Video size={16}/>{busy ? 'Native capture in progress…' : 'Composed H.264 MP4 (Mac test)'}</button>}
       </div>
-      <small className="help-text">The sampled-screenshot test always produces 640×360/10fps AVI. The continuous native-frame input tests use the selected profile (up to 1280×720/15fps). The Mac MP4 path feeds the same composed frames into AVFoundation H.264 encoding; AVI uses MJPEG. All are silent diagnostics with a nominal output clock and may fall behind wall-clock time. No synchronized native capture PTS, camera, microphone, overlays, scene transitions or RTMPS.</small>
+      <small className="help-text">The sampled-screenshot test always produces 640×360/10fps AVI. The continuous native-frame input tests use the selected profile (up to 1280×720/15fps). The Mac MP4 path feeds the same composed frames into AVFoundation H.264 encoding; AVI uses MJPEG. All are silent diagnostics with a nominal output clock and may fall behind wall-clock time. Mac MP4 can explicitly include the default webcam as an inset. No synchronized native capture PTS, microphone, animated overlays, scene transitions or RTMPS.</small>
     </div>}
     {useMp4 && <div className="quick-capture-options">
       <label className="quick-capture-check"><input type="checkbox" checked={systemAudio} disabled={busy}
@@ -330,6 +337,7 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
           {saved.elapsedMs !== undefined ? ` ${(saved.elapsedMs / 1000).toFixed(2)}s wall-clock capture` : ' elapsed time unknown'}.
           The nominal output clock can differ from wall-clock capture when frames arrive late.
         </p>}
+        {saved.webcamIncluded && <p className="help-text" role="status">Webcam inset included · {saved.webcamFrames ?? 0} received frames · {saved.webcamRepeatedSlots ?? 0} repeated slots. Verify the actual clip.</p>}
         {saved.sourceFramesReceived && <p className="help-text" role="status">
           Continuous native frame input · received per source: {saved.sourceFramesReceived.join(', ')} ·
           repeated input slots: {saved.repeatedSourceSlots?.join(', ') ?? 'unknown'} ·
