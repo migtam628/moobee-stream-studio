@@ -16,6 +16,7 @@ type CapturedFile = {
   audioTrackVerified?: boolean
   displayCount?: number
   elapsedMs?: number
+  finalizationMs?: number
   measuredSamplingFps?: number
   sourceFramesReceived?: number[]
   repeatedSourceSlots?: number[]
@@ -151,8 +152,8 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
     }
   }
 
-  async function captureProgramAviTest(mode: 'sampled' | 'continuous' = 'sampled') {
-    if (!supportedDesktop || loading || busy) return
+  async function captureProgramVideoTest(mode: 'sampled' | 'continuous' | 'mp4' = 'sampled') {
+    if (!supportedDesktop || loading || busy || (mode === 'mp4' && !mac)) return
     setBusy(true)
     setCaptureMode('program')
     setStopRequested(false)
@@ -164,15 +165,16 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
       if (displayIds.some(id => !displays.some(display => display.id === id))) {
         throw new Error('One of the Program displays is disconnected. Refresh displays and check the scene.')
       }
-      const result = await request<CapturedFile>(mode === 'continuous'
-        ? '/clips/capture-program-continuous-avi' : '/clips/capture-program-test-avi', {
+      const result = await request<CapturedFile>(mode === 'mp4'
+        ? '/clips/capture-program-continuous-mp4'
+        : mode === 'continuous' ? '/clips/capture-program-continuous-avi' : '/clips/capture-program-test-avi', {
         displayIds, seconds: programAviDuration,
-        ...(mode === 'continuous' ? { profile: continuousProfile } : {})
+        ...(mode !== 'sampled' ? { profile: continuousProfile } : {})
       })
       setSaved(result)
       await refreshSavedClips()
     } catch (cause) {
-      setError((mode === 'continuous' ? 'Continuous Program input' : 'Program AVI') + ' test failed: ' + (cause as Error).message)
+      setError((mode === 'mp4' ? 'Composed H.264 MP4' : mode === 'continuous' ? 'Continuous Program AVI' : 'Sampled Program AVI') + ' test failed: ' + (cause as Error).message)
     } finally {
       setBusy(false)
       setCaptureMode(null)
@@ -218,7 +220,7 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
   return <div className="quick-capture">
     <p className="help-text">
       Save a <strong>bounded test recording of one display</strong> using MooBee's native capture. On supported Macs, request up to 120 seconds and stop early with finalization.
-      The ordinary screen test records one display, not the composed Program scene. A separate silent Program AVI test below combines up to four display sources, without webcam, overlays or audio.
+      The ordinary screen test records one display, not the composed Program scene. Separate silent Program video tests below combine up to four display sources, without webcam, overlays or audio.
     </p>
     <div className="quick-capture-options">
       <label>Display
@@ -242,10 +244,10 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
       <span className="quick-capture-format"><Video size={15}/>{formatLabel}</span>
     </div>
     {supportedDesktop && <div className="clip-mp4-options">
-      <p><strong>Experimental Program display composition → AVI</strong> — combines up to four enabled display sources from the current Program scene (not Studio Preview). Short, silent MJPEG tests only; not production Program encoding or a live stream.</p>
+      <p><strong>Experimental Program display composition</strong> — combines up to four enabled display sources from the current Program scene (not Studio Preview). Short silent AVI tests, plus composed H.264 MP4 on Mac; not production Program recording or a live stream.</p>
       <div className="quick-capture-options">
         <label>Test length
-          <select aria-label="Composited Program AVI test duration" value={programAviDuration} disabled={busy}
+          <select aria-label="Composed Program video test duration" value={programAviDuration} disabled={busy}
             onChange={event => setProgramAviDuration(Number(event.target.value))}>
             {[2, 4, 6, 8].map(seconds => <option key={seconds} value={seconds}>{seconds} seconds</option>)}
           </select>
@@ -258,11 +260,13 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
           </select>
         </label>
         <button type="button" className="secondary-button" disabled={busy || loading}
-          onClick={() => void captureProgramAviTest('sampled')}><Video size={16}/>{busy ? 'Native capture in progress…' : 'Sampled Program AVI'}</button>
+          onClick={() => void captureProgramVideoTest('sampled')}><Video size={16}/>{busy ? 'Native capture in progress…' : 'Sampled Program AVI'}</button>
         <button type="button" className="secondary-button" disabled={busy || loading}
-          onClick={() => void captureProgramAviTest('continuous')}><Video size={16}/>{busy ? 'Native capture in progress…' : 'Continuous-source Program AVI'}</button>
+          onClick={() => void captureProgramVideoTest('continuous')}><Video size={16}/>{busy ? 'Native capture in progress…' : 'Continuous-source Program AVI'}</button>
+        {mac && <button type="button" className="secondary-button" disabled={busy || loading}
+          onClick={() => void captureProgramVideoTest('mp4')}><Video size={16}/>{busy ? 'Native capture in progress…' : 'Composed H.264 MP4 (Mac test)'}</button>}
       </div>
-      <small className="help-text">The sampled-screenshot test always produces 640×360/10fps AVI. The continuous native-frame input test supports the selected profile (up to 1280×720/15fps), but both are silent diagnostics with nominal AVI timing and may fall behind wall-clock time. No native capture PTS, camera, microphone, overlays, scene transitions or RTMPS.</small>
+      <small className="help-text">The sampled-screenshot test always produces 640×360/10fps AVI. The continuous native-frame input tests use the selected profile (up to 1280×720/15fps). The Mac MP4 path feeds the same composed frames into AVFoundation H.264 encoding; AVI uses MJPEG. All are silent diagnostics with a nominal output clock and may fall behind wall-clock time. No synchronized native capture PTS, camera, microphone, overlays, scene transitions or RTMPS.</small>
     </div>}
     {useMp4 && <div className="quick-capture-options">
       <label className="quick-capture-check"><input type="checkbox" checked={systemAudio} disabled={busy}
@@ -308,10 +312,10 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
     {saved && <div className="clip-result" role="status">
       <CheckCircle2 size={18}/>
       <div>
-        <strong>Saved {saved.format.toUpperCase()} locally — playback{saved.format === 'mp4' ? ' and audio' : ''} not yet verified</strong>
+        <strong>Saved {saved.format.toUpperCase()} locally — playback{saved.format === 'mp4' && saved.displayCount === undefined ? ' and audio' : ''} not yet verified</strong>
         <small>
           {saved.durationSeconds !== null && Number.isFinite(saved.durationSeconds)
-            ? saved.displayCount !== undefined
+            ? saved.displayCount !== undefined && saved.format === 'avi'
               ? `${saved.durationSeconds.toFixed(2)}s nominal AVI playback timeline (not independently verified)`
               : `${saved.durationSeconds.toFixed(2)}s recorded (container metadata)`
             : 'Recorded duration not available from metadata'}
@@ -321,16 +325,17 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
           {(saved.bytes / (1024 * 1024)).toFixed(2)} MB
         </small>
         {saved.displayCount !== undefined && <p className="help-text" role="status">
-          {saved.displayCount} Program display source(s) composed · {saved.width ?? 640}×{saved.height ?? 360} · nominal {saved.fps ?? 10} fps AVI ·
+          {saved.displayCount} Program display source(s) composed · {saved.width ?? 640}×{saved.height ?? 360} · nominal {saved.fps ?? 10} fps {saved.format.toUpperCase()} ·
           {typeof saved.measuredSamplingFps === 'number' ? ` ${saved.measuredSamplingFps.toFixed(1)} fps measured sampling` : ' capture performance unknown'} ·
           {saved.elapsedMs !== undefined ? ` ${(saved.elapsedMs / 1000).toFixed(2)}s wall-clock capture` : ' elapsed time unknown'}.
-          AVI playback duration may differ from wall-clock capture time when frames arrive late.
+          The nominal output clock can differ from wall-clock capture when frames arrive late.
         </p>}
         {saved.sourceFramesReceived && <p className="help-text" role="status">
           Continuous native frame input · received per source: {saved.sourceFramesReceived.join(', ')} ·
           repeated input slots: {saved.repeatedSourceSlots?.join(', ') ?? 'unknown'} ·
           late composite frames: {saved.lateOutputFrames ?? 'unknown'} ·
           max source arrival skew: {saved.maxSourceArrivalSkewMs ?? 'unknown'}ms.
+          {saved.finalizationMs !== undefined ? `Container finalization: ${saved.finalizationMs} ms. ` : ''}
           Arrival-time skew is not native capture timestamp synchronization.
         </p>}
         <code>{saved.path}</code>
@@ -346,7 +351,7 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
           </button>
         </div>
         <p className="help-text">{saved.displayCount !== undefined
-          ? 'This silent AVI is an experimental Program display composite, not live Program output. Open it in VLC; check that all screens appear, verify motion, duration and seeking, and compare playback timeline with actual wall-clock capture.'
+          ? 'This silent video is an experimental Program display composite, not live Program output. Open it in QuickTime (MP4) or VLC; check that all screens appear, verify motion, duration and seeking, and compare playback timeline with actual wall-clock capture.'
           : 'A recording file can be finalized without verifying playback or audible audio. Open it in QuickTime or VLC to confirm playback and seeking. For a Stop-and-Save test, compare the actual duration above with when you pressed Stop. Reopen MooBee and check that the clip remains in Clips.'}</p>
       </div>
     </div>}

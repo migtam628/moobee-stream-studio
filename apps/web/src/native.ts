@@ -211,7 +211,7 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
       systemAudio: body.systemAudio, microphone: body.microphone
     })
   }
-  if (path === '/clips/capture-program-continuous-avi') {
+  if (path === '/clips/capture-program-continuous-avi' || path === '/clips/capture-program-continuous-mp4') {
     const ids = body.displayIds
     if (!Array.isArray(ids) || ids.length < 1 || ids.length > 4 ||
         !ids.every(id => typeof id === 'number' && Number.isSafeInteger(id) && id >= 0 && id <= 24) ||
@@ -221,7 +221,7 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
         (body.profile !== 'baseline' && body.profile !== '720p15')) {
       throw new Error('Choose 1–4 unique Program displays, a 2–8 second duration and a supported capture profile')
     }
-    return await invoke('capture_continuous_program_avi', {
+    return await invoke(path.endsWith('-mp4') ? 'capture_continuous_program_mp4' : 'capture_continuous_program_avi', {
       displayIds: ids, seconds: body.seconds, profile: body.profile
     })
   }

@@ -148,3 +148,12 @@ test('web control API explicitly refuses continuous native Program capture', asy
   const payload = await response.json();
   assert.match(payload.error, /installed Mac\/Windows application/);
 });
+
+test('web control API refuses native composed H.264 recording', async () => {
+  const response = await fetch(root + '/api/clips/capture-program-continuous-mp4', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ displayIds: [0, 1], seconds: 4, profile: '720p15' })
+  });
+  assert.equal(response.status, 501);
+  assert.match((await response.json()).error, /installed macOS desktop application/);
+});

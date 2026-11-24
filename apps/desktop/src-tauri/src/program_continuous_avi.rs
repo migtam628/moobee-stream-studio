@@ -1,5 +1,5 @@
 //! Continuous native frame-source experiment (XCap receiver -> composite ->
-//! bounded silent MJPEG AVI). Not a realtime H.264/AAC Program recorder.
+//! bounded silent MJPEG AVI or macOS H.264 MP4). Not a realtime A/V recorder.
 //! Screen frames have arrival timestamps only: they are NOT native PTS.
 //! Real Mac/Windows hardware validation is required before any beta claim.
 use serde::Serialize;
@@ -44,7 +44,7 @@ pub struct ContinuousProgramReport {
     path: String,
     format: &'static str,
     bytes: u64,
-    duration_seconds: u32,
+    duration_seconds: f64,
     requested_max_seconds: u32,
     frame_count: u32,
     width: u32,
@@ -53,6 +53,8 @@ pub struct ContinuousProgramReport {
     profile: &'static str,
     display_count: usize,
     elapsed_ms: u64,
+    finalization_ms: u64,
+    audio_track_verified: bool,
     measured_sampling_fps: f64,
     source_frames_received: Vec<u32>,
     repeated_source_slots: Vec<u32>,
@@ -63,11 +65,11 @@ pub struct ContinuousProgramReport {
 fn validate_request(display_ids: &[usize], seconds: u32, selected_profile: &str) -> Result<EncodingProfile, String> {
     crate::scene_compositor::validate_ids(display_ids)?;
     if !(2..=8).contains(&seconds) {
-        return Err("Continuous Program AVI tests support 2–8 seconds".into());
+        return Err("Continuous Program video tests support 2–8 seconds".into());
     }
     let profile = encoding_profile(selected_profile)?;
     if seconds.saturating_mul(profile.fps) > 120 {
-        return Err("Requested Program test exceeds AVI's 120-frame safety budget".into());
+        return Err("Requested Program test exceeds the 120-frame safety budget".into());
     }
     Ok(profile)
 }
@@ -111,11 +113,71 @@ fn receive_first_frame(receiver: &Receiver<xcap::Frame>) -> Result<image::RgbaIm
     frame_image(frame)
 }
 
+#[derive(Clone, Copy)]
+enum ProgramFormat { Avi, Mp4 }
+
+impl ProgramFormat {
+    fn extension(self) -> &'static str {
+        match self { Self::Avi => "avi", Self::Mp4 => "mp4" }
+    }
+}
+
+// Both formats consume the exact same composed Program canvas. Only the
+// encoder differs. No raw-frame queue or external transcoder is introduced.
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+enum FrameSink {
+    Avi(crate::avi::AviWriter<std::fs::File>),
+    #[cfg(target_os = "macos")]
+    Mp4(crate::program_mp4_sink::ProgramMp4Sink),
+}
+
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+impl FrameSink {
+    fn open(path: &std::path::Path, format: ProgramFormat, profile: EncodingProfile) -> Result<Self, String> {
+        match format {
+            ProgramFormat::Avi => {
+                let file = OpenOptions::new().write(true).create_new(true).open(path)
+                    .map_err(|e| format!("Unable to create private AVI: {e}"))?;
+                Ok(Self::Avi(crate::avi::AviWriter::new(file, profile.width, profile.height, profile.fps)?))
+            }
+            ProgramFormat::Mp4 => {
+                #[cfg(target_os = "macos")]
+                { Ok(Self::Mp4(crate::program_mp4_sink::ProgramMp4Sink::new(path, profile.width, profile.height, profile.fps)?)) }
+                #[cfg(not(target_os = "macos"))]
+                { Err("Native composed H.264 MP4 is currently a macOS-only test".into()) }
+            }
+        }
+    }
+
+    fn append(&mut self, canvas: image::RgbaImage) -> Result<(), String> {
+        match self {
+            Self::Avi(writer) => {
+                use image::{codecs::jpeg::JpegEncoder, DynamicImage};
+                let rgb = DynamicImage::ImageRgba8(canvas).to_rgb8();
+                let mut jpeg = Vec::new();
+                JpegEncoder::new_with_quality(&mut jpeg, 72)
+                    .encode_image(&DynamicImage::ImageRgb8(rgb))
+                    .map_err(|e| format!("Program frame JPEG encoding failed: {e}"))?;
+                writer.write_frame(&jpeg)
+            }
+            #[cfg(target_os = "macos")]
+            Self::Mp4(writer) => writer.append(canvas.as_raw()),
+        }
+    }
+
+    fn finish(&mut self) -> Result<(), (String, bool)> {
+        match self {
+            Self::Avi(writer) => writer.finish().map(|_| ()).map_err(|e| (e, false)),
+            #[cfg(target_os = "macos")]
+            Self::Mp4(writer) => writer.finish(),
+        }
+    }
+}
+
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 fn capture_to_dir(
-    directory: PathBuf, ids: Vec<usize>, seconds: u32, profile: EncodingProfile,
+    directory: PathBuf, ids: Vec<usize>, seconds: u32, profile: EncodingProfile, format: ProgramFormat,
 ) -> Result<ContinuousProgramReport, String> {
-    use image::{codecs::jpeg::JpegEncoder, DynamicImage};
     let available = xcap::Monitor::all()
         .map_err(|error| format!("Unable to enumerate Program displays: {error}"))?;
     let mut recorders = Vec::with_capacity(ids.len());
@@ -151,10 +213,13 @@ fn capture_to_dir(
     fs::create_dir_all(&directory)
         .map_err(|error| format!("Unable to create private clips directory: {error}"))?;
     let id = uuid::Uuid::new_v4().to_string();
-    let final_path = directory.join(format!("clip-{id}.avi"));
-    let temporary = directory.join(format!(".clip-{id}.avi.part"));
-    let mut file = OpenOptions::new().write(true).create_new(true).open(&temporary)
-        .map_err(|error| format!("Unable to create private continuous capture output: {error}"))?;
+    let extension = format.extension();
+    let final_path = directory.join(format!("clip-{id}.{extension}"));
+    let temporary = directory.join(format!(".clip-{id}.part.{extension}"));
+    let mut writer = match FrameSink::open(&temporary, format, profile) {
+        Ok(writer) => writer,
+        Err(error) => { let _ = fs::remove_file(&temporary); return Err(error); }
+    };
 
     let started = Instant::now();
     let total_frames = profile.fps * seconds;
@@ -162,8 +227,7 @@ fn capture_to_dir(
     let mut repeats = vec![0u32; ids.len()];
     let mut late_frames = 0u32;
     let mut max_skew_ms = 0u64;
-    let recording = (|| -> Result<u64, String> {
-        let mut writer = crate::avi::AviWriter::new(&mut file, profile.width, profile.height, profile.fps)?;
+    let recording = (|| -> Result<(), String> {
         for tick in 0..total_frames {
             let target = started + Duration::from_millis(u64::from(tick) * 1000 / u64::from(profile.fps));
             std::thread::sleep(target.saturating_duration_since(Instant::now()));
@@ -201,43 +265,63 @@ fn capture_to_dir(
                 return Err("Program video input stalled for over 1.5 seconds; incomplete file discarded".into());
             }
             let composed = crate::scene_compositor::composite_grid(&latest, profile.width, profile.height)?;
-            let rgb = DynamicImage::ImageRgba8(composed).to_rgb8();
-            let mut jpeg = Vec::new();
-            JpegEncoder::new_with_quality(&mut jpeg, 72)
-                .encode_image(&DynamicImage::ImageRgb8(rgb))
-                .map_err(|error| format!("Program frame JPEG encoding failed: {error}"))?;
-            writer.write_frame(&jpeg)?;
+            writer.append(composed)?;
             if Instant::now() > target + Duration::from_millis(1000 / u64::from(profile.fps)) {
                 late_frames = late_frames.saturating_add(1);
             }
         }
-        writer.finish()
+        Ok(())
     })();
     let elapsed_ms = started.elapsed().as_millis() as u64;
-    let bytes = match recording {
-        Ok(bytes) => bytes,
-        Err(error) => {
-            drop(file);
-            let _ = fs::remove_file(&temporary);
-            return Err(error);
-        }
-    };
-    if let Err(error) = file.sync_all() {
-        drop(file);
+    // Stop native input before waiting on the final container writer.
+    drop(guard);
+    drop(receivers);
+    if let Err(error) = recording {
+        drop(writer);
         let _ = fs::remove_file(&temporary);
-        return Err(format!("Unable to sync continuous Program AVI to disk: {error}"));
+        return Err(error);
     }
-    drop(file);
+    let finalizing = Instant::now();
+    let result = writer.finish();
+    drop(writer);
+    if let Err((error, still_writing)) = result {
+        // A timed-out AVFoundation writer may still own the private file.
+        if !still_writing { let _ = fs::remove_file(&temporary); }
+        return Err(error);
+    }
+    let inspected = (|| -> Result<(u64, f64), String> {
+        match format {
+            ProgramFormat::Avi => {
+                let file = OpenOptions::new().read(true).write(true).open(&temporary)
+                    .map_err(|e| format!("Cannot reopen completed AVI: {e}"))?;
+                let bytes = file.metadata().map_err(|e| e.to_string())?.len();
+                if bytes == 0 || bytes > 64 * 1024 * 1024 { return Err("AVI file outside safety budget".into()); }
+                file.sync_all().map_err(|e| e.to_string())?;
+                Ok((bytes, f64::from(seconds)))
+            }
+            ProgramFormat::Mp4 => {
+                #[cfg(target_os = "macos")]
+                { crate::program_mp4_sink::validate_finished(&temporary) }
+                #[cfg(not(target_os = "macos"))]
+                { Err("Native composed MP4 unavailable".into()) }
+            }
+        }
+    })();
+    let (bytes, actual_duration) = match inspected {
+        Ok(value) => value,
+        Err(error) => { let _ = fs::remove_file(&temporary); return Err(error); }
+    };
+    let finalization_ms = finalizing.elapsed().as_millis() as u64;
     if let Err(error) = fs::rename(&temporary, &final_path) {
         let _ = fs::remove_file(&temporary);
-        return Err(format!("Unable to publish completed Program AVI: {error}"));
+        return Err(format!("Unable to publish completed Program video: {error}"));
     }
     Ok(ContinuousProgramReport {
-        id, path: final_path.to_string_lossy().into_owned(), format: "avi",
-        bytes, duration_seconds: seconds, requested_max_seconds: seconds,
+        id, path: final_path.to_string_lossy().into_owned(), format: extension,
+        bytes, duration_seconds: actual_duration, requested_max_seconds: seconds,
         frame_count: total_frames, width: profile.width, height: profile.height, fps: profile.fps,
         profile: profile.label,
-        display_count: ids.len(), elapsed_ms,
+        display_count: ids.len(), elapsed_ms, finalization_ms, audio_track_verified: false,
         measured_sampling_fps: if elapsed_ms == 0 { 0.0 }
             else { f64::from(total_frames) * 1000.0 / elapsed_ms as f64 },
         source_frames_received: received,
@@ -250,6 +334,22 @@ fn capture_to_dir(
 #[tauri::command]
 pub async fn capture_continuous_program_avi(
     app: tauri::AppHandle, display_ids: Vec<usize>, seconds: u32, profile: String,
+) -> Result<ContinuousProgramReport, String> {
+    capture_continuous_program(app, display_ids, seconds, profile, ProgramFormat::Avi).await
+}
+
+#[tauri::command]
+pub async fn capture_continuous_program_mp4(
+    app: tauri::AppHandle, display_ids: Vec<usize>, seconds: u32, profile: String,
+) -> Result<ContinuousProgramReport, String> {
+    #[cfg(target_os = "macos")]
+    { capture_continuous_program(app, display_ids, seconds, profile, ProgramFormat::Mp4).await }
+    #[cfg(not(target_os = "macos"))]
+    { let _ = (app, display_ids, seconds, profile); Err("Composed H.264 MP4 is a macOS-only experimental test".into()) }
+}
+
+async fn capture_continuous_program(
+    app: tauri::AppHandle, display_ids: Vec<usize>, seconds: u32, profile: String, format: ProgramFormat,
 ) -> Result<ContinuousProgramReport, String> {
     let selected_profile = validate_request(&display_ids, seconds, &profile)?;
     #[cfg(any(target_os = "windows", target_os = "macos"))]
@@ -266,13 +366,13 @@ pub async fn capture_continuous_program_avi(
         };
         tauri::async_runtime::spawn_blocking(move || {
             let _guard = CaptureLock;
-            capture_to_dir(directory, display_ids, seconds, selected_profile)
+            capture_to_dir(directory, display_ids, seconds, selected_profile, format)
         }).await.map_err(|error| format!("Continuous Program capture worker stopped: {error}"))?
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
-        let _ = (app, display_ids, selected_profile);
-        Err("Continuous Program AVI capture requires a Mac or Windows desktop build".into())
+        let _ = (app, display_ids, selected_profile, format);
+        Err("Continuous Program video capture requires a Mac or Windows desktop build".into())
     }
 }
 

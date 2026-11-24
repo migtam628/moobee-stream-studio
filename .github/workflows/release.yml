@@ -154,6 +154,7 @@ jobs:
           cargo test --lib scene_compositor::tests
           cargo test --lib program_test_avi::tests
           cargo test --lib program_continuous_avi::tests
+          cargo test --lib program_mp4_sink::tests
       - name: Build desktop installer
         uses: tauri-apps/tauri-action@v1
         env:
