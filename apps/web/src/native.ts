@@ -237,8 +237,20 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
     const mp4 = path.endsWith('-mp4')
     if (body.webcam !== undefined && typeof body.webcam !== 'boolean') throw new Error('Invalid webcam selection')
     if (body.webcam && (!mp4 || ids.length > 3)) throw new Error('Webcam PiP requires macOS MP4 and one to three displays')
+    if (body.microphone !== undefined && typeof body.microphone !== 'boolean') throw new Error('Invalid microphone selection')
+    if (body.microphone && !mp4) throw new Error('Microphone AAC requires macOS MP4')
+    const micGain = body.micGain ?? 1
+    if (typeof micGain !== 'number' || !Number.isFinite(micGain) || micGain < 0 || micGain > 2) throw new Error('Invalid microphone gain')
+    if (body.overlay !== undefined && body.overlay !== null) {
+      const o = body.overlay as { width: number; height: number; rgbaBase64: string }
+      if (typeof o !== 'object' || !Number.isInteger(o.width) || !Number.isInteger(o.height) ||
+          o.width < 1 || o.width > 480 || o.height < 1 || o.height > 270 ||
+          typeof o.rgbaBase64 !== 'string' || o.rgbaBase64.length !== Math.ceil(o.width * o.height * 4 / 3) * 4) {
+        throw new Error('Invalid bounded graphic overlay')
+      }
+    }
     return await invoke(mp4 ? 'capture_continuous_program_mp4' : 'capture_continuous_program_avi', {
-      displayIds: ids, seconds: body.seconds, profile: body.profile, layout: validateSceneLayout(body.layout), ...(mp4 ? { webcam: body.webcam === true } : {})
+      displayIds: ids, seconds: body.seconds, profile: body.profile, layout: validateSceneLayout(body.layout), overlay: body.overlay ?? null, ...(mp4 ? { webcam: body.webcam === true, microphone: body.microphone === true, micGain } : {})
     })
   }
   if (path === '/clips/capture-program-test-avi') {
