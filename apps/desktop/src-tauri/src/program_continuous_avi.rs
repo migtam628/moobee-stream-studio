@@ -294,6 +294,34 @@ mod tests {
         assert!(validate_request(&[0], 3, "1080p60").is_err());
         assert_eq!(validate_request(&[0], 4, "baseline").unwrap().fps, 10);
     }
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    #[test]
+    fn high_detail_profile_composes_and_encodes_real_720p_jpeg_frames() {
+        use image::{codecs::jpeg::JpegEncoder, DynamicImage, Rgba, RgbaImage};
+        let profile = validate_request(&[0, 1], 4, "720p15").unwrap();
+        let red = RgbaImage::from_pixel(64, 64, Rgba([240, 10, 10, 255]));
+        let blue = RgbaImage::from_pixel(64, 64, Rgba([10, 10, 240, 255]));
+        let composed = crate::scene_compositor::composite_grid(
+            &[red, blue], profile.width, profile.height
+        ).unwrap();
+        assert_eq!(composed.dimensions(), (1280, 720));
+        assert!(composed.get_pixel(320, 360)[0] > 200);
+        assert!(composed.get_pixel(960, 360)[2] > 200);
+        let mut jpeg = Vec::new();
+        JpegEncoder::new_with_quality(&mut jpeg, 72)
+            .encode_image(&DynamicImage::ImageRgb8(
+                DynamicImage::ImageRgba8(composed).to_rgb8()
+            )).unwrap();
+        let decoded = image::load_from_memory(&jpeg).unwrap();
+        assert_eq!(decoded.dimensions(), (1280, 720));
+        let avi = crate::avi::encode_silent_mjpeg_avi(
+            &vec![jpeg; 4], profile.width, profile.height, profile.fps
+        ).unwrap();
+        assert_eq!(&avi[0..4], b"RIFF");
+        assert_eq!(&avi[8..12], b"AVI ");
+        assert!(avi.windows(4).any(|window| window == b"idx1"));
+    }
+
     #[test]
     fn frames_have_bounded_pixel_budget() {
         assert_eq!(validate_frame_geometry(1920, 1080, 0).unwrap(), 2_073_600);
