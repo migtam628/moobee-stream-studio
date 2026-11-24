@@ -58,7 +58,7 @@ pub(crate) fn composite_layout(frames: &[RgbaImage], width: u32, height: u32, la
             } else {
                 // Later sources are opaque inset layers in source-list order.
                 // Use at most 3 stacked insets, wholly inside the canvas.
-                let margin = (height / 40).max(1);
+                let margin = (height / 40).min(width / 10).max(1);
                 let w = (width / 3).max(1);
                 let h = ((height - margin * 4) / 3).min((w * 9 / 16).max(1)).max(1);
                 (width - w - margin, height - margin - i as u32 * h - (i as u32 - 1) * margin, w, h)
@@ -145,7 +145,8 @@ mod tests {
         assert_eq!(canvas.get_pixel(520, 180)[1], 250);
         // Exercise smallest allowed dimensions and all four layers.
         let tiny = RgbaImage::from_pixel(1, 1, Rgba([1,2,3,255]));
-        assert!(composite_layout(&[tiny.clone(),tiny.clone(),tiny.clone(),tiny],16,16,SceneLayout::PictureInPicture).is_ok());
+        assert!(composite_layout(&[tiny.clone(),tiny.clone(),tiny.clone(),tiny.clone()],16,16,SceneLayout::PictureInPicture).is_ok());
+        assert!(composite_layout(&[tiny.clone(),tiny.clone(),tiny.clone(),tiny],16,1080,SceneLayout::PictureInPicture).is_ok());
     }
 
 
