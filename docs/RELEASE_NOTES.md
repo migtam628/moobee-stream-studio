@@ -1,3 +1,24 @@
+# MooBee Stream Studio v0.3.9-alpha.10 — Native Capture Test + Reliable Desktop Distribution
+
+**Experimental hardware-test alpha. Not a beta, not full Program recording, and not a livestream broadcaster.**
+
+## Changes since alpha.8
+
+- Includes alpha.9's continuous native multi-display Program input diagnostic: one to four selected Program displays feed an experimental **silent MJPEG AVI** using frame receivers, with arrival-time/frame-repeat/late-frame metrics. Output remains bounded to 2–8 seconds, 640×360, nominal 10 fps, and requires real Mac/Windows playback verification.
+- Preserves macOS 14+ experimental H.264 direct-display MP4 and a separate screenshot-sampled Program AVI test. Neither records the full saved scene with webcam, overlays, system/microphone audio mix, or stream output.
+- Improves Android debug APK CI caching and retries for Maven Central HTTP 429. If Maven dependencies remain rate-limited, the four desktop installers and web bundle may still publish **only as a partial experimental alpha**: the release manifest names Android as unavailable and release notes explicitly disclose the missing APK. Every other Android failure still prevents release publication.
+- No automatic in-app unsigned updates, change to native production Record/Go Live gating, streaming credentials, or claims of full beta hardware acceptance.
+
+## Required hardware acceptance
+
+Install the correct Mac or Windows test package and open Studio. Select a Program scene with two enabled displays and a different Studio Preview. Capture a short **Continuous-source Program AVI**, compare it with the sampled Program AVI, and verify the resulting source layout, motion, actual capture duration, playback and seeking in VLC. Verify the full AVI decodes with FFmpeg and the recorded timing/late-frame metrics are not mistaken for an encoded synchronized video clock.
+
+On supported macOS hosts, also test the separate direct-screen MP4, short and early-stop recording, and independently verify actual audio and video tracks. Do not assume a saved file proves playback or audible audio.
+
+Track only sanitized evidence in [hardware issue #14](https://github.com/migtam628/moobee-stream-studio/issues/14). The [beta acceptance tracker #18](https://github.com/migtam628/moobee-stream-studio/issues/18) still requires timestamp-aware Program video, webcam/overlays, synchronized microphone/system audio, native Windows H.264/AAC, secure RTMPS and signed/tested installers.
+
+---
+
 # MooBee Stream Studio v0.3.9-alpha.9 — Continuous Native Program Input Diagnostics
 
 **Experimental hardware-test alpha. Not beta, not full Program recording, and not a functioning livestream broadcaster.**
