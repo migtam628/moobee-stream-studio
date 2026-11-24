@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { CheckCircle2, Copy, Film, FolderOpen, Monitor, Square, Video } from 'lucide-react'
 import { request, runningInTauri } from './api'
 import { isScreenCapturePermissionDenied } from './capturePermission'
-import { singleProgramDisplayId, programTestDisplayIds } from './programDisplay'
+import { singleProgramDisplayId, programTestDisplayIds, programTestLayout } from './programDisplay'
 
 type Display = { id: number; name: string; width: number; height: number }
 type Availability = { supported: boolean; requiredMacos: string; osVersion?: string | null; reason?: string; microphoneSupported?: boolean; engine?: string }
@@ -168,7 +168,7 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
       const result = await request<CapturedFile>(mode === 'mp4'
         ? '/clips/capture-program-continuous-mp4'
         : mode === 'continuous' ? '/clips/capture-program-continuous-avi' : '/clips/capture-program-test-avi', {
-        displayIds, seconds: programAviDuration,
+        displayIds, seconds: programAviDuration, layout: programTestLayout(collection),
         ...(mode !== 'sampled' ? { profile: continuousProfile } : {})
       })
       setSaved(result)
