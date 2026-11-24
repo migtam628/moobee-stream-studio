@@ -313,7 +313,7 @@ mod tests {
                 DynamicImage::ImageRgba8(composed).to_rgb8()
             )).unwrap();
         let decoded = image::load_from_memory(&jpeg).unwrap();
-        assert_eq!(decoded.dimensions(), (1280, 720));
+        assert_eq!((decoded.width(), decoded.height()), (1280, 720));
         let avi = crate::avi::encode_silent_mjpeg_avi(
             &vec![jpeg; 4], profile.width, profile.height, profile.fps
         ).unwrap();
