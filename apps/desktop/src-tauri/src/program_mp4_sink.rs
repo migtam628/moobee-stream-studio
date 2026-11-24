@@ -57,6 +57,13 @@ pub(crate) fn validate_finished(path: &Path) -> Result<(u64, f64), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn rejects_unsupported_dimensions_before_opening_output() {
+        let path = std::env::temp_dir().join(format!("moobee-invalid-{}.mp4", uuid::Uuid::new_v4()));
+        assert!(ProgramMp4Sink::new(&path, 1920, 1080, 60).is_err());
+        assert!(!path.exists());
+    }
+
     // Requires a functioning Apple H.264 encoder. Run explicitly on a real Mac:
     // cargo test --lib program_mp4_sink::tests -- --ignored
     #[test]
@@ -67,9 +74,13 @@ mod tests {
         let path = dir.join("test.mp4");
         let result = (|| -> Result<(), String> {
             let mut sink = ProgramMp4Sink::new(&path, 640, 360, 10)?;
-            for frame in 0..20 {
-                let red = image::RgbaImage::from_pixel(64, 64, image::Rgba([200, frame * 5, 0, 255]));
-                let blue = image::RgbaImage::from_pixel(64, 64, image::Rgba([0, 0, 240, 255]));
+            for frame in 0u8..20 {
+                let red = image::RgbaImage::from_fn(320, 180, |x, y| {
+                    image::Rgba([((x + u32::from(frame) * 7) % 256) as u8, (y % 256) as u8, 30, 255])
+                });
+                let blue = image::RgbaImage::from_fn(320, 180, |x, y| {
+                    image::Rgba([20, ((y + u32::from(frame) * 9) % 256) as u8, (x % 256) as u8, 255])
+                });
                 let canvas = crate::scene_compositor::composite_grid(&[red, blue], 640, 360)?;
                 sink.append(canvas.as_raw())?;
             }
