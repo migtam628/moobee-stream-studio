@@ -176,7 +176,7 @@ impl FrameSink {
 
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 fn capture_to_dir(
-    directory: PathBuf, ids: Vec<usize>, seconds: u32, profile: EncodingProfile, format: ProgramFormat,
+    directory: PathBuf, ids: Vec<usize>, seconds: u32, profile: EncodingProfile, format: ProgramFormat, layout: crate::scene_compositor::SceneLayout,
 ) -> Result<ContinuousProgramReport, String> {
     let available = xcap::Monitor::all()
         .map_err(|error| format!("Unable to enumerate Program displays: {error}"))?;
@@ -264,7 +264,7 @@ fn capture_to_dir(
             if last_received.iter().any(|last| now.duration_since(*last).as_millis() as u64 > MAX_STALE_MS) {
                 return Err("Program video input stalled for over 1.5 seconds; incomplete file discarded".into());
             }
-            let composed = crate::scene_compositor::composite_grid(&latest, profile.width, profile.height)?;
+            let composed = crate::scene_compositor::composite_layout(&latest, profile.width, profile.height, layout)?;
             writer.append(composed)?;
             if Instant::now() > target + Duration::from_millis(1000 / u64::from(profile.fps)) {
                 late_frames = late_frames.saturating_add(1);
@@ -333,25 +333,26 @@ fn capture_to_dir(
 
 #[tauri::command]
 pub async fn capture_continuous_program_avi(
-    app: tauri::AppHandle, display_ids: Vec<usize>, seconds: u32, profile: String,
+    app: tauri::AppHandle, display_ids: Vec<usize>, seconds: u32, profile: String, layout: Option<String>,
 ) -> Result<ContinuousProgramReport, String> {
-    capture_continuous_program(app, display_ids, seconds, profile, ProgramFormat::Avi).await
+    capture_continuous_program(app, display_ids, seconds, profile, ProgramFormat::Avi, layout).await
 }
 
 #[tauri::command]
 pub async fn capture_continuous_program_mp4(
-    app: tauri::AppHandle, display_ids: Vec<usize>, seconds: u32, profile: String,
+    app: tauri::AppHandle, display_ids: Vec<usize>, seconds: u32, profile: String, layout: Option<String>,
 ) -> Result<ContinuousProgramReport, String> {
     #[cfg(target_os = "macos")]
-    { capture_continuous_program(app, display_ids, seconds, profile, ProgramFormat::Mp4).await }
+    { capture_continuous_program(app, display_ids, seconds, profile, ProgramFormat::Mp4, layout).await }
     #[cfg(not(target_os = "macos"))]
     { let _ = (app, display_ids, seconds, profile); Err("Composed H.264 MP4 is a macOS-only experimental test".into()) }
 }
 
 async fn capture_continuous_program(
-    app: tauri::AppHandle, display_ids: Vec<usize>, seconds: u32, profile: String, format: ProgramFormat,
+    app: tauri::AppHandle, display_ids: Vec<usize>, seconds: u32, profile: String, format: ProgramFormat, layout: Option<String>,
 ) -> Result<ContinuousProgramReport, String> {
     let selected_profile = validate_request(&display_ids, seconds, &profile)?;
+    let layout = crate::scene_compositor::SceneLayout::parse(layout.as_deref())?;
     #[cfg(any(target_os = "windows", target_os = "macos"))]
     {
         use crate::clip::{CaptureLock, CAPTURE_BUSY};
@@ -366,7 +367,7 @@ async fn capture_continuous_program(
         };
         tauri::async_runtime::spawn_blocking(move || {
             let _guard = CaptureLock;
-            capture_to_dir(directory, display_ids, seconds, selected_profile, format)
+            capture_to_dir(directory, display_ids, seconds, selected_profile, format, layout)
         }).await.map_err(|error| format!("Continuous Program capture worker stopped: {error}"))?
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]

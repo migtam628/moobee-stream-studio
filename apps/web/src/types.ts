@@ -9,6 +9,7 @@ export type StudioStatus = {
   previewScene: string
   studioMode: boolean
   scenes: string[]
+  sceneLayout?: 'grid' | 'pip'
   sources: { id: number; name: string; enabled: boolean; kind: string; deviceId?: string }[]
   inputs: { name: string; kind: string; muted: boolean; volume: number }[]
   streaming: boolean

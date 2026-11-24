@@ -7,10 +7,18 @@
  * recorder, NOT a scene compositor. Multiple sources must not be silently
  * reduced to one.
  */
+export type SceneLayout = 'grid' | 'pip'
+
+export function validateSceneLayout(value: unknown): SceneLayout {
+  if (value === undefined || value === 'grid') return 'grid'
+  if (value === 'pip') return 'pip'
+  throw new Error('Unsupported native scene layout')
+}
+
 export type MinimalSceneCollection = {
   currentScene: string
   previewScene?: string
-  scenes: { name: string; sources: {
+  scenes: { name: string; layout?: SceneLayout; sources: {
     kind: string; deviceId: string; enabled: boolean
   }[] }[]
 }
@@ -76,4 +84,11 @@ export function programTestDisplayIds(collection: unknown): number[] {
     throw new Error('A display may appear only once in the composed AVI test')
   }
   return ids
+}
+
+/** The layout belongs to Program, never the independently edited Preview. */
+export function programTestLayout(collection: unknown): SceneLayout {
+  programTestDisplayIds(collection)
+  const state = collection as MinimalSceneCollection
+  return validateSceneLayout(state.scenes.find(scene => scene.name === state.currentScene)?.layout)
 }

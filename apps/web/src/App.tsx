@@ -153,8 +153,20 @@ function SourcesPanel({ status, perform, pending }: { status: StudioStatus; perf
     </select>
     <button className="secondary-button" disabled={pending || !status.captureAvailable || !selected || !runningInTauri()} title="Add selected display to the selected scene" onClick={() => void addSource()}>+ Add</button>
   </div>}>
-    <div className="rows-scroll">{status.sources.length ? status.sources.map(source => <div className="source-row" key={source.id}>
+    <div className="clip-form">
+      <label>Scene layout
+        <select aria-label="Scene layout" value={status.sceneLayout ?? 'grid'} disabled={pending || isStaticPreview || !status.connected}
+          onChange={event => void perform('/studio/action', { action: 'sceneLayout', layout: event.target.value })}>
+          <option value="grid">Grid · equal display tiles</option>
+          <option value="pip">Picture-in-picture · first source primary</option>
+        </select>
+      </label>
+      <small className="help-text">Reorder sources to choose the primary display and inset order. Applies to the selected scene's still preview and new native Program test recordings. Webcam is not supported yet.</small>
+    </div>
+    <div className="rows-scroll">{status.sources.length ? status.sources.map((source, index) => <div className="source-row" key={source.id}>
       <Video size={16}/><span className="truncate">{source.name}</span>
+      <button className="icon-button" disabled={pending || isStaticPreview || index === 0} aria-label={`Move ${source.name} up`} title="Move source up" onClick={() => void perform('/studio/action', { action: 'moveSource', sceneItemId: source.id, direction: 'up' })}>↑</button>
+      <button className="icon-button" disabled={pending || isStaticPreview || index === status.sources.length - 1} aria-label={`Move ${source.name} down`} title="Move source down" onClick={() => void perform('/studio/action', { action: 'moveSource', sceneItemId: source.id, direction: 'down' })}>↓</button>
       <button disabled={pending || isStaticPreview} title={source.enabled ? 'Hide source' : 'Show source'} className="icon-button" onClick={() => void perform('/studio/action', { action: 'source', sceneItemId: source.id, enabled: !source.enabled })}>{source.enabled ? <Eye size={18}/> : <EyeOff size={18}/>}</button>
       <button disabled={pending || isStaticPreview} title={`Remove ${source.name}`} aria-label={`Remove ${source.name}`} className="icon-button" onClick={() => {
         if (window.confirm(`Remove source "${source.name}" from this scene?`)) void perform('/studio/action', { action: 'removeSource', sceneItemId: source.id })

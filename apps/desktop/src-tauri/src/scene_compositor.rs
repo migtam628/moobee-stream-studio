@@ -21,35 +21,67 @@ pub(crate) fn validate_ids(ids: &[usize]) -> Result<(), String> {
     Ok(())
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SceneLayout { Grid, PictureInPicture }
+
+impl SceneLayout {
+    pub(crate) fn parse(value: Option<&str>) -> Result<Self, String> {
+        match value.unwrap_or("grid") {
+            "grid" => Ok(Self::Grid),
+            "pip" => Ok(Self::PictureInPicture),
+            _ => Err("Unsupported native scene layout".into()),
+        }
+    }
+}
+
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 pub(crate) fn composite_grid(frames: &[RgbaImage], width: u32, height: u32) -> Result<RgbaImage, String> {
+    composite_layout(frames, width, height, SceneLayout::Grid)
+}
+
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+pub(crate) fn composite_layout(frames: &[RgbaImage], width: u32, height: u32, layout: SceneLayout) -> Result<RgbaImage, String> {
     if frames.is_empty() || frames.len() > MAX_PREVIEW_SOURCES ||
        width < 16 || height < 16 || width > 1920 || height > 1080 {
-        return Err("Invalid scene preview dimensions or source count".into());
+        return Err("Invalid scene dimensions or source count".into());
     }
     if frames.iter().any(|frame| frame.width() == 0 || frame.height() == 0) {
-        return Err("Scene preview source is empty".into());
+        return Err("Scene source is empty".into());
     }
+    let mut canvas = RgbaImage::from_pixel(width, height, Rgba([13, 15, 26, 255]));
     let columns = if frames.len() == 1 { 1u32 } else { 2u32 };
     let rows = if frames.len() <= 2 { 1u32 } else { 2u32 };
-    let tile_width = width / columns;
-    let tile_height = height / rows;
-    let mut canvas = RgbaImage::from_pixel(width, height, Rgba([13, 15, 26, 255]));
     for (i, frame) in frames.iter().enumerate() {
-        let col = i as u32 % columns;
-        let row = i as u32 / columns;
-        let scale = f64::min(
-            f64::from(tile_width) / f64::from(frame.width()),
-            f64::from(tile_height) / f64::from(frame.height()),
-        );
-        let scaled_width = (f64::from(frame.width()) * scale).round().max(1.0) as u32;
-        let scaled_height = (f64::from(frame.height()) * scale).round().max(1.0) as u32;
-        let scaled = imageops::resize(
-            frame, scaled_width.min(tile_width), scaled_height.min(tile_height),
-            imageops::FilterType::Triangle,
-        );
-        let x = col * tile_width + (tile_width - scaled.width()) / 2;
-        let y = row * tile_height + (tile_height - scaled.height()) / 2;
+        let (left, top, tile_width, tile_height) = if layout == SceneLayout::PictureInPicture {
+            if i == 0 {
+                (0, 0, width, height)
+            } else {
+                // Later sources are opaque inset layers in source-list order.
+                // Use at most 3 stacked insets, wholly inside the canvas.
+                let margin = (height / 40).min(width / 10).max(1);
+                let w = (width / 3).max(1);
+                let h = ((height - margin * 4) / 3).min((w * 9 / 16).max(1)).max(1);
+                (width - w - margin, height - margin - i as u32 * h - (i as u32 - 1) * margin, w, h)
+            }
+        } else {
+            let w = width / columns;
+            let h = height / rows;
+            (i as u32 % columns * w, i as u32 / columns * h, w, h)
+        };
+        let scale = f64::min(f64::from(tile_width) / f64::from(frame.width()),
+            f64::from(tile_height) / f64::from(frame.height()));
+        let w = (f64::from(frame.width()) * scale).round().max(1.0) as u32;
+        let h = (f64::from(frame.height()) * scale).round().max(1.0) as u32;
+        let scaled = imageops::resize(frame, w.min(tile_width), h.min(tile_height), imageops::FilterType::Triangle);
+        if layout == SceneLayout::PictureInPicture && i > 0 {
+            for y in top..top + tile_height {
+                for x in left..left + tile_width {
+                    canvas.put_pixel(x, y, Rgba([13, 15, 26, 255]));
+                }
+            }
+        }
+        let x = left + (tile_width - scaled.width()) / 2;
+        let y = top + (tile_height - scaled.height()) / 2;
         imageops::overlay(&mut canvas, &scaled, i64::from(x), i64::from(y));
     }
     Ok(canvas)
@@ -58,8 +90,9 @@ pub(crate) fn composite_grid(frames: &[RgbaImage], width: u32, height: u32) -> R
 /// Return a PNG data URL of the selected scene's captured displays.
 /// Only integer monitor-list indices are accepted, never arbitrary file paths.
 #[tauri::command]
-pub async fn capture_scene_snapshot(display_ids: Vec<usize>) -> Result<String, String> {
+pub async fn capture_scene_snapshot(display_ids: Vec<usize>, layout: Option<String>) -> Result<String, String> {
     validate_ids(&display_ids)?;
+    let layout = SceneLayout::parse(layout.as_deref())?;
     #[cfg(any(target_os = "windows", target_os = "macos"))]
     {
         tauri::async_runtime::spawn_blocking(move || {
@@ -72,7 +105,7 @@ pub async fn capture_scene_snapshot(display_ids: Vec<usize>) -> Result<String, S
             frames.push(monitor.capture_image()
                 .map_err(|error| format!("Screen Recording access or capture failed: {error}"))?);
         }
-        let frame = composite_grid(&frames, OUTPUT_WIDTH, OUTPUT_HEIGHT)?;
+        let frame = composite_layout(&frames, OUTPUT_WIDTH, OUTPUT_HEIGHT, layout)?;
         let mut buffer = std::io::Cursor::new(Vec::new());
         image::DynamicImage::ImageRgba8(frame)
             .write_to(&mut buffer, ImageFormat::Png)
@@ -90,7 +123,32 @@ pub async fn capture_scene_snapshot(display_ids: Vec<usize>) -> Result<String, S
 
 #[cfg(test)]
 mod tests {
-    use super::validate_ids;
+    use super::{validate_ids, SceneLayout};
+    #[test]
+    fn rejects_invalid_layout() {
+        assert_eq!(SceneLayout::parse(None).unwrap(), SceneLayout::Grid);
+        assert_eq!(SceneLayout::parse(Some("pip")).unwrap(), SceneLayout::PictureInPicture);
+        assert!(SceneLayout::parse(Some("unknown")).is_err());
+    }
+
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    #[test]
+    fn pip_renders_ordered_primary_and_insets_without_distortion() {
+        use super::composite_layout;
+        use image::{Rgba, RgbaImage};
+        let red = RgbaImage::from_pixel(160, 90, Rgba([250,0,0,255]));
+        let blue = RgbaImage::from_pixel(160, 90, Rgba([0,0,250,255]));
+        let green = RgbaImage::from_pixel(160, 90, Rgba([0,250,0,255]));
+        let canvas = composite_layout(&[red, blue, green], 640, 360, SceneLayout::PictureInPicture).unwrap();
+        assert_eq!(canvas.get_pixel(100, 180)[0], 250);
+        assert_eq!(canvas.get_pixel(520, 300)[2], 250);
+        assert_eq!(canvas.get_pixel(520, 180)[1], 250);
+        // Exercise smallest allowed dimensions and all four layers.
+        let tiny = RgbaImage::from_pixel(1, 1, Rgba([1,2,3,255]));
+        assert!(composite_layout(&[tiny.clone(),tiny.clone(),tiny.clone(),tiny.clone()],16,16,SceneLayout::PictureInPicture).is_ok());
+        assert!(composite_layout(&[tiny.clone(),tiny.clone(),tiny.clone(),tiny],16,1080,SceneLayout::PictureInPicture).is_ok());
+    }
+
 
     #[test]
     fn rejects_empty_too_many_and_invalid_display_ids() {
