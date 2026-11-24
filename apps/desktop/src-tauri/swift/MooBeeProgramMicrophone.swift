@@ -22,7 +22,7 @@ private final class ProgramMicrophone {
     // The default input device is used only after explicit user consent.
     // Resample to mono 48kHz, then duplicate to stereo. No device clock
     // synchronization is claimed; latency and drift require hardware QA.
-    func start() throws {
+    static func authorize() throws {
         if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
             let done = DispatchSemaphore(value: 0)
             AVCaptureDevice.requestAccess(for: .audio) { _ in done.signal() }
@@ -31,6 +31,9 @@ private final class ProgramMicrophone {
         guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else {
             throw micError("Microphone denied; enable MooBee in macOS Privacy & Security > Microphone")
         }
+    }
+    func start() throws {
+        try Self.authorize()
         let input = engine.inputNode
         let source = input.outputFormat(forBus: 0)
         guard source.sampleRate > 0, source.channelCount > 0,
@@ -100,6 +103,11 @@ private final class ProgramMicrophone {
     }
 }
 
+@_cdecl("moobee_program_mic_authorize")
+public func moobee_program_mic_authorize(_ error: UnsafeMutablePointer<CChar>?, _ capacity: Int32) -> Int32 {
+    do { try ProgramMicrophone.authorize(); return 0 }
+    catch let cause { micReport(cause, error, capacity); return -1 }
+}
 @_cdecl("moobee_program_mic_create")
 public func moobee_program_mic_create(_ error: UnsafeMutablePointer<CChar>?, _ capacity: Int32) -> UnsafeMutableRawPointer? {
     let mic = ProgramMicrophone()
