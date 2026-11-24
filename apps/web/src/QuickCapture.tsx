@@ -6,6 +6,7 @@ import { singleProgramDisplayId, programTestDisplayIds, programTestLayout } from
 
 type Display = { id: number; name: string; width: number; height: number }
 type Availability = { supported: boolean; requiredMacos: string; osVersion?: string | null; reason?: string; microphoneSupported?: boolean; engine?: string }
+type GraphicOverlay = { width: number; height: number; rgbaBase64: string }
 type CapturedFile = {
   id: string
   path: string
@@ -17,12 +18,21 @@ type CapturedFile = {
   displayCount?: number
   elapsedMs?: number
   finalizationMs?: number
+  webcamIncluded?: boolean
+  webcamFrames?: number
+  webcamRepeatedSlots?: number
+  plannedAudioSamples48khz?: number
+  microphoneIncluded?: boolean
+  audioSamplesWritten?: number
+  audioPeak?: number
+  audioClippedSamples?: number
+  overlayIncluded?: boolean
   measuredSamplingFps?: number
   sourceFramesReceived?: number[]
   repeatedSourceSlots?: number[]
   lateOutputFrames?: number
   maxSourceArrivalSkewMs?: number
-  profile?: 'baseline' | '720p15'
+  profile?: 'baseline' | '720p15' | '1080p30'
   width?: number
   height?: number
   fps?: number
@@ -44,7 +54,13 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
   const [mp4AvailabilityReason, setMp4AvailabilityReason] = useState('Native MP4 availability has not been checked')
   const [duration, setDuration] = useState(6)
   const [programAviDuration, setProgramAviDuration] = useState(4)
-  const [continuousProfile, setContinuousProfile] = useState<'baseline' | '720p15'>('baseline')
+  const [continuousProfile, setContinuousProfile] = useState<'baseline' | '720p15' | '1080p30'>('baseline')
+  const [programWebcam, setProgramWebcam] = useState(false)
+  const [programMic, setProgramMic] = useState(false)
+  const [micGain, setMicGain] = useState(1)
+  const [graphic, setGraphic] = useState<GraphicOverlay | null>(null)
+  const [graphicName, setGraphicName] = useState('')
+  const [graphicLoading, setGraphicLoading] = useState(false)
   const [systemAudio, setSystemAudio] = useState(false)
   const [microphone, setMicrophone] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -152,8 +168,34 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
     }
   }
 
+  async function loadProgramGraphic(file?: File) {
+    if (!file) return
+    setGraphicLoading(true); setGraphic(null); setGraphicName(''); setError('')
+    try {
+      if (file.type !== 'image/png' || file.size > 2 * 1024 * 1024) throw new Error('Choose a PNG of 2 MB or less')
+      const image = await createImageBitmap(file)
+      try {
+        if (!image.width || !image.height || image.width > 4096 || image.height > 4096) throw new Error('PNG dimensions exceed 4096 pixels')
+        const scale = Math.min(1, 480 / image.width, 270 / image.height)
+        const width = Math.max(1, Math.round(image.width * scale))
+        const height = Math.max(1, Math.round(image.height * scale))
+        const canvas = document.createElement('canvas')
+        canvas.width = width; canvas.height = height
+        const context = canvas.getContext('2d')
+        if (!context) throw new Error('Cannot prepare overlay')
+        context.drawImage(image, 0, 0, width, height)
+        const pixels = context.getImageData(0, 0, width, height).data
+        let binary = ''
+        for (let i = 0; i < pixels.length; i += 8192) binary += String.fromCharCode(...pixels.subarray(i, i + 8192))
+        setGraphic({ width, height, rgbaBase64: btoa(binary) })
+        setGraphicName(file.name)
+      } finally { image.close() }
+    } catch (cause) { setError('Graphic import failed: ' + (cause as Error).message) }
+    finally { setGraphicLoading(false) }
+  }
+
   async function captureProgramVideoTest(mode: 'sampled' | 'continuous' | 'mp4' = 'sampled') {
-    if (!supportedDesktop || loading || busy || (mode === 'mp4' && !mac)) return
+    if (!supportedDesktop || loading || busy || graphicLoading || (mode === 'mp4' && !mac)) return
     setBusy(true)
     setCaptureMode('program')
     setStopRequested(false)
@@ -169,7 +211,8 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
         ? '/clips/capture-program-continuous-mp4'
         : mode === 'continuous' ? '/clips/capture-program-continuous-avi' : '/clips/capture-program-test-avi', {
         displayIds, seconds: programAviDuration, layout: programTestLayout(collection),
-        ...(mode !== 'sampled' ? { profile: continuousProfile } : {})
+        ...(mode !== 'sampled' ? { profile: continuousProfile, overlay: graphic } : {}),
+        ...(mode === 'mp4' ? { webcam: programWebcam, microphone: programMic, micGain } : {})
       })
       setSaved(result)
       await refreshSavedClips()
@@ -244,29 +287,37 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
       <span className="quick-capture-format"><Video size={15}/>{formatLabel}</span>
     </div>
     {supportedDesktop && <div className="clip-mp4-options">
-      <p><strong>Experimental Program display composition</strong> — combines up to four enabled display sources from the current Program scene (not Studio Preview). Short silent AVI tests, plus composed H.264 MP4 on Mac; not production Program recording or a live stream.</p>
+      <p><strong>Experimental Program display composition</strong> — combines up to four enabled display sources from the current Program scene (not Studio Preview). Short silent AVI tests, plus composed H.264/AAC MP4 on Mac; not production Program recording or a live stream.</p>
       <div className="quick-capture-options">
         <label>Test length
           <select aria-label="Composed Program video test duration" value={programAviDuration} disabled={busy}
             onChange={event => setProgramAviDuration(Number(event.target.value))}>
-            {[2, 4, 6, 8].map(seconds => <option key={seconds} value={seconds}>{seconds} seconds</option>)}
+            {(continuousProfile === '1080p30' ? [2, 4] : [2, 4, 6, 8]).map(seconds => <option key={seconds} value={seconds}>{seconds} seconds</option>)}
           </select>
         </label>
         <label>Continuous test profile
           <select aria-label="Continuous Program test profile" value={continuousProfile} disabled={busy}
-            onChange={event => setContinuousProfile(event.target.value as 'baseline' | '720p15')}>
+            onChange={event => { const profile = event.target.value as 'baseline' | '720p15' | '1080p30'; setContinuousProfile(profile); if (profile === '1080p30' && programAviDuration > 4) setProgramAviDuration(4) }}>
             <option value="baseline">Baseline · 640×360 / 10 fps</option>
             <option value="720p15">Higher detail · 1280×720 / 15 fps</option>
+            {mac && <option value="1080p30">Full HD · 1920×1080 / 30 fps (Mac MP4, max 4s)</option>}
           </select>
         </label>
         <button type="button" className="secondary-button" disabled={busy || loading}
           onClick={() => void captureProgramVideoTest('sampled')}><Video size={16}/>{busy ? 'Native capture in progress…' : 'Sampled Program AVI'}</button>
-        <button type="button" className="secondary-button" disabled={busy || loading}
+        <button type="button" className="secondary-button" disabled={busy || loading || graphicLoading || continuousProfile === '1080p30'}
           onClick={() => void captureProgramVideoTest('continuous')}><Video size={16}/>{busy ? 'Native capture in progress…' : 'Continuous-source Program AVI'}</button>
-        {mac && <button type="button" className="secondary-button" disabled={busy || loading}
+        {mac && <label><input type="checkbox" checked={programWebcam} disabled={busy} onChange={e => setProgramWebcam(e.target.checked)}/> Default webcam in Mac MP4 (forces PiP, up to 3 displays)</label>}
+        {mac && <label className="quick-capture-check"><input type="checkbox" checked={programMic} disabled={busy} onChange={e => setProgramMic(e.target.checked)}/> Include default microphone (AAC test)</label>}
+        {mac && programMic && <label>Microphone gain <input type="range" min="0" max="2" step="0.1" value={micGain} disabled={busy} onChange={e => setMicGain(Number(e.target.value))}/>{Math.round(micGain*100)}%</label>}
+        <label>Static PNG overlay (continuous AVI / MP4)
+          <input type="file" accept="image/png" disabled={busy || graphicLoading} onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; void loadProgramGraphic(file) }}/>
+        </label>
+        {graphic && <button type="button" className="secondary-button" disabled={busy} onClick={() => { setGraphic(null); setGraphicName('') }}>Remove {graphicName}</button>}
+        {mac && <button type="button" className="secondary-button" disabled={busy || loading || graphicLoading}
           onClick={() => void captureProgramVideoTest('mp4')}><Video size={16}/>{busy ? 'Native capture in progress…' : 'Composed H.264 MP4 (Mac test)'}</button>}
       </div>
-      <small className="help-text">The sampled-screenshot test always produces 640×360/10fps AVI. The continuous native-frame input tests use the selected profile (up to 1280×720/15fps). The Mac MP4 path feeds the same composed frames into AVFoundation H.264 encoding; AVI uses MJPEG. All are silent diagnostics with a nominal output clock and may fall behind wall-clock time. No synchronized native capture PTS, camera, microphone, overlays, scene transitions or RTMPS.</small>
+      <small className="help-text">The sampled-screenshot test always produces 640×360/10fps AVI. The continuous native-frame input tests use the selected profile (up to 1280×720/15fps for AVI and nominal 1920×1080/30fps for Mac MP4). The Mac MP4 path feeds the same composed frames into AVFoundation H.264 encoding; AVI uses MJPEG. AVI stays silent; Mac MP4 can explicitly include the default webcam and default microphone (AAC). A static PNG overlay is supported in both continuous formats. Video and PCM sample slots share a nominal rational timeline; real-device latency, drift, audio playback, animated overlays, transitions and RTMPS remain unverified or unimplemented.</small>
     </div>}
     {useMp4 && <div className="quick-capture-options">
       <label className="quick-capture-check"><input type="checkbox" checked={systemAudio} disabled={busy}
@@ -312,7 +363,7 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
     {saved && <div className="clip-result" role="status">
       <CheckCircle2 size={18}/>
       <div>
-        <strong>Saved {saved.format.toUpperCase()} locally — playback{saved.format === 'mp4' && saved.displayCount === undefined ? ' and audio' : ''} not yet verified</strong>
+        <strong>Saved {saved.format.toUpperCase()} locally — playback{saved.format === 'mp4' && (saved.displayCount === undefined || saved.microphoneIncluded) ? ' and audio' : ''} not yet verified</strong>
         <small>
           {saved.durationSeconds !== null && Number.isFinite(saved.durationSeconds)
             ? saved.displayCount !== undefined && saved.format === 'avi'
@@ -330,6 +381,9 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
           {saved.elapsedMs !== undefined ? ` ${(saved.elapsedMs / 1000).toFixed(2)}s wall-clock capture` : ' elapsed time unknown'}.
           The nominal output clock can differ from wall-clock capture when frames arrive late.
         </p>}
+        {saved.overlayIncluded && <p className="help-text">Static graphic overlay included in output.</p>}
+        {saved.microphoneIncluded && <p className="help-text" role="status">AAC requested · {saved.audioSamplesWritten ?? 0} PCM frames supplied at 48 kHz · peak {Math.round((saved.audioPeak ?? 0)*100)}% · {saved.audioClippedSamples ?? 0} clipped samples. Confirm the AAC track and audible audio independently; capture timestamps and drift are not verified.</p>}
+        {saved.webcamIncluded && <p className="help-text" role="status">Webcam inset included · {saved.webcamFrames ?? 0} received frames · {saved.webcamRepeatedSlots ?? 0} repeated slots. Verify the actual clip.</p>}
         {saved.sourceFramesReceived && <p className="help-text" role="status">
           Continuous native frame input · received per source: {saved.sourceFramesReceived.join(', ')} ·
           repeated input slots: {saved.repeatedSourceSlots?.join(', ') ?? 'unknown'} ·
@@ -351,7 +405,7 @@ export default function QuickCapture({ openClips }: { openClips: () => void }) {
           </button>
         </div>
         <p className="help-text">{saved.displayCount !== undefined
-          ? 'This silent video is an experimental Program display composite, not live Program output. Open it in QuickTime (MP4) or VLC; check that all screens appear, verify motion, duration and seeking, and compare playback timeline with actual wall-clock capture.'
+          ? 'This video is an experimental Program composite, not live Program output. Open it in QuickTime (MP4) or VLC; check that all screens appear, verify motion, duration and seeking, and compare playback timeline with actual wall-clock capture.'
           : 'A recording file can be finalized without verifying playback or audible audio. Open it in QuickTime or VLC to confirm playback and seeking. For a Stop-and-Save test, compare the actual duration above with when you pressed Stop. Reopen MooBee and check that the clip remains in Clips.'}</p>
       </div>
     </div>}

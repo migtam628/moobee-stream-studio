@@ -1,12 +1,13 @@
 //! Mac-only synchronous AVFoundation sink used by the native capture worker.
-//! This writes composed display video only; no audio track is requested.
+//! Composed H.264 with optional AAC from aligned 48kHz stereo PCM.
 use std::{ffi::{CStr, CString, c_void}, fs::OpenOptions, os::raw::{c_char,c_int}, path::Path};
 
 unsafe extern "C" {
     fn moobee_program_writer_create(path: *const c_char, width: c_int, height: c_int,
-        fps: c_int, error: *mut c_char, capacity: c_int) -> *mut c_void;
+        fps: c_int, microphone: c_int, error: *mut c_char, capacity: c_int) -> *mut c_void;
     fn moobee_program_writer_append(handle: *mut c_void, rgba: *const u8, length: usize,
         error: *mut c_char, capacity: c_int) -> c_int;
+    fn moobee_program_writer_append_audio(handle: *mut c_void, pcm: *const f32, frames: usize, error: *mut c_char, capacity: c_int) -> c_int;
     fn moobee_program_writer_finish(handle: *mut c_void, error: *mut c_char, capacity: c_int) -> c_int;
     fn moobee_program_writer_destroy(handle: *mut c_void);
 }
@@ -18,10 +19,13 @@ fn message(error: &[c_char; 512]) -> String {
 }
 impl ProgramMp4Sink {
     pub(crate) fn new(path: &Path, width: u32, height: u32, fps: u32) -> Result<Self, String> {
+        Self::new_with_audio(path,width,height,fps,false)
+    }
+    pub(crate) fn new_with_audio(path: &Path, width: u32, height: u32, fps: u32, microphone: bool) -> Result<Self,String> {
         let path = CString::new(path.to_string_lossy().as_bytes()).map_err(|_| "Invalid MP4 path")?;
         let mut error = [0; 512];
         let handle = unsafe { moobee_program_writer_create(path.as_ptr(), width as c_int,
-            height as c_int, fps as c_int, error.as_mut_ptr(), 512) };
+            height as c_int, fps as c_int, if microphone { 1 } else { 0 }, error.as_mut_ptr(), 512) };
         if handle.is_null() { Err(message(&error)) } else { Ok(Self(handle)) }
     }
 
@@ -32,6 +36,12 @@ impl ProgramMp4Sink {
         if result == 0 { Ok(()) } else { Err(message(&error)) }
     }
 
+    pub(crate) fn append_audio(&mut self, pcm: &[f32]) -> Result<(), String> {
+        if pcm.is_empty() || pcm.len() % 2 != 0 || pcm.len() > 9600 { return Err("Invalid stereo PCM block".into()); }
+        let mut error = [0;512];
+        let result = unsafe { moobee_program_writer_append_audio(self.0, pcm.as_ptr(), pcm.len()/2, error.as_mut_ptr(),512) };
+        if result == 0 { Ok(()) } else { Err(message(&error)) }
+    }
     pub(crate) fn finish(&mut self) -> Result<(), (String, bool)> {
         let mut error = [0; 512];
         let result = unsafe { moobee_program_writer_finish(self.0, error.as_mut_ptr(), 512) };
@@ -95,4 +105,35 @@ mod tests {
         if result.is_ok() { std::fs::remove_dir_all(&dir).unwrap(); }
         result.unwrap();
     }
+
+    #[test]
+    #[ignore = "requires macOS H.264/AAC encoder; real-device validation"]
+    fn synthetic_full_hd_video_and_aac_share_two_second_timeline() {
+        let dir = std::env::temp_dir().join(format!("moobee-av-{}",uuid::Uuid::new_v4()));
+        std::fs::create_dir(&dir).unwrap();
+        let path = dir.join("test.mp4");
+        let result = (|| -> Result<(),String> {
+            let mut sink = ProgramMp4Sink::new_with_audio(&path,1920,1080,30,true)?;
+            let clock = crate::media_clock::MediaClock::new(30)?;
+            for tick in 0..60u32 {
+                let canvas = image::RgbaImage::from_fn(1920,1080,|x,y| image::Rgba([((x+tick*3)%256) as u8,(y%256) as u8,60,255]));
+                sink.append(canvas.as_raw())?;
+                let samples = clock.audio_range(tick,48_000)?;
+                let mut pcm = Vec::new();
+                for n in samples {
+                    let value = 0.1 * (2.0 * std::f32::consts::PI * 440.0 * n as f32 / 48_000.0).sin();
+                    pcm.extend_from_slice(&[value,value]);
+                }
+                sink.append_audio(&pcm)?;
+            }
+            sink.finish().map_err(|(message,_)| message)?;
+            drop(sink);
+            let (_,duration) = validate_finished(&path)?;
+            assert!((duration-2.0).abs()<0.2);
+            Ok(())
+        })();
+        if result.is_ok() { std::fs::remove_dir_all(&dir).unwrap(); }
+        result.unwrap();
+    }
+
 }

@@ -9,6 +9,14 @@ mod program_test_avi;
 mod program_continuous_avi;
 #[cfg(target_os = "macos")]
 mod program_mp4_sink;
+#[cfg(target_os = "macos")]
+mod program_camera;
+#[cfg(target_os = "macos")]
+mod program_microphone;
+mod program_overlay;
+mod media_clock;
+mod audio_mix;
+mod stream_mux;
 
 use axum::{
     extract::State,

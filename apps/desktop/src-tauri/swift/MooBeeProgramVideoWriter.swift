@@ -1,6 +1,7 @@
 // First-party composed-frame writer. Rust supplies bounded RGBA canvases and
 // a monotonic output frame index; no ScreenCaptureKit single-display shortcut.
 import AVFoundation
+import AudioToolbox
 import CoreMedia
 import CoreVideo
 import Foundation
@@ -23,15 +24,19 @@ private final class ProgramVideoWriter {
     let writer: AVAssetWriter
     let input: AVAssetWriterInput
     let adaptor: AVAssetWriterInputPixelBufferAdaptor
+    let audioInput: AVAssetWriterInput?
+    let audioFormat: AVAudioFormat?
+    var audioFrames: Int64 = 0
     let width: Int
     let height: Int
     let fps: Int32
     var count: Int64 = 0
     var finishing = false
 
-    init(path: String, width: Int, height: Int, fps: Int32) throws {
+    init(path: String, width: Int, height: Int, fps: Int32, microphone: Bool) throws {
         guard (width == 640 && height == 360 && fps == 10) ||
-              (width == 1280 && height == 720 && fps == 15) else {
+              (width == 1280 && height == 720 && fps == 15) ||
+              (width == 1920 && height == 1080 && fps == 30) else {
             throw writerError("Unsupported composed H.264 test profile")
         }
         self.width = width
@@ -43,7 +48,7 @@ private final class ProgramVideoWriter {
             AVVideoWidthKey: width,
             AVVideoHeightKey: height,
             AVVideoCompressionPropertiesKey: [
-                AVVideoAverageBitRateKey: 3_000_000,
+                AVVideoAverageBitRateKey: width == 1920 ? 6_000_000 : 3_000_000,
                 AVVideoExpectedSourceFrameRateKey: Int(fps),
                 AVVideoMaxKeyFrameIntervalKey: Int(fps) * 2,
                 AVVideoAllowFrameReorderingKey: false
@@ -58,6 +63,23 @@ private final class ProgramVideoWriter {
                 kCVPixelBufferWidthKey as String: width,
                 kCVPixelBufferHeightKey as String: height
             ])
+        if microphone {
+            guard let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48_000, channels: 2, interleaved: true) else {
+                throw writerError("Cannot create stereo PCM format")
+            }
+            audioFormat = format
+            let audio = AVAssetWriterInput(mediaType: .audio, outputSettings: [
+                AVFormatIDKey: kAudioFormatMPEG4AAC,
+                AVSampleRateKey: 48_000, AVNumberOfChannelsKey: 2, AVEncoderBitRateKey: 128_000
+            ], sourceFormatHint: format.formatDescription)
+            audio.expectsMediaDataInRealTime = true
+            guard asset.canAdd(audio) else { throw writerError("AAC encoder unavailable") }
+            asset.add(audio)
+            audioInput = audio
+        } else {
+            audioFormat = nil
+            audioInput = nil
+        }
         guard asset.canAdd(track) else { throw writerError("H.264 encoder unavailable") }
         asset.add(track)
         guard asset.startWriting() else { throw asset.error ?? writerError("Could not start H.264 writer") }
@@ -107,11 +129,48 @@ private final class ProgramVideoWriter {
         count += 1
     }
 
+    func appendAudio(_ samples: UnsafePointer<Float>, frames: Int) throws {
+        guard !finishing, let track = audioInput, let format = audioFormat,
+              frames > 0, frames <= 4800,
+              audioFrames + Int64(frames) <= count * 48_000 / Int64(fps) else {
+            throw writerError("Invalid or out-of-order audio block")
+        }
+        let deadline = ProcessInfo.processInfo.systemUptime + 0.5
+        while !track.isReadyForMoreMediaData && writer.status == .writing &&
+              ProcessInfo.processInfo.systemUptime < deadline { Thread.sleep(forTimeInterval: 0.005) }
+        guard track.isReadyForMoreMediaData, writer.status == .writing else {
+            throw writer.error ?? writerError("AAC writer stalled")
+        }
+        let bytes = frames * 2 * MemoryLayout<Float>.size
+        var block: CMBlockBuffer?
+        guard CMBlockBufferCreateWithMemoryBlock(allocator: kCFAllocatorDefault, memoryBlock: nil,
+            blockLength: bytes, blockAllocator: kCFAllocatorDefault, customBlockSource: nil,
+            offsetToData: 0, dataLength: bytes, flags: 0, blockBufferOut: &block) == noErr,
+            let block, CMBlockBufferReplaceDataBytes(with: UnsafeRawPointer(samples), blockBuffer: block,
+                offsetIntoDestination: 0, dataLength: bytes) == noErr else {
+            throw writerError("Unable to allocate PCM sample buffer")
+        }
+        var timing = CMSampleTimingInfo(duration: CMTime(value: 1, timescale: 48_000),
+            presentationTimeStamp: CMTime(value: audioFrames, timescale: 48_000), decodeTimeStamp: .invalid)
+        var size = 2 * MemoryLayout<Float>.size
+        var sample: CMSampleBuffer?
+        guard CMSampleBufferCreateReady(allocator: kCFAllocatorDefault, dataBuffer: block,
+            formatDescription: format.formatDescription, sampleCount: frames,
+            sampleTimingEntryCount: 1, sampleTimingArray: &timing, sampleSizeEntryCount: 1,
+            sampleSizeArray: &size, sampleBufferOut: &sample) == noErr,
+            let sample, track.append(sample) else {
+            throw writer.error ?? writerError("AAC encoder rejected PCM")
+        }
+        audioFrames += Int64(frames)
+    }
+
     func finish() -> Int32 {
-        guard !finishing, count >= 2, writer.status == .writing else { return -1 }
+        guard !finishing, count >= 2, writer.status == .writing,
+              audioInput == nil || audioFrames == count * 48_000 / Int64(fps) else { return -1 }
         finishing = true
         writer.endSession(atSourceTime: CMTime(value: count, timescale: fps))
         input.markAsFinished()
+        audioInput?.markAsFinished()
         let done = DispatchSemaphore(value: 0)
         let retainedWriter = writer
         retainedWriter.finishWriting { _ = retainedWriter.status; done.signal() }
@@ -128,14 +187,14 @@ private final class ProgramVideoWriter {
 
 @_cdecl("moobee_program_writer_create")
 public func moobee_program_writer_create(
-    _ path: UnsafePointer<CChar>?, _ width: Int32, _ height: Int32, _ fps: Int32,
+    _ path: UnsafePointer<CChar>?, _ width: Int32, _ height: Int32, _ fps: Int32, _ microphone: Int32,
     _ error: UnsafeMutablePointer<CChar>?, _ capacity: Int32
 ) -> UnsafeMutableRawPointer? {
     do {
         guard let path, let value = String(validatingUTF8: path) else {
             throw writerError("Invalid composed MP4 path")
         }
-        let sink = try ProgramVideoWriter(path: value, width: Int(width), height: Int(height), fps: fps)
+        let sink = try ProgramVideoWriter(path: value, width: Int(width), height: Int(height), fps: fps, microphone: microphone == 1)
         return Unmanaged.passRetained(sink).toOpaque()
     } catch let cause { reportError(cause, error, capacity); return nil }
 }
@@ -148,6 +207,18 @@ public func moobee_program_writer_append(
     do {
         guard let handle, let rgba else { throw writerError("Invalid composed frame writer handle") }
         try Unmanaged<ProgramVideoWriter>.fromOpaque(handle).takeUnretainedValue().append(rgba, length: length)
+        return 0
+    } catch let cause { reportError(cause, error, capacity); return -1 }
+}
+
+@_cdecl("moobee_program_writer_append_audio")
+public func moobee_program_writer_append_audio(
+    _ handle: UnsafeMutableRawPointer?, _ pcm: UnsafePointer<Float>?, _ frames: Int,
+    _ error: UnsafeMutablePointer<CChar>?, _ capacity: Int32
+) -> Int32 {
+    do {
+        guard let handle, let pcm else { throw writerError("Invalid PCM writer input") }
+        try Unmanaged<ProgramVideoWriter>.fromOpaque(handle).takeUnretainedValue().appendAudio(pcm, frames: frames)
         return 0
     } catch let cause { reportError(cause, error, capacity); return -1 }
 }
