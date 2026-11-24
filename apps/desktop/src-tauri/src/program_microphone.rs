@@ -1,5 +1,6 @@
 use std::{ffi::{c_void,CStr}, os::raw::{c_char,c_int}};
 unsafe extern "C" {
+    fn moobee_program_mic_authorize(error: *mut c_char, capacity: c_int) -> c_int;
     fn moobee_program_mic_create(error: *mut c_char, capacity: c_int) -> *mut c_void;
     fn moobee_program_mic_read(handle: *mut c_void, destination: *mut f32,
         frames: usize, error: *mut c_char, capacity: c_int) -> c_int;
@@ -11,6 +12,10 @@ fn message(error: &[c_char;512]) -> String {
 }
 pub(crate) struct ProgramMicrophone(*mut c_void);
 impl ProgramMicrophone {
+    pub(crate) fn authorize() -> Result<(),String> {
+        let mut error = [0;512];
+        if unsafe { moobee_program_mic_authorize(error.as_mut_ptr(),512) } == 0 { Ok(()) } else { Err(message(&error)) }
+    }
     pub(crate) fn start() -> Result<Self,String> {
         let mut error = [0;512];
         let handle = unsafe { moobee_program_mic_create(error.as_mut_ptr(),512) };
