@@ -41,7 +41,8 @@ jobs:
             -target "${{ matrix.swift_target }}" -sdk "$SDK" \
             apps/desktop/src-tauri/swift/MooBeeScreenRecording.swift \
             apps/desktop/src-tauri/swift/MooBeeSonomaRecording.swift \
-            apps/desktop/src-tauri/swift/MooBeeProgramVideoWriter.swift
+            apps/desktop/src-tauri/swift/MooBeeProgramVideoWriter.swift \
+            apps/desktop/src-tauri/swift/MooBeeProgramCamera.swift
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -64,6 +65,8 @@ jobs:
           cargo test --lib program_test_avi::tests
           cargo test --lib program_continuous_avi::tests
           cargo test --lib program_mp4_sink::tests
+          cargo test --lib media_clock::tests
+          cargo test --lib audio_mix::tests
       # A cargo check or test binary is not an installed Tauri application.
       # Verify at least one actual .app contains the Swift runtime rpath and
       # permission reasons before considering hardware acceptance.
