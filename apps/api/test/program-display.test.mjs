@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { singleProgramDisplayId, programTestDisplayIds } from '../../../apps/web/src/programDisplay.ts'
+import { singleProgramDisplayId, programTestDisplayIds, programTestLayout } from '../../../apps/web/src/programDisplay.ts'
 
 const state = {
   studioMode: true,
@@ -60,4 +60,16 @@ test('composed Program AVI rejects missing, duplicate and unsupported sources', 
   tooMany.scenes[0].sources = [0, 1, 2, 3, 4].map((i) =>
     ({ id: i + 10, kind: 'display', deviceId: String(i), enabled: true }))
   assert.throws(() => programTestDisplayIds(tooMany), /one to four/)
+})
+
+test('Program layout and layer order are isolated from Preview; legacy defaults to grid', () => {
+  const layoutState = structuredClone(state)
+  assert.equal(programTestLayout(layoutState), 'grid')
+  layoutState.scenes[0].layout = 'pip'
+  layoutState.scenes[1].layout = 'grid'
+  layoutState.scenes[0].sources.unshift({ id: 9, kind: 'display', deviceId: '1', enabled: true })
+  assert.equal(programTestLayout(layoutState), 'pip')
+  assert.deepEqual(programTestDisplayIds(layoutState), [1, 0])
+  layoutState.scenes[0].layout = 'invalid'
+  assert.throws(() => programTestLayout(layoutState), /Unsupported native scene layout/)
 })
