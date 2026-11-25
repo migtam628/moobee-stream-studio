@@ -198,7 +198,7 @@ impl FrameSink {
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 fn capture_to_dir(
     directory: PathBuf, ids: Vec<usize>, seconds: u32, profile: EncodingProfile, format: ProgramFormat, layout: crate::scene_compositor::SceneLayout, webcam: bool,
-    microphone: bool, mic_gain: f32, overlay: Option<crate::program_overlay::OverlayInput>, video_device_id: Option<String>, audio_inputs: Option<Vec<crate::program_audio::AudioInput>>,
+    microphone: bool, mic_gain: f32, overlay: Option<crate::program_overlay::OverlayInput>, video_device_id: Option<String>, audio_inputs: Option<Vec<crate::program_audio::AudioInput>>, transforms: Option<Vec<crate::source_transform::SourceTransform>>,
 ) -> Result<ContinuousProgramReport, String> {
     let clock = crate::media_clock::MediaClock::new(profile.fps)?;
     let graphic = overlay.map(|input| input.prepare(profile.width, profile.height)).transpose()?;
@@ -357,10 +357,10 @@ fn capture_to_dir(
                 // Borrow all display/camera images; no full-resolution source clone.
                 crate::scene_compositor::composite_with_camera(&latest, frame, profile.width, profile.height)?
             } else {
-                crate::scene_compositor::composite_layout(&latest, profile.width, profile.height, layout)?
+                if let Some(ref items)=transforms { crate::source_transform::composite(&latest,profile.width,profile.height,items)? } else { crate::scene_compositor::composite_layout(&latest, profile.width, profile.height, layout)? }
             };
             #[cfg(not(target_os = "macos"))]
-            let mut composed = crate::scene_compositor::composite_layout(&latest, profile.width, profile.height, layout)?;
+            let mut composed = if let Some(ref items)=transforms { crate::source_transform::composite(&latest,profile.width,profile.height,items)? } else { crate::scene_compositor::composite_layout(&latest, profile.width, profile.height, layout)? };
             if let Some(ref overlay) = graphic { crate::program_overlay::apply(&mut composed, overlay); }
             writer.append(composed)?;
             #[cfg(target_os = "macos")]
@@ -461,30 +461,32 @@ fn capture_to_dir(
 #[tauri::command]
 pub async fn capture_continuous_program_avi(
     app: tauri::AppHandle, display_ids: Vec<usize>, seconds: u32, profile: String, layout: Option<String>,
-    overlay: Option<crate::program_overlay::OverlayInput>,
+    overlay: Option<crate::program_overlay::OverlayInput>, transforms: Option<Vec<crate::source_transform::SourceTransform>>,
 ) -> Result<ContinuousProgramReport, String> {
-    capture_continuous_program(app, display_ids, seconds, profile, ProgramFormat::Avi, layout, false, false, 1.0, overlay, None, None).await
+    capture_continuous_program(app, display_ids, seconds, profile, ProgramFormat::Avi, layout, false, false, 1.0, overlay, None, None, transforms).await
 }
 
 #[tauri::command]
 pub async fn capture_continuous_program_mp4(
     app: tauri::AppHandle, display_ids: Vec<usize>, seconds: u32, profile: String, layout: Option<String>, webcam: Option<bool>, microphone: Option<bool>, mic_gain: Option<f32>,
-    overlay: Option<crate::program_overlay::OverlayInput>, video_device_id: Option<String>, audio_inputs: Option<Vec<crate::program_audio::AudioInput>>,
+    overlay: Option<crate::program_overlay::OverlayInput>, video_device_id: Option<String>, audio_inputs: Option<Vec<crate::program_audio::AudioInput>>, transforms: Option<Vec<crate::source_transform::SourceTransform>>,
 ) -> Result<ContinuousProgramReport, String> {
     #[cfg(target_os = "macos")]
-    { capture_continuous_program(app, display_ids, seconds, profile, ProgramFormat::Mp4, layout, webcam.unwrap_or(false), microphone.unwrap_or(false), mic_gain.unwrap_or(1.0), overlay, video_device_id, audio_inputs).await }
+    { capture_continuous_program(app, display_ids, seconds, profile, ProgramFormat::Mp4, layout, webcam.unwrap_or(false), microphone.unwrap_or(false), mic_gain.unwrap_or(1.0), overlay, video_device_id, audio_inputs, transforms).await }
     #[cfg(not(target_os = "macos"))]
-    { let _ = (app, display_ids, seconds, profile, layout, webcam, microphone, mic_gain, overlay, video_device_id, audio_inputs); Err("Composed H.264 MP4 is a macOS-only experimental test".into()) }
+    { let _ = (app, display_ids, seconds, profile, layout, webcam, microphone, mic_gain, overlay, video_device_id, audio_inputs, transforms); Err("Composed H.264 MP4 is a macOS-only experimental test".into()) }
 }
 
 async fn capture_continuous_program(
     app: tauri::AppHandle, display_ids: Vec<usize>, seconds: u32, profile: String, format: ProgramFormat, layout: Option<String>, webcam: bool, microphone: bool, mic_gain: f32,
-    overlay: Option<crate::program_overlay::OverlayInput>, video_device_id: Option<String>, audio_inputs: Option<Vec<crate::program_audio::AudioInput>>,
+    overlay: Option<crate::program_overlay::OverlayInput>, video_device_id: Option<String>, audio_inputs: Option<Vec<crate::program_audio::AudioInput>>, transforms: Option<Vec<crate::source_transform::SourceTransform>>,
 ) -> Result<ContinuousProgramReport, String> {
     if let Some(ref inputs) = audio_inputs {
         crate::program_audio::validate(inputs)?;
         if !cfg!(target_os = "macos") || !matches!(format, ProgramFormat::Mp4) { return Err("Named audio inputs require Mac MP4".into()); }
     }
+    crate::source_transform::validate_list(transforms.as_deref(), display_ids.len()+usize::from(video_device_id.is_some()))?;
+    if transforms.is_some() && webcam { return Err("Disable the separate webcam inset for manual scene transforms".into()); }
     let selected_profile = if let Some(ref id) = video_device_id {
         if !cfg!(target_os = "macos") || !matches!(format, ProgramFormat::Mp4) || !display_ids.is_empty() || webcam || id.is_empty() || id.len() > 1024 || id.chars().any(char::is_control) {
             return Err("Video device recording requires Mac MP4, one selected video input only, and webcam inset off".into());
@@ -513,12 +515,12 @@ async fn capture_continuous_program(
         };
         tauri::async_runtime::spawn_blocking(move || {
             let _guard = CaptureLock;
-            capture_to_dir(directory, display_ids, seconds, selected_profile, format, layout, webcam, microphone, mic_gain, overlay, video_device_id, audio_inputs)
+            capture_to_dir(directory, display_ids, seconds, selected_profile, format, layout, webcam, microphone, mic_gain, overlay, video_device_id, audio_inputs, transforms)
         }).await.map_err(|error| format!("Continuous Program capture worker stopped: {error}"))?
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
-        let _ = (app, display_ids, selected_profile, format, layout, webcam, microphone, mic_gain, overlay, video_device_id, audio_inputs);
+        let _ = (app, display_ids, selected_profile, format, layout, webcam, microphone, mic_gain, overlay, video_device_id, audio_inputs, transforms);
         Err("Continuous Program video capture requires a Mac or Windows desktop build".into())
     }
 }

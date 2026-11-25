@@ -1,4 +1,4 @@
-import { validateSceneLayout, validVideoInputId, type SceneLayout } from './programDisplay'
+import { validateSceneLayout, validVideoInputId, validateTransform, sceneTransforms, type SourceTransform, type SceneLayout } from './programDisplay'
 import { invoke } from '@tauri-apps/api/core'
 import { version as appVersion } from '../../../package.json'
 import { offline, type Activity, type Alert, type StudioStatus } from './types'
@@ -40,10 +40,10 @@ async function captureWithPreviewReleased<T>(command: string, args: Record<strin
   try { await releaseAudioMeter(); await releaseVideoPreviews(); return await invoke<T>(command,args) }
   finally { captureActive = false }
 }
-async function movingPreview(ids: string[], layout: SceneLayout, previousKey: string | null): Promise<MovingFrame> {
+async function movingPreview(ids: string[], layout: SceneLayout, previousKey: string | null, transforms?:SourceTransform[]): Promise<MovingFrame> {
   if (captureActive || releasing) return {image:null,frameKey:null,liveVideo:true,waiting:true}
   previewUsed = true
-  const task = invoke<MovingFrame>('live_video_preview_frame',{deviceIds:ids,layout,previousKey})
+  const task = invoke<MovingFrame>('live_video_preview_frame',{deviceIds:ids,layout,previousKey,transforms:transforms??null})
   pendingPreview.add(task)
   try { return await task } finally { pendingPreview.delete(task) }
 }
@@ -75,7 +75,7 @@ function validateCollection(value: unknown): Saved {
         throw new Error('Invalid capture source in collection')
       }
       ids.add(source.id)
-      return { id: source.id, name: source.name.trim(), kind: source.kind, deviceId: source.deviceId, enabled: source.enabled }
+      return { id: source.id, name: source.name.trim(), kind: source.kind, deviceId: source.deviceId, enabled: source.enabled, ...(source.transform===undefined?{}:{transform:validateTransform(source.transform)}) }
     })
     const layout = validateSceneLayout(scene.layout)
     return { name, sources, ...(scene.layout === undefined ? {} : { layout }) }
@@ -193,6 +193,15 @@ function perform(body: Body) {
     if (!active) throw new Error('No active scene')
     if (body.layout === undefined) throw new Error('Choose a scene layout')
     active.layout = validateSceneLayout(body.layout)
+  } else if (action === 'sourceTransform') {
+    if (!active || body.sceneName !== active.name) throw new Error('The edited scene is no longer selected')
+    const source=active.sources.find(item=>item.id===body.sceneItemId)
+    if (!source) throw new Error('Unknown source')
+    if(body.transform===null) delete source.transform
+    else source.transform=validateTransform(body.transform)
+  } else if (action === 'resetTransforms') {
+    if (!active || body.sceneName !== active.name) throw new Error('The edited scene is no longer selected')
+    for(const source of active.sources) delete source.transform
   } else if (action === 'moveSource') {
     const index = active?.sources.findIndex(src => src.id === body.sceneItemId) ?? -1
     if (!active || index < 0 || (body.direction !== 'up' && body.direction !== 'down')) throw new Error('Invalid source order')
@@ -300,8 +309,10 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
         if (!p || typeof p !== 'object' || !Number.isInteger(p.xPercent) || p.xPercent < 0 || p.xPercent > 100 || !Number.isInteger(p.yPercent) || p.yPercent < 0 || p.yPercent > 100 || !Number.isInteger(p.widthPercent) || p.widthPercent < 10 || p.widthPercent > 50) throw new Error('Invalid graphic placement')
       }
     }
+    const transforms = body.transforms === undefined || body.transforms === null ? undefined :
+      Array.isArray(body.transforms) && body.transforms.length === (hasVideo?1:ids.length) ? body.transforms.map(validateTransform) : (()=>{throw new Error('Invalid source transform count')})()
     return await captureWithPreviewReleased(mp4 ? 'capture_continuous_program_mp4' : 'capture_continuous_program_avi', {
-      displayIds: ids, seconds: body.seconds, profile: body.profile, layout: validateSceneLayout(body.layout), overlay: body.overlay ?? null, ...(mp4 ? { webcam: body.webcam === true, microphone: body.microphone === true, micGain, ...(body.audioInputs !== undefined ? { audioInputs: body.audioInputs } : {}), ...(hasVideo ? { videoDeviceId } : {}) } : {})
+      displayIds: ids, seconds: body.seconds, profile: body.profile, layout: validateSceneLayout(body.layout), transforms:transforms??null, overlay: body.overlay ?? null, ...(mp4 ? { webcam: body.webcam === true, microphone: body.microphone === true, micGain, ...(body.audioInputs !== undefined ? { audioInputs: body.audioInputs } : {}), ...(hasVideo ? { videoDeviceId } : {}) } : {})
     })
   }
   if (path === '/clips/capture-program-test-avi') {
@@ -313,7 +324,8 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
         body.seconds < 2 || body.seconds > 8) {
       throw new Error('Choose one to four unique Program displays and a 2–8 second test duration')
     }
-    return await captureWithPreviewReleased('capture_program_test_avi', { displayIds: ids, seconds: body.seconds, layout: validateSceneLayout(body.layout) })
+    const transforms=body.transforms===undefined||body.transforms===null?null:Array.isArray(body.transforms)&&body.transforms.length===ids.length?body.transforms.map(validateTransform):(()=>{throw new Error('Invalid source transform count')})()
+    return await captureWithPreviewReleased('capture_program_test_avi', { displayIds: ids, seconds: body.seconds, layout: validateSceneLayout(body.layout),transforms })
   }
   if (path === '/clips/capture-avi') {
     if (typeof body.displayId !== 'number' || !Number.isSafeInteger(body.displayId) ||
@@ -380,6 +392,7 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
     const scene = draft.scenes.find(s => s.name === name)
     if (!scene) throw new Error('Scene not found')
     const enabled = scene.sources.filter(source => source.enabled)
+    const transforms=sceneTransforms(scene.sources,validateSceneLayout(scene.layout))
     const video = enabled.find(source => source.kind === 'video')
     if (video) {
       if (params.get('mode') === 'live') {
@@ -388,8 +401,9 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
           throw new Error('Live video preview supports one or two distinct Mac video inputs; hide other sources.')
         }
         const key = params.get('key')
-        return await movingPreview(ids,validateSceneLayout(scene.layout),key && key.length <= 256 ? key : null)
+        return await movingPreview(ids,validateSceneLayout(scene.layout),key && key.length <= 2048 ? key : null,transforms)
       }
+      if (transforms) throw new Error('Choose Live video inputs to preview manual video source transforms')
       if (enabled.length !== 1) throw new Error('Enable only the selected capture card or camera for this video input test')
       if (testedVideo?.id !== video.deviceId) throw new Error('Video input selected. Use Test video signal in Sources to acquire a still frame.')
       return { image: testedVideo?.image ?? null }
@@ -403,7 +417,7 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
     if (ids.some(id => !Number.isSafeInteger(id) || id < 0 || id > 24)) {
       throw new Error('Scene includes an invalid display identity')
     }
-    return { image: await invoke<string>('capture_scene_snapshot', { displayIds: ids, layout: validateSceneLayout(scene.layout) }) }
+    return { image: await invoke<string>('capture_scene_snapshot', { displayIds: ids, layout: validateSceneLayout(scene.layout),transforms:transforms??null }) }
   }
   if (path === '/alerts/test') {
     const alert = await invoke<Alert>('emit_test_alert', { alert: { type: body.type, name: body.name, message: body.message } })

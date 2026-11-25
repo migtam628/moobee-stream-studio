@@ -1,0 +1,29 @@
+import {useRef,useState,useEffect,type PointerEvent} from 'react'
+import {defaultTransform,validateTransform,type SourceTransform,type SceneLayout} from './programDisplay'
+import type {StudioStatus} from './types'
+type Source=StudioStatus['sources'][number]
+export function geometry(sources:Source[],id:number,layout:SceneLayout){
+ const active=sources.filter(s=>s.enabled),i=active.findIndex(s=>s.id===id)
+ return i<0||active.length>4?undefined:active[i].transform??defaultTransform(i,active.length,layout)
+}
+type Props={sources:Source[];layout:SceneLayout;selected:number|null;select:(id:number)=>void;save:(id:number,t:SourceTransform)=>void;disabled:boolean;lockRatio:boolean}
+const clamp=(v:number,min:number,max:number)=>Math.max(min,Math.min(max,Math.round(v)))
+export function TransformCanvas({sources,layout,selected,select,save,disabled,lockRatio}:Props){
+ const svg=useRef<SVGSVGElement>(null)
+ const drag=useRef<{id:number;pointer:number;x:number;y:number;initial:SourceTransform;resize:boolean;next:SourceTransform}|null>(null)
+ const [draft,setDraft]=useState<{id:number;t:SourceTransform}|null>(null)
+ const active=sources.filter(s=>s.enabled)
+ function point(e:PointerEvent){const root=svg.current,m=root?.getScreenCTM();if(!root||!m)return null;const p=root.createSVGPoint();p.x=e.clientX;p.y=e.clientY;const q=p.matrixTransform(m.inverse());return {x:q.x/1600*10000,y:q.y/900*10000}}
+ function begin(e:PointerEvent,id:number,resize:boolean){if(disabled||e.button!==0)return;const p=point(e),t=geometry(sources,id,layout);if(!p||!t)return;e.preventDefault();e.stopPropagation();select(id);drag.current={id,pointer:e.pointerId,...p,initial:{...t},next:{...t},resize};svg.current?.setPointerCapture(e.pointerId)}
+ function move(e:PointerEvent){const d=drag.current,p=point(e);if(!d||!p||d.pointer!==e.pointerId)return;const t={...d.initial},dx=p.x-d.x,dy=p.y-d.y;if(!d.resize){t.x=clamp(t.x+dx,0,10000-t.width);t.y=clamp(t.y+dy,0,10000-t.height)}else if(lockRatio){const ratio=t.width/t.height;t.width=clamp(t.width+dx,Math.ceil(Math.max(250,250*ratio)),Math.floor(Math.min(10000-t.x,(10000-t.y)*ratio)));t.height=clamp(t.width/ratio,250,10000-t.y)}else{t.width=clamp(t.width+dx,250,10000-t.x);t.height=clamp(t.height+dy,250,10000-t.y)}d.next=t;setDraft({id:d.id,t})}
+ function finish(e:PointerEvent,commit:boolean){const d=drag.current;if(!d||d.pointer!==e.pointerId)return;drag.current=null;setDraft(null);if(svg.current?.hasPointerCapture(e.pointerId))svg.current.releasePointerCapture(e.pointerId);if(commit&&JSON.stringify(d.next)!==JSON.stringify(d.initial))save(d.id,d.next)}
+ if(active.length>4||!active.length)return null
+ return <svg className="source-transform-canvas" ref={svg} viewBox="0 0 1600 900" aria-label="Source transform canvas" onPointerMove={move} onPointerUp={e=>finish(e,true)} onPointerCancel={e=>finish(e,false)} onLostPointerCapture={e=>finish(e,false)}>{active.map(s=>{const t=draft?.id===s.id?draft.t:geometry(sources,s.id,layout);if(!t)return null;const x=t.x*.16,y=t.y*.09,w=t.width*.16,h=t.height*.09;return <g key={s.id}><rect className="source-transform-outline" aria-label={s.name+' transform bounds'} x={x+2} y={y+2} width={Math.max(1,w-4)} height={Math.max(1,h-4)} fill="transparent" stroke={s.id===selected?'#ff686b':'#a78bfa'} strokeWidth="2" vectorEffect="non-scaling-stroke" onPointerDown={e=>begin(e,s.id,false)}/>{s.id===selected&&<rect className="source-transform-handle" aria-label={'Resize '+s.name} x={x+w-24} y={y+h-24} width={22} height={22} fill="#ff686b" onPointerDown={e=>begin(e,s.id,true)}/>}</g>})}</svg>
+}
+export function TransformControls({source,initial,save,reset,disabled,lockRatio,setLockRatio}:{source:Source;initial:SourceTransform;save:(t:SourceTransform)=>void;reset:()=>void;disabled:boolean;lockRatio:boolean;setLockRatio:(v:boolean)=>void}){
+ const [t,setT]=useState(initial),[error,setError]=useState('')
+ const key=JSON.stringify(initial)
+ useEffect(()=>{setT(JSON.parse(key));setError('')},[source.id,key])
+ const fields:[keyof SourceTransform,string][]=[['x','X position'],['y','Y position'],['width','Width'],['height','Height'],['cropLeft','Crop left'],['cropTop','Crop top'],['cropRight','Crop right'],['cropBottom','Crop bottom']]
+ return <div className="transform-controls"><div className="dock-subtitle">Transform · {source.name}</div><small className="dock-note">Position and size: output %. Crop: input %.</small><div className="transform-fields">{fields.map(([k,label])=><label key={k} className="dock-field">{label} %<input aria-label={label+' percent'} type="number" min="0" max="100" step=".25" disabled={disabled} value={Number(t[k])/100} onChange={e=>setT(v=>({...v,[k]:Math.round(Number(e.target.value)*100)}))}/></label>)}</div><label className="dock-field">Rotation<select aria-label="Source rotation" value={t.rotation} disabled={disabled} onChange={e=>setT(v=>({...v,rotation:Number(e.target.value)}))}>{[0,90,180,270].map(v=><option key={v} value={v}>{v}°</option>)}</select></label><label className="layer-switch"><span>Preserve aspect ratio</span><input type="checkbox" checked={t.fit} disabled={disabled} onChange={e=>setT(v=>({...v,fit:e.target.checked}))}/></label><label className="layer-switch"><span>Lock resize ratio</span><input type="checkbox" checked={lockRatio} onChange={e=>setLockRatio(e.target.checked)}/></label><div className="dock-action-row"><button className="secondary-button" disabled={disabled} onClick={()=>{try{save(validateTransform(t));setError('')}catch(cause){setError(String(cause))}}}>Apply transform</button><button className="secondary-button" disabled={disabled} onClick={reset}>Auto layout</button></div>{error&&<small role="alert" className="preview-error">{error}</small>}</div>
+}
