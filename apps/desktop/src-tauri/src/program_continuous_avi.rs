@@ -199,7 +199,7 @@ fn capture_to_dir(
     microphone: bool, mic_gain: f32, overlay: Option<crate::program_overlay::OverlayInput>,
 ) -> Result<ContinuousProgramReport, String> {
     let clock = crate::media_clock::MediaClock::new(profile.fps)?;
-    let graphic = overlay.map(|input| input.decode()).transpose()?;
+    let graphic = overlay.map(|input| input.prepare(profile.width, profile.height)).transpose()?;
     #[cfg(target_os = "macos")]
     if microphone { crate::program_microphone::ProgramMicrophone::authorize()?; }
     // Explicit opt-in; permission is resolved before starting the display receivers.
