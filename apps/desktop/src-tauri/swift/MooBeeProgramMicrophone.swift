@@ -140,6 +140,7 @@ private final class ProgramAudioSource: NSObject, AVCaptureAudioDataOutputSample
     private var samples = [Float]()
     private var failure: String?
     private var closed = false
+    private var armed = false
     private var ready = false
     private var converter: AVAudioConverter?
     private let target = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 2)!
@@ -239,7 +240,13 @@ private final class ProgramAudioSource: NSObject, AVCaptureAudioDataOutputSample
         condition.lock()
         defer { condition.broadcast(); condition.unlock() }
         if closed || failure != nil { return }
-        if samples.count + frames*2 > maxSamples { failure = "Audio queue overflow; capture fell behind"; return }
+        if frames*2 > maxSamples { failure = "Audio block exceeds queue capacity"; return }
+        if samples.count + frames*2 > maxSamples {
+            if armed { failure = "Audio queue overflow; capture fell behind"; return }
+            // During device startup retain only the newest bounded samples;
+            // never encode pre-roll collected while other inputs initialize.
+            samples.removeFirst(samples.count + frames*2 - maxSamples)
+        }
         for i in 0..<frames { samples.append(data[0][i]); samples.append(data[1][i]) }
     }
     func read(_ destination: UnsafeMutablePointer<Float>, frames: Int) throws {
@@ -252,7 +259,7 @@ private final class ProgramAudioSource: NSObject, AVCaptureAudioDataOutputSample
         for i in 0..<(frames*2) { destination[i] = samples[i] }
         samples.removeFirst(frames*2)
     }
-    func discardQueued() { condition.lock(); samples.removeAll(keepingCapacity: true); condition.unlock() }
+    func discardQueued() { condition.lock(); samples.removeAll(keepingCapacity: true); armed = true; condition.unlock() }
     func stop() {
         condition.lock(); closed = true; condition.broadcast(); condition.unlock()
         output?.setSampleBufferDelegate(nil, queue: nil)
