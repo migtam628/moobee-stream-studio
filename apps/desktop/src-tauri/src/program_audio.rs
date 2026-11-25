@@ -10,6 +10,7 @@ pub(crate) struct AudioInput {
 }
 pub(crate) fn validate(inputs: &[AudioInput]) -> Result<(),String> {
     if inputs.len()>3 { return Err("At most three audio sources".into()); }
+    if inputs.iter().filter(|i|i.kind=="device").count()>1 && inputs.iter().any(|i|i.kind=="device" && i.device_id.is_none()) { return Err("Choose distinct named devices for multiple audio inputs".into()); }
     for (i,input) in inputs.iter().enumerate() {
         let valid = match input.kind.as_str() {
             "device" => input.device_id.as_ref().map_or(true, |id| !id.is_empty() && id.len()<=1024 && !id.chars().any(char::is_control)),
@@ -133,6 +134,7 @@ mod tests{
     #[test]fn validates_named_sources_and_limits(){
         assert!(validate(&[device("usb"),device("mic")]).is_ok());
         assert!(validate(&[device("usb"),device("usb")]).is_err());
+        let mut default=device("mic");default.device_id=None;assert!(validate(&[default,device("usb")]).is_err());
         assert!(validate(&[device("bad\0id")]).is_err());
         let mut i=device("mic");i.gain=f32::NAN;assert!(validate(&[i]).is_err());
     }
