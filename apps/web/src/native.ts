@@ -10,6 +10,34 @@ type VideoInput = { id: string; name: string; isDefault: boolean }
 let videoInputs: VideoInput[] = []
 let testedVideo: { id: string; image: string } | null = null
 const macHost = () => /Macintosh|Mac OS X/i.test(navigator.userAgent)
+type MovingFrame = { image: string | null; frameKey: string | null; liveVideo: boolean; waiting: boolean }
+const pendingPreview = new Set<Promise<MovingFrame>>()
+let previewUsed = false
+let captureActive = false
+let releasing: Promise<void> | null = null
+async function releaseVideoPreviews(): Promise<void> {
+  if (releasing) return releasing
+  if (!previewUsed && pendingPreview.size === 0) return
+  releasing = (async () => {
+    await Promise.allSettled([...pendingPreview])
+    await invoke('stop_video_previews')
+    previewUsed = false
+  })()
+  try { await releasing } finally { releasing = null }
+}
+async function captureWithPreviewReleased<T>(command: string, args: Record<string,unknown>): Promise<T> {
+  if (captureActive) throw new Error('Another native capture is active')
+  captureActive = true
+  try { await releaseVideoPreviews(); return await invoke<T>(command,args) }
+  finally { captureActive = false }
+}
+async function movingPreview(ids: string[], layout: SceneLayout, previousKey: string | null): Promise<MovingFrame> {
+  if (captureActive || releasing) return {image:null,frameKey:null,liveVideo:true,waiting:true}
+  previewUsed = true
+  const task = invoke<MovingFrame>('live_video_preview_frame',{deviceIds:ids,layout,previousKey})
+  pendingPreview.add(task)
+  try { return await task } finally { pendingPreview.delete(task) }
+}
 type Display = { id: number; name: string; width: number; height: number }
 type Saved = { version: 1; scenes: Scene[]; currentScene: string; previewScene: string; studioMode: boolean }
 const STORAGE_KEY = 'moobee-native-studio.v1'
@@ -224,7 +252,7 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
         typeof body.systemAudio !== 'boolean' || typeof body.microphone !== 'boolean') {
       throw new Error('Choose a valid 3–120-second native MP4 capture and audio options')
     }
-    return await invoke('capture_macos_mp4', {
+    return await captureWithPreviewReleased('capture_macos_mp4', {
       displayId: body.displayId, seconds: body.seconds,
       systemAudio: body.systemAudio, microphone: body.microphone
     })
@@ -262,7 +290,7 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
         if (!p || typeof p !== 'object' || !Number.isInteger(p.xPercent) || p.xPercent < 0 || p.xPercent > 100 || !Number.isInteger(p.yPercent) || p.yPercent < 0 || p.yPercent > 100 || !Number.isInteger(p.widthPercent) || p.widthPercent < 10 || p.widthPercent > 50) throw new Error('Invalid graphic placement')
       }
     }
-    return await invoke(mp4 ? 'capture_continuous_program_mp4' : 'capture_continuous_program_avi', {
+    return await captureWithPreviewReleased(mp4 ? 'capture_continuous_program_mp4' : 'capture_continuous_program_avi', {
       displayIds: ids, seconds: body.seconds, profile: body.profile, layout: validateSceneLayout(body.layout), overlay: body.overlay ?? null, ...(mp4 ? { webcam: body.webcam === true, microphone: body.microphone === true, micGain, ...(hasVideo ? { videoDeviceId } : {}) } : {})
     })
   }
@@ -275,19 +303,19 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
         body.seconds < 2 || body.seconds > 8) {
       throw new Error('Choose one to four unique Program displays and a 2–8 second test duration')
     }
-    return await invoke('capture_program_test_avi', { displayIds: ids, seconds: body.seconds, layout: validateSceneLayout(body.layout) })
+    return await captureWithPreviewReleased('capture_program_test_avi', { displayIds: ids, seconds: body.seconds, layout: validateSceneLayout(body.layout) })
   }
   if (path === '/clips/capture-avi') {
     if (typeof body.displayId !== 'number' || !Number.isSafeInteger(body.displayId) ||
         typeof body.seconds !== 'number' || !Number.isInteger(body.seconds) ||
         body.seconds < 2 || body.seconds > 8) throw new Error('Native AVI test duration must be 2–8 seconds')
-    return await invoke('capture_silent_avi', { displayId: body.displayId, seconds: body.seconds })
+    return await captureWithPreviewReleased('capture_silent_avi', { displayId: body.displayId, seconds: body.seconds })
   }
   if (path === '/clips/capture') {
     if (typeof body.displayId !== 'number' || !Number.isSafeInteger(body.displayId) ||
         typeof body.seconds !== 'number' || !Number.isInteger(body.seconds) ||
         body.seconds < 2 || body.seconds > 10) throw new Error('Invalid test clip request')
-    return await invoke('capture_test_clip', { displayId: body.displayId, seconds: body.seconds })
+    return await captureWithPreviewReleased('capture_test_clip', { displayId: body.displayId, seconds: body.seconds })
   }
   if (path.startsWith('/clips/preview')) {
     const clipId = new URL(path, 'http://localhost').searchParams.get('id')
@@ -301,8 +329,9 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
         body.seconds < 2 || body.seconds > 5) {
       throw new Error('Select a valid display and a 2–5 second capture diagnostic')
     }
-    return await invoke('probe_native_capture', { displayId: body.displayId, seconds: body.seconds })
+    return await captureWithPreviewReleased('probe_native_capture', { displayId: body.displayId, seconds: body.seconds })
   }
+  if (path === '/capture/stop-video-previews') { await releaseVideoPreviews(); return { stopped: true } }
   if (path === '/capture/video-inputs') {
     if (!macHost()) return { devices: [], supported: false }
     videoInputs = await invoke<VideoInput[]>('list_video_inputs')
@@ -314,7 +343,7 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
   if (path === '/capture/test-video-input') {
     if (!macHost() || !validVideoInputId(body.deviceId)) throw new Error('Select an available Mac video input')
     testedVideo = null
-    const image = await invoke<string>('test_video_input', { deviceId: body.deviceId })
+    const image = await captureWithPreviewReleased<string>('test_video_input', { deviceId: body.deviceId })
     testedVideo = { id: body.deviceId, image }
     return { image }
   }
@@ -323,12 +352,21 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
     return { displays, available: displays.length > 0 }
   }
   if (path.startsWith('/studio/snapshot')) {
-    const name = new URL(path, 'http://localhost').searchParams.get('scene') || draft.currentScene
+    const params = new URL(path, 'http://localhost').searchParams
+    const name = params.get('scene') || draft.currentScene
     const scene = draft.scenes.find(s => s.name === name)
     if (!scene) throw new Error('Scene not found')
     const enabled = scene.sources.filter(source => source.enabled)
     const video = enabled.find(source => source.kind === 'video')
     if (video) {
+      if (params.get('mode') === 'live') {
+        const ids = enabled.map(source => source.deviceId)
+        if (!macHost() || enabled.length > 2 || enabled.some(source => source.kind !== 'video') || !ids.every(validVideoInputId) || new Set(ids).size !== ids.length) {
+          throw new Error('Live video preview supports one or two distinct Mac video inputs; hide other sources.')
+        }
+        const key = params.get('key')
+        return await movingPreview(ids,validateSceneLayout(scene.layout),key && key.length <= 256 ? key : null)
+      }
       if (enabled.length !== 1) throw new Error('Enable only the selected capture card or camera for this video input test')
       if (testedVideo?.id !== video.deviceId) throw new Error('Video input selected. Use Test video signal in Sources to acquire a still frame.')
       return { image: testedVideo?.image ?? null }

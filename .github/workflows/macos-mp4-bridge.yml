@@ -77,6 +77,7 @@ jobs:
           cargo test --lib program_continuous_avi::tests
           cargo test --lib program_mp4_sink::tests
           cargo test --lib program_camera::tests
+          cargo test --lib video_preview::tests
           cargo test --lib media_clock::tests
           cargo test --lib audio_mix::tests
           cargo test --lib program_overlay::tests
