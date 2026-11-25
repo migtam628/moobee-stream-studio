@@ -80,18 +80,19 @@ jobs:
           cargo test --lib video_preview::tests
           cargo test --lib media_clock::tests
           cargo test --lib audio_mix::tests
+          cargo test --lib program_audio::tests
           cargo test --lib program_overlay::tests
           cargo test --lib stream_mux::tests
       # A cargo check or test binary is not an installed Tauri application.
       # Verify at least one actual .app contains the Swift runtime rpath and
       # permission reasons before considering hardware acceptance.
       - name: Package unsigned Apple Silicon macOS app for acceptance
-        if: matrix.label == 'Apple Silicon'
+        if: github.event_name == 'workflow_dispatch' && matrix.label == 'Apple Silicon'
         working-directory: apps/desktop
         env:
           APPLE_SIGNING_IDENTITY: '-'
         run: npx tauri build --bundles app
       - name: Inspect packaged macOS runtime and privacy declarations
-        if: matrix.label == 'Apple Silicon'
+        if: github.event_name == 'workflow_dispatch' && matrix.label == 'Apple Silicon'
         shell: bash
         run: bash scripts/verify-macos-app-bundle.sh
