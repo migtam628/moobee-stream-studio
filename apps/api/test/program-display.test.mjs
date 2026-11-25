@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { singleProgramDisplayId, programTestDisplayIds, programTestLayout } from '../../../apps/web/src/programDisplay.ts'
+import { singleProgramDisplayId, programTestDisplayIds, programTestLayout, programVideoInput, validVideoInputId } from '../../../apps/web/src/programDisplay.ts'
 
 const state = {
   studioMode: true,
@@ -72,4 +72,18 @@ test('Program layout and layer order are isolated from Preview; legacy defaults 
   assert.deepEqual(programTestDisplayIds(layoutState), [1, 0])
   layoutState.scenes[0].layout = 'invalid'
   assert.throws(() => programTestLayout(layoutState), /Unsupported native scene layout/)
+})
+
+test('selected video device is stable and isolated from Preview', () => {
+  const c = structuredClone(state)
+  c.scenes[0].sources = [{kind:'video', deviceId:'usb-card-0123', enabled:true}]
+  c.scenes[1].sources = [{kind:'video', deviceId:'other-camera', enabled:true}]
+  assert.equal(programVideoInput(c), 'usb-card-0123')
+  c.scenes[0].sources.push({kind:'display',deviceId:'0',enabled:true})
+  assert.throws(() => programVideoInput(c), /only one/)
+  c.scenes[0].sources[1].enabled = false
+  assert.equal(programVideoInput(c), 'usb-card-0123')
+  assert.equal(programVideoInput(state), undefined)
+  assert.equal(validVideoInputId('bad\0id'), false)
+  assert.equal(validVideoInputId(''), false)
 })
