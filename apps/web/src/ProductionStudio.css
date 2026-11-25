@@ -171,3 +171,13 @@
 .graphic-stage{position:relative;aspect-ratio:16/9;background:#111318;border:1px solid #484b54;border-radius:4px;overflow:hidden;touch-action:none;cursor:crosshair}
 .graphic-stage>span{position:absolute;left:6px;bottom:4px;color:#888e9a;font-size:9px;pointer-events:none}
 .graphic-stage>img{position:absolute;object-fit:contain;outline:1px solid #b7a0ff;pointer-events:none}
+
+.production-monitor .preview-canvas{position:relative}
+.source-transform-canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:3;touch-action:none}
+.source-transform-outline,.source-transform-handle{pointer-events:all;touch-action:none;cursor:move}
+.source-transform-handle{cursor:nwse-resize}
+.source-name-button{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;color:inherit;font-size:11px;background:transparent;border:0;padding:4px 3px;border-radius:3px}
+.source-name-button.selected{background:#443953;color:#f1e8ff}
+.transform-controls{padding:9px;border-top:1px solid var(--studio-border);display:flex;flex-direction:column;gap:7px}
+.transform-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px}
+.transform-fields input{width:100%;min-width:0;background:#17191e;border:1px solid #454953;color:#eee;border-radius:4px;padding:4px;font-size:11px}
