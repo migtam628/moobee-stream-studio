@@ -46,6 +46,7 @@ jobs:
           cargo test --lib program_continuous_avi::tests
           cargo test --lib media_clock::tests
           cargo test --lib audio_mix::tests
+          cargo test --lib program_audio::tests
           cargo test --lib program_overlay::tests
           cargo test --lib stream_mux::tests
       - name: Compile Windows Tauri native media commands
