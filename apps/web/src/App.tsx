@@ -11,6 +11,8 @@ import { version as appVersion } from '../../../package.json'
 import { buildIdentity } from './buildIdentity'
 import BrowserRecorder from './BrowserRecorder'
 import QuickCapture from './QuickCapture'
+import { TransformCanvas, TransformControls, geometry } from './SourceTransformEditor'
+import type { SourceTransform } from './programDisplay'
 import ServiceDiagnostics from './ServiceDiagnostics'
 import GithubUpdates from './GithubUpdates'
 import { offline, type Activity as ActivityItem, type Alert, type StudioStatus } from './types'
@@ -74,7 +76,7 @@ function formatElapsed(seconds: number) {
 
 type PreviewRefresh = 'live' | 'fast' | 'normal' | 'paused'
 
-function ScenePreview({ status, label, previewScene, active, refreshRate, revision }: { status: StudioStatus; label: string; previewScene: string; active: boolean; refreshRate: PreviewRefresh; revision: string }) {
+function ScenePreview({ status, label, previewScene, active, refreshRate, revision, editor }: { status: StudioStatus; label: string; previewScene: string; active: boolean; refreshRate: PreviewRefresh; revision: string; editor?:ReactNode }) {
   const [image, setImage] = useState('')
   const [previewError, setPreviewError] = useState('')
   const [lastFrame, setLastFrame] = useState<number | null>(null)
@@ -117,6 +119,7 @@ function ScenePreview({ status, label, previewScene, active, refreshRate, revisi
     <div className="preview-heading"><span><Monitor size={15}/>{label}</span><span>{!status.connected ? 'Local studio offline' : refreshRate === 'paused' ? 'Preview paused' : moving ? 'Native video · up to 10 fps' : refreshRate === 'live' ? 'Display stills / waiting for video' : refreshRate === 'fast' ? 'Still frames · 1s interval' : 'Still frames · 5s interval'}</span></div>
     <div className="preview-canvas">
       {image ? <img src={image} alt={`MooBee scene: ${previewScene}`} /> : <div className="preview-empty"><Radio size={34}/><strong>{refreshRate === 'paused' ? 'Preview paused' : moving ? 'Waiting for native video' : 'No preview available'}</strong><span>{status.connected ? 'Add or enable a compatible source in this scene' : 'Add a native display source to preview this scene'}</span></div>}
+      {editor}
       {status.streaming && <span className="live-flag">LIVE</span>}
       {lastFrame !== null && <span className="snapshot-timestamp" title="Time the last preview frame was received">{new Date(lastFrame).toLocaleTimeString()}</span>}
     </div>
@@ -150,7 +153,7 @@ function ScenesPanel({ status, perform, pending }: { status: StudioStatus; perfo
   </Panel>
 }
 
-function SourcesPanel({ status, perform, pending }: { status: StudioStatus; perform: (path: string, body: object) => Promise<boolean>; pending: boolean }) {
+function SourcesPanel({ status, perform, pending, selectedSource, selectSource, inspector }: { status: StudioStatus; perform: (path: string, body: object) => Promise<boolean>; pending: boolean; selectedSource:number|null; selectSource:(id:number)=>void; inspector?:ReactNode }) {
   const [displays, setDisplays] = useState<{ id: number; name: string; width: number; height: number }[]>([])
   const [devices, setDevices] = useState<{ id: string; name: string; isDefault: boolean }[]>([])
   const [selected, setSelected] = useState('')
@@ -224,7 +227,7 @@ function SourcesPanel({ status, perform, pending }: { status: StudioStatus; perf
       <small className="help-text">Reorder sources to choose the primary display and inset order. Applies to the selected scene preview and supported Program recordings. Live video mode accepts two named video inputs, but recording currently accepts one.</small>
     </div>
     <div className="rows-scroll">{status.sources.length ? status.sources.map((source, index) => <div className="source-row" key={source.id}>
-      <Video size={16}/><span className="truncate">{source.name}</span>
+      <Video size={16}/><button className={`source-name-button ${selectedSource===source.id?'selected':''}`} title={`Select ${source.name} for transform`} disabled={!runningInTauri()||!source.enabled} onClick={()=>selectSource(source.id)}>{source.name}</button>
       <button className="icon-button" disabled={pending || isStaticPreview || index === 0} aria-label={`Move ${source.name} up`} title="Move source up" onClick={() => void perform('/studio/action', { action: 'moveSource', sceneItemId: source.id, direction: 'up' })}>↑</button>
       <button className="icon-button" disabled={pending || isStaticPreview || index === status.sources.length - 1} aria-label={`Move ${source.name} down`} title="Move source down" onClick={() => void perform('/studio/action', { action: 'moveSource', sceneItemId: source.id, direction: 'down' })}>↓</button>
       <button disabled={pending || isStaticPreview} title={source.enabled ? 'Hide source' : 'Show source'} className="icon-button" onClick={() => void perform('/studio/action', { action: 'source', sceneItemId: source.id, enabled: !source.enabled })}>{source.enabled ? <Eye size={18}/> : <EyeOff size={18}/>}</button>
@@ -232,6 +235,7 @@ function SourcesPanel({ status, perform, pending }: { status: StudioStatus; perf
         if (window.confirm(`Remove source "${source.name}" from this scene?`)) void perform('/studio/action', { action: 'removeSource', sceneItemId: source.id })
       }}><X size={17}/></button>
     </div>) : <div className="empty-list">Choose a display or supported video capture device and add it to your scene.</div>}</div>
+    {inspector}
   </Panel>
 }
 
@@ -258,7 +262,15 @@ function Studio({ status, perform, pending, setTab, active }: { status: StudioSt
     return () => { document.removeEventListener('visibilitychange',onVisibility); release() }
   }, [active, refreshRate, macVideoPreview])
   const selectedScene = status.studioMode ? status.previewScene : status.currentScene
-  const sceneRevision = JSON.stringify([status.sceneLayout, status.sources.map(source => [source.id, source.enabled, source.deviceId])])
+  const [selectedSource,setSelectedSource]=useState<number|null>(null)
+  const [editTransforms,setEditTransforms]=useState(false)
+  const [lockRatio,setLockRatio]=useState(true)
+  const source=status.sources.find(item=>item.id===selectedSource&&item.enabled)??status.sources.find(item=>item.enabled)
+  const initial=source?geometry(status.sources,source.id,status.sceneLayout??'grid'):undefined
+  const saveTransform=(id:number,transform:SourceTransform|null)=>{void perform('/studio/action',{action:'sourceTransform',sceneName:selectedScene,sceneItemId:id,transform})}
+  const editor=editTransforms&&runningInTauri()&&initial?<TransformCanvas sources={status.sources} layout={status.sceneLayout??'grid'} selected={source?.id??null} select={setSelectedSource} save={saveTransform} disabled={pending} lockRatio={lockRatio}/>:undefined
+  const inspector=editTransforms&&source&&initial?<TransformControls source={source} initial={initial} save={t=>saveTransform(source.id,t)} reset={()=>saveTransform(source.id,null)} disabled={pending} lockRatio={lockRatio} setLockRatio={setLockRatio}/>:undefined
+  const sceneRevision = JSON.stringify([status.sceneLayout, status.sources.map(source => [source.id, source.enabled, source.deviceId, source.transform])])
   const revisionFor = (name: string) => name === selectedScene ? sceneRevision : name
   return <div className="production-studio">
     <div className="production-toolbar">
@@ -266,15 +278,16 @@ function Studio({ status, perform, pending, setTab, active }: { status: StudioSt
       <div className="production-toolbar-actions">
         <label className="preview-rate-control">Preview refresh <select aria-label="Preview refresh" value={refreshRate} onChange={e => setRefreshRate(e.target.value as PreviewRefresh)}>{macVideoPreview && <option value="live">Live video inputs (Mac)</option>}<option value="fast">1 second</option><option value="normal">5 seconds</option><option value="paused">Paused</option></select></label>
         <button className={`tool-button ${status.studioMode ? 'tool-active' : ''}`} aria-pressed={status.studioMode} disabled={!status.connected || pending} onClick={() => void perform('/studio/action', { action: 'studioMode', studioModeEnabled: !status.studioMode })}><Layers size={15}/>Studio Mode</button>
+        {runningInTauri() && <button className={`tool-button ${editTransforms?'tool-active':''}`} aria-pressed={editTransforms} disabled={pending||!initial} onClick={()=>setEditTransforms(v=>!v)}><SlidersHorizontal size={15}/>Edit sources</button>}
         {status.studioMode && <button className="tool-button take-button" disabled={!status.connected || pending} onClick={() => void perform('/studio/action', { action: 'transition' })}><RefreshCcw size={15}/>Take</button>}
       </div>
     </div>
     <div className={`production-monitor-grid ${status.studioMode ? 'dual-monitor' : 'single-monitor'}`}>
-      {status.studioMode && <div className="production-monitor preview-monitor"><ScenePreview status={status} label="Preview" previewScene={status.previewScene || status.currentScene} active={active} refreshRate={refreshRate} revision={revisionFor(status.previewScene || status.currentScene)}/><span className="monitor-scene-name">{status.previewScene || status.currentScene || 'No scene'}</span></div>}
-      <div className="production-monitor program-monitor"><ScenePreview status={status} label="Program" previewScene={status.currentScene} active={active} refreshRate={refreshRate} revision={revisionFor(status.currentScene)}/><span className="monitor-scene-name">{status.currentScene || 'No scene'} <small>· Not live output</small></span></div>
+      {status.studioMode && <div className="production-monitor preview-monitor"><ScenePreview status={status} label="Preview" previewScene={status.previewScene || status.currentScene} active={active} refreshRate={refreshRate} revision={revisionFor(status.previewScene || status.currentScene)} editor={editor}/><span className="monitor-scene-name">{status.previewScene || status.currentScene || 'No scene'}</span></div>}
+      <div className="production-monitor program-monitor"><ScenePreview status={status} label="Program" previewScene={status.currentScene} active={active} refreshRate={refreshRate} revision={revisionFor(status.currentScene)} editor={status.studioMode?undefined:editor}/><span className="monitor-scene-name">{status.currentScene || 'No scene'} <small>· Not live output</small></span></div>
     </div>
     <QuickCapture active={active} scenes={<ScenesPanel status={status} perform={perform} pending={pending}/>}
-      sources={<SourcesPanel status={status} perform={perform} pending={pending}/>}
+      sources={<SourcesPanel status={status} perform={perform} pending={pending} selectedSource={source?.id??null} selectSource={id=>{setSelectedSource(id);setEditTransforms(true)}} inspector={inspector}/>}
       otherAudio={status.inputs.length ? <MixerPanel status={status} perform={perform} pending={pending}/> : undefined}
       openClips={() => setTab('Clips')} openSettings={() => setTab('Settings')}
       streamControl={<button className={`go-live dock-stream ${status.streaming ? 'stop-live' : ''}`} disabled={!status.broadcastAvailable || pending} title="Native RTMPS transport is not implemented" onClick={() => void perform('/studio/action', { action: 'stream' })}>{status.streaming ? <Square size={15}/> : <Radio size={16}/>} {status.streaming ? 'End Stream' : 'Go Live (unavailable)'}</button>}/>
