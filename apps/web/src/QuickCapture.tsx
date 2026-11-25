@@ -488,7 +488,7 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
             <div aria-label="Program recording statistics" role="status" className="dock-note">
               {programStats ? <>
                 <b>{programStats.phase} · {programStats.fps > 0 ? (programStats.recordedFrames/programStats.fps).toFixed(1) : '0.0'}s media</b>
-                <div>{programStats.recordedFrames} encoded frames · {(programStats.elapsedMs/1000).toFixed(1)}s wall time</div>
+                <div>{programStats.recordedFrames} submitted frames · {(programStats.elapsedMs/1000).toFixed(1)}s wall time</div>
                 <div>{(programStats.fileBytes/1048576).toFixed(2)} MiB written · {programStats.recordedFrames > 0 ? (programStats.fileBytes*8*programStats.fps/programStats.recordedFrames/1000).toFixed(0) : '—'} kbps file average (buffered)</div>
                 <div>{programStats.lateFrames} late slots · {programStats.repeatedSourceSlots} repeated source slots</div>
                 <div>{(programStats.pausedMs/1000).toFixed(1)}s paused (nominal)</div>
