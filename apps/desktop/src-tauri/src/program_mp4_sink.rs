@@ -4,7 +4,7 @@ use std::{ffi::{CStr, CString, c_void}, fs::OpenOptions, os::raw::{c_char,c_int}
 
 unsafe extern "C" {
     fn moobee_program_writer_create(path: *const c_char, width: c_int, height: c_int,
-        fps: c_int, microphone: c_int, error: *mut c_char, capacity: c_int) -> *mut c_void;
+        fps: c_int, microphone: c_int, bitrate_kbps: c_int, error: *mut c_char, capacity: c_int) -> *mut c_void;
     fn moobee_program_writer_append(handle: *mut c_void, rgba: *const u8, length: usize,
         error: *mut c_char, capacity: c_int) -> c_int;
     fn moobee_program_writer_append_audio(handle: *mut c_void, pcm: *const f32, frames: usize, error: *mut c_char, capacity: c_int) -> c_int;
@@ -22,10 +22,14 @@ impl ProgramMp4Sink {
         Self::new_with_audio(path,width,height,fps,false)
     }
     pub(crate) fn new_with_audio(path: &Path, width: u32, height: u32, fps: u32, microphone: bool) -> Result<Self,String> {
+        Self::new_with_settings(path, width, height, fps, microphone, if width == 1920 { 6000 } else { 3000 })
+    }
+    pub(crate) fn new_with_settings(path: &Path, width: u32, height: u32, fps: u32, microphone: bool, bitrate_kbps: u32) -> Result<Self,String> {
+        if !matches!(bitrate_kbps, 1500 | 3000 | 6000) { return Err("Invalid MP4 bitrate preset".into()); }
         let path = CString::new(path.to_string_lossy().as_bytes()).map_err(|_| "Invalid MP4 path")?;
         let mut error = [0; 512];
         let handle = unsafe { moobee_program_writer_create(path.as_ptr(), width as c_int,
-            height as c_int, fps as c_int, if microphone { 1 } else { 0 }, error.as_mut_ptr(), 512) };
+            height as c_int, fps as c_int, if microphone { 1 } else { 0 }, bitrate_kbps as c_int, error.as_mut_ptr(), 512) };
         if handle.is_null() { Err(message(&error)) } else { Ok(Self(handle)) }
     }
 
