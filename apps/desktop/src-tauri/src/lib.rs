@@ -19,6 +19,7 @@ mod program_overlay;
 mod media_clock;
 mod audio_mix;
 mod program_audio;
+mod source_transform;
 mod stream_mux;
 
 use axum::{
@@ -173,11 +174,11 @@ async fn list_video_inputs() -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
-async fn live_video_preview_frame(device_ids: Vec<String>, layout: Option<String>, previous_key: Option<String>) -> Result<serde_json::Value,String> {
+async fn live_video_preview_frame(device_ids: Vec<String>, layout: Option<String>, previous_key: Option<String>, transforms: Option<Vec<source_transform::SourceTransform>>) -> Result<serde_json::Value,String> {
     #[cfg(target_os = "macos")]
-    { serde_json::to_value(video_preview::frame(device_ids,layout,previous_key).await?).map_err(|e|e.to_string()) }
+    { serde_json::to_value(video_preview::frame(device_ids,layout,previous_key,transforms).await?).map_err(|e|e.to_string()) }
     #[cfg(not(target_os = "macos"))]
-    { let _=(device_ids,layout,previous_key); Err("Live video input preview requires macOS".into()) }
+    { let _=(device_ids,layout,previous_key,transforms); Err("Live video input preview requires macOS".into()) }
 }
 
 #[tauri::command]
