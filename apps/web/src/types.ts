@@ -1,3 +1,4 @@
+import type { SourceTransform } from './programDisplay'
 export type StudioStatus = {
   connected: boolean
   address: string
@@ -10,7 +11,7 @@ export type StudioStatus = {
   studioMode: boolean
   scenes: string[]
   sceneLayout?: 'grid' | 'pip'
-  sources: { id: number; name: string; enabled: boolean; kind: string; deviceId?: string }[]
+  sources: { id: number; name: string; enabled: boolean; kind: string; deviceId?: string; transform?:SourceTransform }[]
   inputs: { name: string; kind: string; muted: boolean; volume: number }[]
   streaming: boolean
   recording: boolean
