@@ -72,28 +72,39 @@ function formatElapsed(seconds: number) {
   return `${h}:${m}:${s}`
 }
 
-type PreviewRefresh = 'fast' | 'normal' | 'paused'
+type PreviewRefresh = 'live' | 'fast' | 'normal' | 'paused'
 
 function ScenePreview({ status, label, previewScene, active, refreshRate, revision }: { status: StudioStatus; label: string; previewScene: string; active: boolean; refreshRate: PreviewRefresh; revision: string }) {
   const [image, setImage] = useState('')
   const [previewError, setPreviewError] = useState('')
   const [lastFrame, setLastFrame] = useState<number | null>(null)
+  const [moving, setMoving] = useState(false)
   const inFlight = useRef(false)
-  useEffect(() => { setImage(''); setPreviewError(''); setLastFrame(null) }, [previewScene, revision])
+  useEffect(() => { setImage(''); setPreviewError(''); setLastFrame(null); setMoving(false) }, [previewScene, revision, refreshRate])
   useEffect(() => {
     if (!active || !status.connected || !previewScene || refreshRate === 'paused') return
     let cancelled = false
     let timer: ReturnType<typeof setTimeout> | undefined
-    const delay = refreshRate === 'fast' ? 1000 : 5000
+    let key: string | null = null
+    let delay = refreshRate === 'normal' ? 5000 : 1000
     async function load() {
       if (cancelled) return
-      if (document.hidden || inFlight.current) { timer = setTimeout(load, delay); return }
+      if (document.hidden || inFlight.current) { timer = setTimeout(load, 250); return }
       inFlight.current = true
       try {
-        const response = await request<{ image: string }>(`/studio/snapshot?scene=${encodeURIComponent(previewScene)}`)
-        if (!cancelled) { setImage(response.image ?? ''); setPreviewError(''); setLastFrame(response.image ? Date.now() : null) }
+        const params = new URLSearchParams({scene:previewScene,mode:refreshRate})
+        if (key) params.set('key',key)
+        const response = await request<{ image: string | null; liveVideo?: boolean; frameKey?: string | null; waiting?: boolean }>(`/studio/snapshot?${params}`)
+        if (!cancelled) {
+          setMoving(response.liveVideo === true)
+          setPreviewError('')
+          delay = response.liveVideo ? 100 : refreshRate === 'normal' ? 5000 : 1000
+          if (response.waiting) { setImage(''); setLastFrame(null); key = null }
+          else if (response.image) { setImage(response.image); setLastFrame(Date.now()); key = response.frameKey ?? null }
+          else if (!response.liveVideo || !response.frameKey) { setImage(''); setLastFrame(null); key = null }
+        }
       } catch (error) {
-        if (!cancelled) { setImage(''); setLastFrame(null); setPreviewError((error as Error).message || 'Could not render native scene still preview') }
+        if (!cancelled) { setImage(''); setLastFrame(null); setMoving(false); key = null; delay = 1000; setPreviewError((error as Error).message || 'Could not render native scene preview') }
       } finally {
         inFlight.current = false
         if (!cancelled) timer = setTimeout(load, delay)
@@ -103,11 +114,11 @@ function ScenePreview({ status, label, previewScene, active, refreshRate, revisi
     return () => { cancelled = true; if (timer !== undefined) clearTimeout(timer) }
   }, [previewScene, status.connected, active, refreshRate, revision])
   return <div className="preview-block">
-    <div className="preview-heading"><span><Monitor size={15}/>{label}</span><span>{!status.connected ? 'Local studio offline' : refreshRate === 'paused' ? 'Preview paused' : refreshRate === 'fast' ? 'Still frames · 1s interval' : 'Still frames · 5s interval'}</span></div>
+    <div className="preview-heading"><span><Monitor size={15}/>{label}</span><span>{!status.connected ? 'Local studio offline' : refreshRate === 'paused' ? 'Preview paused' : moving ? 'Native video · up to 10 fps' : refreshRate === 'live' ? 'Display stills / waiting for video' : refreshRate === 'fast' ? 'Still frames · 1s interval' : 'Still frames · 5s interval'}</span></div>
     <div className="preview-canvas">
-      {image ? <img src={image} alt={`MooBee scene: ${previewScene}`} /> : <div className="preview-empty"><Radio size={34}/><strong>{refreshRate === 'paused' ? 'Preview paused' : 'No preview available'}</strong><span>{status.connected ? 'Add or enable a display source in this scene' : 'Add a native display source to preview this scene'}</span></div>}
+      {image ? <img src={image} alt={`MooBee scene: ${previewScene}`} /> : <div className="preview-empty"><Radio size={34}/><strong>{refreshRate === 'paused' ? 'Preview paused' : moving ? 'Waiting for native video' : 'No preview available'}</strong><span>{status.connected ? 'Add or enable a compatible source in this scene' : 'Add a native display source to preview this scene'}</span></div>}
       {status.streaming && <span className="live-flag">LIVE</span>}
-      {lastFrame !== null && <span className="snapshot-timestamp" title="Time the last still frame was received">{new Date(lastFrame).toLocaleTimeString()}</span>}
+      {lastFrame !== null && <span className="snapshot-timestamp" title="Time the last preview frame was received">{new Date(lastFrame).toLocaleTimeString()}</span>}
     </div>
     {previewError && <small className="preview-error" role="status">{previewError}</small>}
   </div>
@@ -178,7 +189,7 @@ function SourcesPanel({ status, perform, pending }: { status: StudioStatus; perf
     setTesting(true); setSignal(''); setDeviceError('')
     try {
       await request<{ image: string }>('/capture/test-video-input', { deviceId: selectedVideo.id })
-      setSignal('Video frame received · still preview only. Select the device as the sole enabled scene source.')
+      setSignal('Video frame received · verify actual HDMI content. Select Live video inputs for moving preview.')
     } catch (cause) { setDeviceError('Video signal test failed: ' + String(cause)) }
     finally { setTesting(false) }
   }
@@ -200,7 +211,7 @@ function SourcesPanel({ status, perform, pending }: { status: StudioStatus; perf
       {mac && <small className="dock-note">{devices.length} video input(s) detected. USB/UVC devices appear by their macOS names. Detection does not confirm HDMI signal.</small>}
       {signal && <small className="dock-note" role="status">{signal}</small>}
       {deviceError && <small className="preview-error" role="alert">{deviceError}</small>}
-      {selectedVideo && <small className="dock-note">Mac recording test: enable just this video source. Disable the separate webcam inset. Video preview shows the last manually tested still, not live video.</small>}
+      {selectedVideo && <small className="dock-note">Mac recording test: enable just this video source. Disable the separate webcam inset. Choose Live video inputs in Preview refresh for moving video. For preview only, two distinct video inputs may share Grid or PiP.</small>}
     </div>
     <div className="clip-form">
       <label>Scene layout
@@ -210,7 +221,7 @@ function SourcesPanel({ status, perform, pending }: { status: StudioStatus; perf
           <option value="pip">Picture-in-picture · first source primary</option>
         </select>
       </label>
-      <small className="help-text">Reorder sources to choose the primary display and inset order. Applies to the selected scene's still preview and new native Program test recordings. Webcam and PNG are configured under Recording layers; they do not appear in still previews.</small>
+      <small className="help-text">Reorder sources to choose the primary display and inset order. Applies to the selected scene preview and supported Program recordings. Live video mode accepts two named video inputs, but recording currently accepts one.</small>
     </div>
     <div className="rows-scroll">{status.sources.length ? status.sources.map((source, index) => <div className="source-row" key={source.id}>
       <Video size={16}/><span className="truncate">{source.name}</span>
@@ -238,6 +249,14 @@ function MixerPanel({ status, perform, pending }: { status: StudioStatus; perfor
 
 function Studio({ status, perform, pending, setTab, active }: { status: StudioStatus; perform: (path: string, body: object) => Promise<boolean>; pending: boolean; setTab: (t: Tab) => void; active: boolean }) {
   const [refreshRate, setRefreshRate] = useState<PreviewRefresh>('fast')
+  const macVideoPreview = runningInTauri() && /Macintosh|Mac OS X/i.test(navigator.userAgent)
+  useEffect(() => {
+    if (!active || refreshRate !== 'live' || !macVideoPreview) return
+    const release = () => { void request('/capture/stop-video-previews', {}).catch(() => { /* native lease is a second cleanup path */ }) }
+    const onVisibility = () => { if (document.hidden) release() }
+    document.addEventListener('visibilitychange',onVisibility)
+    return () => { document.removeEventListener('visibilitychange',onVisibility); release() }
+  }, [active, refreshRate, macVideoPreview])
   const selectedScene = status.studioMode ? status.previewScene : status.currentScene
   const sceneRevision = JSON.stringify([status.sceneLayout, status.sources.map(source => [source.id, source.enabled, source.deviceId])])
   const revisionFor = (name: string) => name === selectedScene ? sceneRevision : name
@@ -245,7 +264,7 @@ function Studio({ status, perform, pending, setTab, active }: { status: StudioSt
     <div className="production-toolbar">
       <div className="production-heading"><h1>Studio</h1><span className="production-mode">{status.connected ? 'Local workspace' : 'Offline'}</span></div>
       <div className="production-toolbar-actions">
-        <label className="preview-rate-control">Preview refresh <select aria-label="Preview refresh" value={refreshRate} onChange={e => setRefreshRate(e.target.value as PreviewRefresh)}><option value="fast">1 second</option><option value="normal">5 seconds</option><option value="paused">Paused</option></select></label>
+        <label className="preview-rate-control">Preview refresh <select aria-label="Preview refresh" value={refreshRate} onChange={e => setRefreshRate(e.target.value as PreviewRefresh)}>{macVideoPreview && <option value="live">Live video inputs (Mac)</option>}<option value="fast">1 second</option><option value="normal">5 seconds</option><option value="paused">Paused</option></select></label>
         <button className={`tool-button ${status.studioMode ? 'tool-active' : ''}`} aria-pressed={status.studioMode} disabled={!status.connected || pending} onClick={() => void perform('/studio/action', { action: 'studioMode', studioModeEnabled: !status.studioMode })}><Layers size={15}/>Studio Mode</button>
         {status.studioMode && <button className="tool-button take-button" disabled={!status.connected || pending} onClick={() => void perform('/studio/action', { action: 'transition' })}><RefreshCcw size={15}/>Take</button>}
       </div>
