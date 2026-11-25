@@ -97,6 +97,9 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
   if(cardAudio && cardDevice) audioRows.push({name:'HDMI / USB Audio',input:{kind:'device',deviceId:cardDevice,gain:cardGain,muted:cardGain===0}})
   if(desktopAudio) audioRows.push({name:'Desktop Audio',input:{kind:'desktop',deviceId:null,gain:desktopGain,muted:desktopGain===0}})
   const audioConfig = JSON.stringify(audioRows.map(r=>r.input))
+  const audioConfigRef = useRef(audioConfig)
+  audioConfigRef.current = audioConfig
+  const audioIdentity = JSON.stringify(audioRows.map(r=>[r.input.kind,r.input.deviceId]))
   const audioSelectionError = cardAudio && !cardDevice ? 'Select the capture card audio input.' : cardAudio && programMic && (!micDevice || cardDevice===micDevice) ? 'Select different named microphone and HDMI audio devices.' : ''
 
   const [graphic, setGraphic] = useState<GraphicOverlay | null>(null)
@@ -117,7 +120,7 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
       if(cancelled)return
       if(document.hidden){timer=setTimeout(update,250);return}
       try{
-        const response=await request<{levels:AudioLevels|null}>('/capture/audio-levels',{inputs:JSON.parse(audioConfig)})
+        const response=await request<{levels:AudioLevels|null}>('/capture/audio-levels',{inputs:JSON.parse(audioConfigRef.current)})
         if(!cancelled){setAudioLevels(response.levels);setAudioError('')}
       }catch(cause){if(!cancelled){setAudioLevels(null);setAudioError(String(cause))}}
       if(!cancelled)timer=setTimeout(update,250)
@@ -126,7 +129,7 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
     const visibility=()=>{if(document.hidden){setAudioLevels(null);void request('/capture/stop-audio-levels',{}).catch(()=>{})}}
     document.addEventListener('visibilitychange',visibility)
     return()=>{cancelled=true;if(timer!==undefined)clearTimeout(timer);document.removeEventListener('visibilitychange',visibility);void request('/capture/stop-audio-levels',{}).catch(()=>{})}
-  },[mac,active,liveMeter,audioConfig,audioSelectionError,busy])
+  },[mac,active,liveMeter,audioIdentity,audioSelectionError,busy])
   const [captureMode, setCaptureMode] = useState<'screen' | 'program' | null>(null)
   const [stopRequested, setStopRequested] = useState(false)
   const [error, setError] = useState('')
