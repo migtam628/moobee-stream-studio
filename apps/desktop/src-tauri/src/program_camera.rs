@@ -78,13 +78,11 @@ pub(crate) fn list_inputs() -> Result<Vec<VideoInput>, String> {
     Ok(devices.into_iter().filter(|d| valid_device_id(&d.id)).collect())
 }
 
-#[tauri::command]
-pub async fn list_video_inputs() -> Result<Vec<VideoInput>, String> {
+pub(crate) async fn list_video_inputs() -> Result<Vec<VideoInput>, String> {
     tauri::async_runtime::spawn_blocking(list_inputs).await.map_err(|e| e.to_string())?
 }
 
-#[tauri::command]
-pub async fn test_video_input(device_id: String) -> Result<String, String> {
+pub(crate) async fn test_video_input(device_id: String) -> Result<String, String> {
     if !valid_device_id(&device_id) { return Err("Invalid video input ID".into()); }
     tauri::async_runtime::spawn_blocking(move || {
         use crate::clip::{CaptureLock, CAPTURE_BUSY};
