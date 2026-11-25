@@ -6,6 +6,7 @@ import { singleProgramDisplayId, programTestDisplayIds, programTestLayout } from
 
 type Display = { id: number; name: string; width: number; height: number }
 type Availability = { supported: boolean; requiredMacos: string; osVersion?: string | null; reason?: string; microphoneSupported?: boolean; engine?: string }
+type OverlayPlacement = { xPercent: number; yPercent: number; widthPercent: number }
 type GraphicOverlay = { width: number; height: number; rgbaBase64: string }
 type CapturedFile = {
   id: string
@@ -65,6 +66,8 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
   const [micGain, setMicGain] = useState(1)
   const [graphic, setGraphic] = useState<GraphicOverlay | null>(null)
   const [graphicName, setGraphicName] = useState('')
+  const [graphicPreview, setGraphicPreview] = useState('')
+  const [placement, setPlacement] = useState<OverlayPlacement>({ xPercent: 0, yPercent: 0, widthPercent: 25 })
   const [graphicLoading, setGraphicLoading] = useState(false)
   const [systemAudio, setSystemAudio] = useState(false)
   const [microphone, setMicrophone] = useState(false)
@@ -175,7 +178,7 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
 
   async function loadProgramGraphic(file?: File) {
     if (!file) return
-    setGraphicLoading(true); setGraphic(null); setGraphicName(''); setError('')
+    setGraphicLoading(true); setGraphic(null); setGraphicName(''); setGraphicPreview(''); setError('')
     try {
       if (file.type !== 'image/png' || file.size > 2 * 1024 * 1024) throw new Error('Choose a PNG of 2 MB or less')
       const image = await createImageBitmap(file)
@@ -194,6 +197,7 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
         for (let i = 0; i < pixels.length; i += 8192) binary += String.fromCharCode(...pixels.subarray(i, i + 8192))
         setGraphic({ width, height, rgbaBase64: btoa(binary) })
         setGraphicName(file.name)
+        setGraphicPreview(canvas.toDataURL('image/png'))
       } finally { image.close() }
     } catch (cause) { setError('Graphic import failed: ' + (cause as Error).message) }
     finally { setGraphicLoading(false) }
@@ -216,7 +220,7 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
         ? '/clips/capture-program-continuous-mp4'
         : mode === 'continuous' ? '/clips/capture-program-continuous-avi' : '/clips/capture-program-test-avi', {
         displayIds, seconds: programAviDuration, layout: programTestLayout(collection),
-        ...(mode !== 'sampled' ? { profile: continuousProfile, overlay: graphic } : {}),
+        ...(mode !== 'sampled' ? { profile: continuousProfile, overlay: graphic ? { ...graphic, placement } : null } : {}),
         ...(mode === 'mp4' ? { webcam: programWebcam, microphone: programMic, micGain } : {})
       })
       setSaved(result)
@@ -267,6 +271,8 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
 
   const isMacProgram = mac
   const canProgram = supportedDesktop && !busy && !loading && !graphicLoading && displays.length > 0
+  const overlayWidth = graphic ? Math.min(placement.widthPercent, 50 * 9 / 16 * graphic.width / graphic.height) : 0
+  const overlayHeight = graphic ? overlayWidth * 16 / 9 * graphic.height / graphic.width : 0
   const peak = saved?.microphoneIncluded && typeof saved.audioPeak === 'number' ? saved.audioPeak : null
   const openDiagnostics = () => { if (!diagnostics.current?.open) diagnostics.current?.showModal() }
   return <div className="production-capture">
@@ -278,7 +284,29 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
           <div className="dock-subtitle">Recording layers <small>Program tests</small></div>
           <label className="layer-switch"><Video size={15}/><span>Webcam inset <small>{mac ? 'Default camera · Mac MP4' : 'Mac MP4 only'}</small></span><input type="checkbox" aria-label="Webcam inset" checked={programWebcam} disabled={!mac || busy} onChange={e => setProgramWebcam(e.target.checked)}/></label>
           <label className="layer-switch"><ImageIcon size={15}/><span>PNG graphic <small>{graphicName || 'Static overlay · continuous recording'}</small></span><input type="file" aria-label="Import PNG overlay" accept="image/png" disabled={!supportedDesktop || busy || graphicLoading} onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; void loadProgramGraphic(file) }}/></label>
-          {graphic && <button className="text-button dock-remove" disabled={busy} onClick={() => { setGraphic(null); setGraphicName('') }}>Remove graphic</button>}
+          {graphic && <div className="graphic-placement-editor">
+            <div className="graphic-stage" aria-label="Graphic placement reference canvas" onPointerDown={event => {
+              if (busy) return
+              event.currentTarget.setPointerCapture(event.pointerId)
+              const rect = event.currentTarget.getBoundingClientRect()
+              const x = Math.max(0, Math.min(100, Math.round(((event.clientX-rect.left)/rect.width*100-1.40625-overlayWidth/2)/(100-2*1.40625-overlayWidth)*100)))
+              const y = Math.max(0, Math.min(100, Math.round(((event.clientY-rect.top)/rect.height*100-2.5-overlayHeight/2)/(95-overlayHeight)*100)))
+              setPlacement(p => ({...p,xPercent:x,yPercent:y}))
+            }} onPointerMove={event => {
+              if (busy || !event.currentTarget.hasPointerCapture(event.pointerId)) return
+              const rect = event.currentTarget.getBoundingClientRect()
+              const x = Math.max(0, Math.min(100, Math.round(((event.clientX-rect.left)/rect.width*100-1.40625-overlayWidth/2)/(100-2*1.40625-overlayWidth)*100)))
+              const y = Math.max(0, Math.min(100, Math.round(((event.clientY-rect.top)/rect.height*100-2.5-overlayHeight/2)/(95-overlayHeight)*100)))
+              setPlacement(p => ({...p,xPercent:x,yPercent:y}))
+            }}>
+              <span>16:9 output reference</span>
+              <img draggable={false} alt="Imported graphic placement" src={graphicPreview} style={{ width: `${overlayWidth}%`,height: `${overlayHeight}%`,left:`${1.40625+(100-2*1.40625-overlayWidth)*placement.xPercent/100}%`,top:`${2.5+(95-overlayHeight)*placement.yPercent/100}%` }}/>
+            </div>
+            <label className="gain-label">Horizontal <b>{placement.xPercent}%</b><input type="range" aria-label="Graphic horizontal position" min="0" max="100" value={placement.xPercent} disabled={busy} onChange={e => setPlacement(p => ({...p,xPercent:Number(e.target.value)}))}/></label>
+            <label className="gain-label">Vertical <b>{placement.yPercent}%</b><input type="range" aria-label="Graphic vertical position" min="0" max="100" value={placement.yPercent} disabled={busy} onChange={e => setPlacement(p => ({...p,yPercent:Number(e.target.value)}))}/></label>
+            <label className="gain-label">Size <b>{placement.widthPercent}%</b><input type="range" aria-label="Graphic width" min="10" max="50" value={placement.widthPercent} disabled={busy} onChange={e => setPlacement(p => ({...p,widthPercent:Number(e.target.value)}))}/></label>
+            <button className="text-button dock-remove" disabled={busy} onClick={() => { setGraphic(null); setGraphicName(''); setGraphicPreview('') }}>Remove graphic</button>
+          </div>}
           <p className="dock-note">Webcam and graphic render into recording tests, not the still preview.</p>
         </div>
       </div>
