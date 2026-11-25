@@ -87,7 +87,7 @@ private final class ProgramVideoWriter {
     }
 
     func append(_ rgba: UnsafePointer<UInt8>, length: Int) throws {
-        guard !finishing, count < 120, length == width * height * 4 else {
+        guard !finishing, count < Int64(fps) * 30, length == width * height * 4 else {
             throw writerError("Invalid composed frame or frame budget exceeded")
         }
         // Bounded backpressure, not an unbounded queued recording.
