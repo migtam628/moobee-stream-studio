@@ -11,6 +11,7 @@ type Display = { id: number; name: string; width: number; height: number }
 type Availability = { supported: boolean; requiredMacos: string; osVersion?: string | null; reason?: string; microphoneSupported?: boolean; engine?: string }
 type OverlayPlacement = { xPercent: number; yPercent: number; widthPercent: number }
 type GraphicOverlay = { width: number; height: number; rgbaBase64: string }
+type ProgramStats = { phase:'starting'|'recording'|'paused'|'finalizing'; recordedFrames:number; fps:number; elapsedMs:number; pausedMs:number; fileBytes:number; lateFrames:number; repeatedSourceSlots:number }
 type CapturedFile = {
   id: string
   path: string
@@ -19,6 +20,7 @@ type CapturedFile = {
   durationSeconds: number | null
   requestedMaxSeconds?: number
   stoppedEarly?: boolean
+  pausedMs?: number
   audioTrackVerified?: boolean
   displayCount?: number
   videoInputCount?: number
@@ -136,6 +138,26 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
   const [programSession, setProgramSession] = useState<string | null>(null)
   const programSessionRef = useRef<string | null>(null)
   const [programStopError, setProgramStopError] = useState('')
+  const [programStats, setProgramStats] = useState<ProgramStats | null>(null)
+  const [pausePending, setPausePending] = useState(false)
+  useEffect(() => {
+    setProgramStats(null)
+    if (!programSession) return
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout>
+    async function poll() {
+      try {
+        const stats = await request<ProgramStats | null>('/clips/program-mp4-stats', {sessionId:programSession})
+        if (!cancelled && stats) setProgramStats(stats)
+      } catch {
+        if (!cancelled) setProgramStats(null)
+      } finally {
+        if (!cancelled) timer = setTimeout(poll, 250)
+      }
+    }
+    void poll()
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [programSession])
   const [error, setError] = useState('')
   const [permissionSettingsError, setPermissionSettingsError] = useState('')
   const [saved, setSaved] = useState<CapturedFile | null>(null)
@@ -271,6 +293,7 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
     programSessionRef.current = sessionId
     setProgramSession(sessionId)
     setProgramStopError('')
+    setPausePending(false)
     setBusy(true)
     setCaptureMode('program')
     setStopRequested(false)
@@ -306,6 +329,25 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
       setProgramStopError('')
       setBusy(false)
       setCaptureMode(null)
+    }
+  }
+
+  async function toggleProgramPause() {
+    const sessionId = programSessionRef.current
+    if (!sessionId || !programStats || pausePending || stopRequested || !['recording','paused'].includes(programStats.phase)) return
+    setPausePending(true)
+    setProgramStopError('')
+    try {
+      const paused = programStats.phase !== 'paused'
+      const result = await request<{accepted:boolean}>('/clips/pause-program-mp4', {sessionId, paused})
+      if (!result.accepted) throw new Error('Recording is not available for pause or resume.')
+      // Refresh from the worker; do not synthesize a recording phase.
+      const stats = await request<ProgramStats | null>('/clips/program-mp4-stats', {sessionId})
+      if (programSessionRef.current === sessionId && stats) setProgramStats(stats)
+    } catch (cause) {
+      if (programSessionRef.current === sessionId) setProgramStopError((cause as Error).message)
+    } finally {
+      if (programSessionRef.current === sessionId) setPausePending(false)
     }
   }
 
@@ -441,6 +483,18 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
           </label>
           <button className="primary-button program-record" type="button" disabled={!canProgram} onClick={() => void captureProgramVideoTest(isMacProgram ? 'mp4' : 'continuous')}><span className="record-dot"/>{busy ? 'Capturing / finalizing…' : 'Record Program test'}</button>
           {programSession && busy && <button className="secondary-button" type="button" disabled={stopRequested} onClick={() => void stopProgramCapture()}><Square size={15}/>{stopRequested ? 'Stopping and finalizing…' : 'Stop and save Program MP4'}</button>}
+          {programSession && busy && <>
+            <button className="secondary-button" type="button" disabled={pausePending || stopRequested || !programStats || !['recording','paused'].includes(programStats.phase)} onClick={() => void toggleProgramPause()}>{programStats?.phase === 'paused' ? 'Resume Program recording' : 'Pause Program recording'}</button>
+            <div aria-label="Program recording statistics" role="status" className="dock-note">
+              {programStats ? <>
+                <b>{programStats.phase} · {programStats.fps > 0 ? (programStats.recordedFrames/programStats.fps).toFixed(1) : '0.0'}s media</b>
+                <div>{programStats.recordedFrames} encoded frames · {(programStats.elapsedMs/1000).toFixed(1)}s wall time</div>
+                <div>{(programStats.fileBytes/1048576).toFixed(2)} MiB written · {programStats.recordedFrames > 0 ? (programStats.fileBytes*8*programStats.fps/programStats.recordedFrames/1000).toFixed(0) : '—'} kbps file average (buffered)</div>
+                <div>{programStats.lateFrames} late slots · {programStats.repeatedSourceSlots} repeated source slots</div>
+                <div>{(programStats.pausedMs/1000).toFixed(1)}s paused (nominal)</div>
+              </> : 'Waiting for native recording statistics…'}
+            </div>
+          </>}
           {programStopError && <small className="preview-error" role="status">{programStopError}</small>}
           <small className="dock-note">{mac ? 'H.264 MP4 · optional AAC' : supportedDesktop ? 'Silent MJPEG AVI' : 'Requires Mac/Windows app'} · bounded diagnostic</small>
           {streamControl}
@@ -542,6 +596,7 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
           {saved.elapsedMs !== undefined ? ` ${(saved.elapsedMs / 1000).toFixed(2)}s wall-clock capture` : ' elapsed time unknown'}.
           The nominal output clock can differ from wall-clock capture when frames arrive late.
         </p>}
+        {typeof saved.pausedMs === 'number' && saved.pausedMs > 0 && <p className="help-text">{(saved.pausedMs/1000).toFixed(2)}s paused input omitted from the nominal recording timeline.</p>}
         {saved.stoppedEarly && <p className="help-text" role="status">Program recording stopped early and finalized.</p>}
         {saved.overlayIncluded && <p className="help-text">Static graphic overlay included in output.</p>}
         {(saved.microphoneIncluded || (saved.audioInputCount??0)>0) && <p className="help-text" role="status">AAC requested · {saved.audioSamplesWritten ?? 0} PCM frames supplied at 48 kHz · peak {Math.round((saved.audioPeak ?? 0)*100)}% · {saved.audioClippedSamples ?? 0} clipped samples. Confirm the AAC track and audible audio independently; capture timestamps and drift are not verified.</p>}
