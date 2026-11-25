@@ -502,7 +502,7 @@ function ClipLab() {
             <button className="secondary-button" disabled={!desktop || working} onClick={() => void reload()}><RefreshCcw size={16}/>Refresh</button>
           </div>
           <p className="help-text">{desktop ? 'All files stay on your computer. Grant Screen Recording permission on macOS if prompted. AVI playback is available in external players such as VLC.' : 'Native test capture is only available in the installed Windows/macOS app. Web and Android editions cannot use native GIF/AVI capture.'}</p>
-          {error && <p role="alert" className="clip-error">{error}</p>}
+          {error && <p role="alert" className="clip-error">{error}{error.startsWith('Native macOS MP4 capture failed:') && <><br/>This attempt did not save a new recording. Any selected video on the right is an earlier saved clip.</>}</p>}
           {macMp4Result && <div className="clip-result" role="status"><CheckCircle2 size={18}/><div>
             <strong>MP4 file saved — playback/audio unverified</strong>
             <small>{macMp4Result.durationSeconds}s requested · {(macMp4Result.bytes / (1024 * 1024)).toFixed(2)} MB · H.264 test</small>
