@@ -175,8 +175,18 @@ try {
       if (cmd === 'list_test_clips') return window.__programRequests.length ? [clip] : [];
       if (cmd === 'capture_continuous_program_mp4') {
         window.__captureOrder.push('record'); window.__programRequests.push(args);
-        if (args.seconds === 30) return await new Promise(resolve => { window.__pendingProgram = {id:args.sessionId, resolve}; });
+        if (args.seconds === 30) return await new Promise(resolve => { window.__pendingProgram = {id:args.sessionId, resolve, paused:false}; });
         return clip;
+      }
+      if (cmd === 'continuous_program_stats') {
+        const pending = window.__pendingProgram;
+        if (!pending || pending.id !== args.sessionId) return null;
+        return {phase:pending.paused?'paused':'recording',recordedFrames:60,fps:30,elapsedMs:2500,pausedMs:pending.paused?500:0,fileBytes:262144,lateFrames:1,repeatedSourceSlots:2};
+      }
+      if (cmd === 'pause_continuous_program_mp4') {
+        if (window.__pendingProgram?.id !== args.sessionId) return false;
+        window.__pendingProgram.paused = args.paused;
+        return true;
       }
       if (cmd === 'stop_continuous_program_mp4') {
         if (window.__pendingProgram?.id !== args.sessionId) return false;
@@ -299,6 +309,11 @@ try {
   await macPage.getByLabel('Composed Program video test duration',{exact:true}).selectOption('30');
   await macPage.getByRole('button',{name:'Record Program test',exact:true}).click();
   await macPage.waitForFunction(()=>!!window.__pendingProgram);
+  await macPage.getByText('recording · 2.0s media',{exact:true}).waitFor();
+  await macPage.getByRole('button',{name:'Pause Program recording',exact:true}).click();
+  await macPage.getByText('paused · 2.0s media',{exact:true}).waitFor();
+  await macPage.getByRole('button',{name:'Resume Program recording',exact:true}).click();
+  await macPage.getByText('recording · 2.0s media',{exact:true}).waitFor();
   await macPage.getByRole('button',{name:'Stop and save Program MP4',exact:true}).click();
   await macPage.getByRole('button',{name:'Saved MP4 · View result',exact:true}).waitFor();
   const longer = await macPage.evaluate(()=>window.__programRequests.at(-1));
