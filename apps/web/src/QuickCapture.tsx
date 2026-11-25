@@ -18,6 +18,7 @@ type CapturedFile = {
   format: string
   durationSeconds: number | null
   requestedMaxSeconds?: number
+  stoppedEarly?: boolean
   audioTrackVerified?: boolean
   displayCount?: number
   videoInputCount?: number
@@ -132,6 +133,9 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
   },[mac,active,liveMeter,audioIdentity,audioSelectionError,busy])
   const [captureMode, setCaptureMode] = useState<'screen' | 'program' | null>(null)
   const [stopRequested, setStopRequested] = useState(false)
+  const [programSession, setProgramSession] = useState<string | null>(null)
+  const programSessionRef = useRef<string | null>(null)
+  const [programStopError, setProgramStopError] = useState('')
   const [error, setError] = useState('')
   const [permissionSettingsError, setPermissionSettingsError] = useState('')
   const [saved, setSaved] = useState<CapturedFile | null>(null)
@@ -262,6 +266,11 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
 
   async function captureProgramVideoTest(mode: 'sampled' | 'continuous' | 'mp4' = 'sampled') {
     if (!supportedDesktop || loading || busy || graphicLoading || (mode === 'mp4' && !mac)) return
+    if (mode !== 'mp4' && (programAviDuration > 8 || continuousProfile === '1080p30')) return
+    const sessionId = mode === 'mp4' ? crypto.randomUUID() : null
+    programSessionRef.current = sessionId
+    setProgramSession(sessionId)
+    setProgramStopError('')
     setBusy(true)
     setCaptureMode('program')
     setStopRequested(false)
@@ -285,15 +294,34 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
         displayIds, seconds: programAviDuration, layout, transforms,
         ...(videoDeviceId ? { videoDeviceId } : {}),
         ...(mode !== 'sampled' ? { profile: continuousProfile, overlay: graphic ? { ...graphic, placement } : null } : {}),
-        ...(mode === 'mp4' ? { webcam: programWebcam, microphone: programMic, micGain, audioInputs: audioRows.map(row=>row.input) } : {})
+        ...(mode === 'mp4' ? { sessionId, webcam: programWebcam, microphone: programMic, micGain, audioInputs: audioRows.map(row=>row.input) } : {})
       })
       setSaved(result)
       await refreshSavedClips()
     } catch (cause) {
       setError((mode === 'mp4' ? 'Composed H.264 MP4' : mode === 'continuous' ? 'Continuous Program AVI' : 'Sampled Program AVI') + ' test failed: ' + (cause as Error).message)
     } finally {
+      programSessionRef.current = null
+      setProgramSession(null)
+      setProgramStopError('')
       setBusy(false)
       setCaptureMode(null)
+    }
+  }
+
+  async function stopProgramCapture() {
+    const sessionId = programSessionRef.current
+    if (!sessionId || stopRequested) return
+    setStopRequested(true)
+    setProgramStopError('')
+    try {
+      const result = await request<{stopRequested:boolean}>('/clips/stop-program-mp4', { sessionId })
+      if (!result.stopRequested) throw new Error('Recorder is starting or has finished. Retry if it is still recording.')
+    } catch (cause) {
+      if (programSessionRef.current === sessionId) {
+        setStopRequested(false)
+        setProgramStopError((cause as Error).message)
+      }
     }
   }
 
@@ -402,16 +430,18 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
         <div className="panel-head"><div className="panel-title"><Settings2 size={17}/>Controls</div><span className="subdued">{busy ? 'Working' : 'Local'}</span></div>
         <div className="dock-body">
           <label className="dock-field">Video profile
-            <select aria-label="Continuous Program test profile" value={continuousProfile} disabled={busy} onChange={event => { const profile = event.target.value as 'baseline' | '720p15' | '1080p30'; setContinuousProfile(profile); if (profile === '1080p30' && programAviDuration > 4) setProgramAviDuration(4) }}>
+            <select aria-label="Continuous Program test profile" value={continuousProfile} disabled={busy} onChange={event => { const profile = event.target.value as 'baseline' | '720p15' | '1080p30'; setContinuousProfile(profile) }}>
               <option value="baseline">360p · 10 fps</option><option value="720p15">720p · 15 fps</option>{mac && <option value="1080p30">1080p · 30 fps (test)</option>}
             </select>
           </label>
           <label className="dock-field">Recording length
             <select aria-label="Composed Program video test duration" value={programAviDuration} disabled={busy} onChange={event => setProgramAviDuration(Number(event.target.value))}>
-              {(continuousProfile === '1080p30' ? [2,4] : [2,4,6,8]).map(seconds => <option key={seconds} value={seconds}>{seconds} seconds</option>)}
+              {(mac ? [2,4,6,8,15,30] : [2,4,6,8]).map(seconds => <option key={seconds} value={seconds}>{seconds} seconds</option>)}
             </select>
           </label>
           <button className="primary-button program-record" type="button" disabled={!canProgram} onClick={() => void captureProgramVideoTest(isMacProgram ? 'mp4' : 'continuous')}><span className="record-dot"/>{busy ? 'Capturing / finalizing…' : 'Record Program test'}</button>
+          {programSession && busy && <button className="secondary-button" type="button" disabled={stopRequested} onClick={() => void stopProgramCapture()}><Square size={15}/>{stopRequested ? 'Stopping and finalizing…' : 'Stop and save Program MP4'}</button>}
+          {programStopError && <small className="preview-error" role="status">{programStopError}</small>}
           <small className="dock-note">{mac ? 'H.264 MP4 · optional AAC' : supportedDesktop ? 'Silent MJPEG AVI' : 'Requires Mac/Windows app'} · bounded diagnostic</small>
           {streamControl}
           <div className="dock-action-row"><button className="secondary-button" onClick={openClips}><Film size={14}/>Clips</button><button className="secondary-button" onClick={openSettings}><Settings2 size={14}/>Settings</button></div>
@@ -426,8 +456,8 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
       <div className="quick-capture">
         <p className="help-text">The direct screen test records one display. Program recordings use the selected scene and recording layers from the production docks.</p>
         {supportedDesktop && <div className="clip-actions">
-          <button className="secondary-button" disabled={!canProgram} onClick={() => void captureProgramVideoTest('sampled')}>Sampled Program AVI</button>
-          <button className="secondary-button" disabled={!canProgram || continuousProfile === '1080p30'} onClick={() => void captureProgramVideoTest('continuous')}>Continuous-source Program AVI</button>
+          <button className="secondary-button" disabled={!canProgram || programAviDuration > 8 || continuousProfile === '1080p30'} onClick={() => void captureProgramVideoTest('sampled')}>Sampled Program AVI</button>
+          <button className="secondary-button" disabled={!canProgram || continuousProfile === '1080p30' || programAviDuration > 8} onClick={() => void captureProgramVideoTest('continuous')}>Continuous-source Program AVI</button>
         </div>}
     <div className="quick-capture-options">
       <label>Display
@@ -512,6 +542,7 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
           {saved.elapsedMs !== undefined ? ` ${(saved.elapsedMs / 1000).toFixed(2)}s wall-clock capture` : ' elapsed time unknown'}.
           The nominal output clock can differ from wall-clock capture when frames arrive late.
         </p>}
+        {saved.stoppedEarly && <p className="help-text" role="status">Program recording stopped early and finalized.</p>}
         {saved.overlayIncluded && <p className="help-text">Static graphic overlay included in output.</p>}
         {(saved.microphoneIncluded || (saved.audioInputCount??0)>0) && <p className="help-text" role="status">AAC requested · {saved.audioSamplesWritten ?? 0} PCM frames supplied at 48 kHz · peak {Math.round((saved.audioPeak ?? 0)*100)}% · {saved.audioClippedSamples ?? 0} clipped samples. Confirm the AAC track and audible audio independently; capture timestamps and drift are not verified.</p>}
         {saved.webcamIncluded && <p className="help-text" role="status">Webcam inset included · {saved.webcamFrames ?? 0} received frames · {saved.webcamRepeatedSlots ?? 0} repeated slots. Verify the actual clip.</p>}

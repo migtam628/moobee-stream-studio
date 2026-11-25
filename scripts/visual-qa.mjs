@@ -173,7 +173,18 @@ try {
       if (cmd === 'macos_mp4_availability') return {supported:true,requiredMacos:'14.0',microphoneSupported:true};
       if (cmd === 'capture_scene_snapshot') { window.__snapshotCount++; return image; }
       if (cmd === 'list_test_clips') return window.__programRequests.length ? [clip] : [];
-      if (cmd === 'capture_continuous_program_mp4') { window.__captureOrder.push('record'); window.__programRequests.push(args); return clip; }
+      if (cmd === 'capture_continuous_program_mp4') {
+        window.__captureOrder.push('record'); window.__programRequests.push(args);
+        if (args.seconds === 30) return await new Promise(resolve => { window.__pendingProgram = {id:args.sessionId, resolve}; });
+        return clip;
+      }
+      if (cmd === 'stop_continuous_program_mp4') {
+        if (window.__pendingProgram?.id !== args.sessionId) return false;
+        const pending = window.__pendingProgram;
+        window.__pendingProgram = null;
+        pending.resolve({...clip, requestedMaxSeconds:30, stoppedEarly:true});
+        return true;
+      }
       throw new Error('Unexpected simulated command: '+cmd);
     }};
   });
@@ -284,6 +295,14 @@ try {
   await macPage.waitForFunction(()=>window.__programRequests.length===3);
   const transformed=await macPage.evaluate(()=>window.__programRequests[2].transforms?.[0]);
   if(transformed?.x!==2500||transformed?.height!==5000||transformed?.cropLeft!==1000||transformed?.rotation!==90)throw new Error('Manual source geometry did not reach native recorder');
+  await macPage.getByRole('button',{name:'Saved MP4 · View result',exact:true}).waitFor();
+  await macPage.getByLabel('Composed Program video test duration',{exact:true}).selectOption('30');
+  await macPage.getByRole('button',{name:'Record Program test',exact:true}).click();
+  await macPage.waitForFunction(()=>!!window.__pendingProgram);
+  await macPage.getByRole('button',{name:'Stop and save Program MP4',exact:true}).click();
+  await macPage.getByRole('button',{name:'Saved MP4 · View result',exact:true}).waitFor();
+  const longer = await macPage.evaluate(()=>window.__programRequests.at(-1));
+  if (longer.seconds!==30 || !longer.sessionId) throw new Error('Long Program capture did not route session');
   await macPage.close();
   const mobile = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
   await mobile.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'domcontentloaded' });

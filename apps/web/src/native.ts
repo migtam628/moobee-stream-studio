@@ -275,6 +275,10 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
       systemAudio: body.systemAudio, microphone: body.microphone
     })
   }
+  if (path === '/clips/stop-program-mp4') {
+    if (typeof body.sessionId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(body.sessionId)) throw new Error('Invalid Program session')
+    return { stopRequested: await invoke<boolean>('stop_continuous_program_mp4', { sessionId: body.sessionId }) }
+  }
   if (path === '/clips/capture-program-continuous-avi' || path === '/clips/capture-program-continuous-mp4') {
     const ids = body.displayIds
     const videoDeviceId = body.videoDeviceId
@@ -285,11 +289,12 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
         !ids.every(id => typeof id === 'number' && Number.isSafeInteger(id) && id >= 0 && id <= 24) ||
         new Set(ids).size !== ids.length ||
         typeof body.seconds !== 'number' || !Number.isSafeInteger(body.seconds) ||
-        body.seconds < 2 || body.seconds > 8 ||
+        body.seconds < 2 || body.seconds > (mp4 ? 30 : 8) ||
         (body.profile !== 'baseline' && body.profile !== '720p15' && body.profile !== '1080p30')) {
-      throw new Error('Choose 1–4 unique Program displays, a 2–8 second duration and a supported capture profile')
+      throw new Error('Choose 1–4 unique Program displays, a supported duration (MP4 up to 30 seconds, AVI up to 8) and capture profile')
     }
-    if (body.profile === '1080p30' && (!mp4 || Number(body.seconds) > 4)) throw new Error('1080p30 requires Mac MP4 and a 2–4 second test')
+    if (body.profile === '1080p30' && !mp4) throw new Error('1080p30 requires Mac MP4')
+    if (body.sessionId !== undefined && (!mp4 || typeof body.sessionId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(body.sessionId))) throw new Error('Invalid Program session')
     if (body.webcam !== undefined && typeof body.webcam !== 'boolean') throw new Error('Invalid webcam selection')
     if (body.webcam && (!mp4 || ids.length > 3)) throw new Error('Webcam PiP requires macOS MP4 and one to three displays')
     if (body.microphone !== undefined && typeof body.microphone !== 'boolean') throw new Error('Invalid microphone selection')
@@ -312,7 +317,7 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
     const transforms = body.transforms === undefined || body.transforms === null ? undefined :
       Array.isArray(body.transforms) && body.transforms.length === (hasVideo?1:ids.length) ? body.transforms.map(validateTransform) : (()=>{throw new Error('Invalid source transform count')})()
     return await captureWithPreviewReleased(mp4 ? 'capture_continuous_program_mp4' : 'capture_continuous_program_avi', {
-      displayIds: ids, seconds: body.seconds, profile: body.profile, layout: validateSceneLayout(body.layout), transforms:transforms??null, overlay: body.overlay ?? null, ...(mp4 ? { webcam: body.webcam === true, microphone: body.microphone === true, micGain, ...(body.audioInputs !== undefined ? { audioInputs: body.audioInputs } : {}), ...(hasVideo ? { videoDeviceId } : {}) } : {})
+      displayIds: ids, seconds: body.seconds, profile: body.profile, layout: validateSceneLayout(body.layout), transforms:transforms??null, overlay: body.overlay ?? null, ...(mp4 ? { sessionId: body.sessionId ?? null, webcam: body.webcam === true, microphone: body.microphone === true, micGain, ...(body.audioInputs !== undefined ? { audioInputs: body.audioInputs } : {}), ...(hasVideo ? { videoDeviceId } : {}) } : {})
     })
   }
   if (path === '/clips/capture-program-test-avi') {
