@@ -19,7 +19,7 @@ export type MinimalSceneCollection = {
   currentScene: string
   previewScene?: string
   scenes: { name: string; layout?: SceneLayout; sources: {
-    kind: string; deviceId: string; enabled: boolean
+    kind: string; deviceId: string; enabled: boolean; transform?:SourceTransform
   }[] }[]
 }
 
@@ -108,4 +108,37 @@ export function programVideoInput(collection: unknown): string | undefined {
     throw new Error('For this Mac video-input test, enable only one capture card or camera in Program; hide other sources.')
   }
   return video[0].deviceId
+}
+
+export type SourceTransform = { x:number; y:number; width:number; height:number; cropLeft:number; cropTop:number; cropRight:number; cropBottom:number; rotation:number; fit:boolean }
+export const fullTransform = ():SourceTransform => ({x:0,y:0,width:10000,height:10000,cropLeft:0,cropTop:0,cropRight:0,cropBottom:0,rotation:0,fit:true})
+export function validateTransform(value:unknown):SourceTransform {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid source transform')
+  const t=value as SourceTransform
+  const values=[t.x,t.y,t.width,t.height,t.cropLeft,t.cropTop,t.cropRight,t.cropBottom,t.rotation]
+  if(values.some(v=>!Number.isInteger(v)||v<0)||t.width<250||t.height<250||t.x+t.width>10000||t.y+t.height>10000||
+    t.cropLeft+t.cropRight>9000||t.cropTop+t.cropBottom>9000||![0,90,180,270].includes(t.rotation)||typeof t.fit!=='boolean') throw new Error('Invalid source transform bounds')
+  return {x:t.x,y:t.y,width:t.width,height:t.height,cropLeft:t.cropLeft,cropTop:t.cropTop,cropRight:t.cropRight,cropBottom:t.cropBottom,rotation:t.rotation,fit:t.fit}
+}
+export function defaultTransform(index:number,count:number,layout:SceneLayout):SourceTransform {
+  const t=fullTransform()
+  if(count===1)return t
+  if(layout==='pip'){
+    if(index===0)return t
+    return {...t,x:6526,y:10000-250-index*2250-(index-1)*250,width:3333,height:2250}
+  }
+  const cols=count===1?1:2,rows=count<=2?1:2
+  return {...t,x:index%cols*5000,y:Math.floor(index/cols)*10000/rows,width:10000/cols,height:10000/rows}
+}
+export function sceneTransforms(sources:{enabled:boolean;transform?:SourceTransform}[],layout:SceneLayout):SourceTransform[]|undefined{
+  const active=sources.filter(s=>s.enabled)
+  if(!active.some(s=>s.transform))return undefined
+  if(active.length>4)throw new Error('Manual transforms support up to four enabled sources')
+  return active.map((s,i)=>s.transform?validateTransform(s.transform):defaultTransform(i,active.length,layout))
+}
+export function programTransforms(collection:unknown):SourceTransform[]|undefined{
+  const data=collection as MinimalSceneCollection
+  const scene=data.scenes.find(s=>s.name===data.currentScene)
+  if(!scene)throw new Error('Program scene not found')
+  return sceneTransforms(scene.sources,validateSceneLayout(scene.layout))
 }
