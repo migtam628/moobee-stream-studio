@@ -44,6 +44,16 @@ jobs:
             apps/desktop/src-tauri/swift/MooBeeProgramVideoWriter.swift \
             apps/desktop/src-tauri/swift/MooBeeProgramCamera.swift \
             apps/desktop/src-tauri/swift/MooBeeProgramMicrophone.swift
+      - name: Exercise ScreenCaptureKit stop recovery policy
+        run: |
+          SDK="$(xcrun --sdk macosx --show-sdk-path)"
+          xcrun swiftc -swift-version 5 -parse-as-library \
+            -target "${{ matrix.swift_target }}" -sdk "$SDK" \
+            apps/desktop/src-tauri/swift/MooBeeScreenRecording.swift \
+            apps/desktop/src-tauri/swift/MooBeeSonomaRecording.swift \
+            apps/desktop/src-tauri/swift/tests/RecordingStopPolicy.swift \
+            -o "$RUNNER_TEMP/moobee-stop-policy"
+          "$RUNNER_TEMP/moobee-stop-policy"
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
