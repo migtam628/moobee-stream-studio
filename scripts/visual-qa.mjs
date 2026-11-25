@@ -238,6 +238,8 @@ try {
   const cardRequest = await macPage.evaluate(() => window.__programRequests[1]);
   if (cardRequest.videoDeviceId !== 'uvc-card-test' || cardRequest.displayIds.length || cardRequest.webcam) throw new Error('Capture card Program input not routed correctly');
   if (!(await macPage.evaluate(() => window.__captureOrder.slice(-2).join() === 'stop-preview,record'))) throw new Error('Recording started before preview released video devices');
+  const afterRecordCalls = await macPage.evaluate(() => window.__movingCalls.length);
+  await macPage.waitForFunction(count => window.__movingCalls.length > count, afterRecordCalls);
   await macPage.getByLabel('Preview refresh',{exact:true}).selectOption('paused');
   await macPage.waitForFunction(() => window.__captureOrder.at(-1) === 'stop-preview');
   const liveCount = await macPage.evaluate(() => window.__movingCalls.length);
