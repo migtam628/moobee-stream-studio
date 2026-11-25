@@ -105,8 +105,9 @@ fn composite_layers(frames: &[&RgbaImage], width: u32, height: u32, layout: Scen
 /// Return a PNG data URL of the selected scene's captured displays.
 /// Only integer monitor-list indices are accepted, never arbitrary file paths.
 #[tauri::command]
-pub async fn capture_scene_snapshot(display_ids: Vec<usize>, layout: Option<String>) -> Result<String, String> {
+pub async fn capture_scene_snapshot(display_ids: Vec<usize>, layout: Option<String>, transforms: Option<Vec<crate::source_transform::SourceTransform>>) -> Result<String, String> {
     validate_ids(&display_ids)?;
+    crate::source_transform::validate_list(transforms.as_deref(),display_ids.len())?;
     let layout = SceneLayout::parse(layout.as_deref())?;
     #[cfg(any(target_os = "windows", target_os = "macos"))]
     {
@@ -120,7 +121,7 @@ pub async fn capture_scene_snapshot(display_ids: Vec<usize>, layout: Option<Stri
             frames.push(monitor.capture_image()
                 .map_err(|error| format!("Screen Recording access or capture failed: {error}"))?);
         }
-        let frame = composite_layout(&frames, OUTPUT_WIDTH, OUTPUT_HEIGHT, layout)?;
+        let frame = if let Some(ref items)=transforms { crate::source_transform::composite(&frames,OUTPUT_WIDTH,OUTPUT_HEIGHT,items)? } else { composite_layout(&frames, OUTPUT_WIDTH, OUTPUT_HEIGHT, layout)? };
         let mut buffer = std::io::Cursor::new(Vec::new());
         image::DynamicImage::ImageRgba8(frame)
             .write_to(&mut buffer, ImageFormat::Png)
