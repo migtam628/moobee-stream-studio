@@ -151,6 +151,8 @@ try {
     }));
     window.__programRequests = [];
     window.__snapshotCount = 0;
+    window.__movingCalls = [];
+    window.__captureOrder = [];
     const clip = {id:'e9525c58-0e63-40b3-94b6-a9d0f0de4e99', path:'/test/clip.mp4', format:'mp4', bytes:200000, durationSeconds:4, displayCount:1, microphoneIncluded:true, webcamIncluded:true, overlayIncluded:true, audioPeak:0.42, audioSamplesWritten:192000, width:1920, height:1080, fps:30};
     const canvas = document.createElement('canvas'); canvas.width=960; canvas.height=540;
     const ctx = canvas.getContext('2d');
@@ -159,13 +161,15 @@ try {
     ctx.font='36px sans-serif'; ctx.fillStyle='white'; ctx.fillText('Simulated display · UI wiring test',100,285);
     const image = canvas.toDataURL('image/png');
     window.__TAURI_INTERNALS__ = { invoke: async (cmd,args) => {
-      if (cmd === 'list_video_inputs') return [{id:'uvc-card-test',name:'USB HDMI Capture (simulated)',isDefault:false}];
+      if (cmd === 'list_video_inputs') return [{id:'uvc-card-test',name:'USB HDMI Capture (simulated)',isDefault:false},{id:'webcam-test',name:'FaceTime Camera (simulated)',isDefault:true}];
+      if (cmd === 'live_video_preview_frame') { window.__movingCalls.push(args); return {image,frameKey:String(window.__movingCalls.length),liveVideo:true,waiting:false}; }
+      if (cmd === 'stop_video_previews') { window.__captureOrder.push('stop-preview'); return null; }
       if (cmd === 'test_video_input') { window.__testedDevice = args.deviceId; return image; }
       if (cmd === 'list_displays') return [{id:0,name:'Test display',width:1920,height:1080},{id:1,name:'Other display',width:1280,height:720}];
       if (cmd === 'macos_mp4_availability') return {supported:true,requiredMacos:'14.0',microphoneSupported:true};
       if (cmd === 'capture_scene_snapshot') { window.__snapshotCount++; return image; }
       if (cmd === 'list_test_clips') return window.__programRequests.length ? [clip] : [];
-      if (cmd === 'capture_continuous_program_mp4') { window.__programRequests.push(args); return clip; }
+      if (cmd === 'capture_continuous_program_mp4') { window.__captureOrder.push('record'); window.__programRequests.push(args); return clip; }
       throw new Error('Unexpected simulated command: '+cmd);
     }};
   });
@@ -221,10 +225,24 @@ try {
   const displayRow = macPage.locator('.source-row').filter({hasText:'Test display'});
   await displayRow.getByTitle('Hide source').click();
   await macPage.getByRole('checkbox',{name:'Webcam inset',exact:true}).uncheck();
+  await macPage.getByLabel('Preview refresh',{exact:true}).selectOption('live');
+  await macPage.waitForFunction(() => window.__movingCalls.length >= 3);
+  if (!(await macPage.evaluate(() => window.__movingCalls.every(x => x.deviceIds.join() === 'uvc-card-test')))) throw new Error('Wrong moving preview device');
+  await macPage.getByLabel('Choose capture source',{exact:true}).selectOption('video:webcam-test');
+  await macPage.getByRole('button',{name:'+ Add source',exact:true}).click();
+  await macPage.waitForFunction(() => window.__movingCalls.some(x => x.deviceIds.join() === 'uvc-card-test,webcam-test'));
+  await macPage.locator('.source-row').filter({hasText:'FaceTime Camera (simulated)'}).getByTitle('Hide source').click();
+  await macPage.waitForFunction(() => window.__movingCalls.at(-1)?.deviceIds.join() === 'uvc-card-test');
   await macPage.getByRole('button',{name:'Record Program test',exact:true}).click();
   await macPage.waitForFunction(() => window.__programRequests.length === 2);
   const cardRequest = await macPage.evaluate(() => window.__programRequests[1]);
   if (cardRequest.videoDeviceId !== 'uvc-card-test' || cardRequest.displayIds.length || cardRequest.webcam) throw new Error('Capture card Program input not routed correctly');
+  if (!(await macPage.evaluate(() => window.__captureOrder.slice(-2).join() === 'stop-preview,record'))) throw new Error('Recording started before preview released video devices');
+  await macPage.getByLabel('Preview refresh',{exact:true}).selectOption('paused');
+  await macPage.waitForFunction(() => window.__captureOrder.at(-1) === 'stop-preview');
+  const liveCount = await macPage.evaluate(() => window.__movingCalls.length);
+  await macPage.waitForTimeout(350);
+  if (await macPage.evaluate(() => window.__movingCalls.length !== liveCount)) throw new Error('Paused video preview still requested frames');
   await macPage.close();
   const mobile = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
   await mobile.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'domcontentloaded' });
