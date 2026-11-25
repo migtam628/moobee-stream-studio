@@ -244,7 +244,7 @@ try {
   await macPage.waitForFunction(() => window.__captureOrder.at(-1) === 'stop-preview');
   const liveCount = await macPage.evaluate(() => window.__movingCalls.length);
   await macPage.waitForTimeout(350);
-  if (await macPage.evaluate(() => window.__movingCalls.length !== liveCount)) throw new Error('Paused video preview still requested frames');
+  if (await macPage.evaluate(count => window.__movingCalls.length !== count, liveCount)) throw new Error('Paused video preview still requested frames');
   await macPage.close();
   const mobile = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
   await mobile.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'domcontentloaded' });
