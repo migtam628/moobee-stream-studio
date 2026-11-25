@@ -72,35 +72,42 @@ function formatElapsed(seconds: number) {
   return `${h}:${m}:${s}`
 }
 
-function ScenePreview({ status, label, previewScene }: { status: StudioStatus; label: string; previewScene: string }) {
+type PreviewRefresh = 'fast' | 'normal' | 'paused'
+
+function ScenePreview({ status, label, previewScene, active, refreshRate, revision }: { status: StudioStatus; label: string; previewScene: string; active: boolean; refreshRate: PreviewRefresh; revision: string }) {
   const [image, setImage] = useState('')
   const [previewError, setPreviewError] = useState('')
+  const [lastFrame, setLastFrame] = useState<number | null>(null)
+  const inFlight = useRef(false)
+  useEffect(() => { setImage(''); setPreviewError(''); setLastFrame(null) }, [previewScene, revision])
   useEffect(() => {
-    if (!status.connected || !previewScene) { setImage(''); return }
+    if (!active || !status.connected || !previewScene || refreshRate === 'paused') return
     let cancelled = false
-    let inFlight = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const delay = refreshRate === 'fast' ? 1000 : 5000
     async function load() {
-      if (inFlight || cancelled) return
-      inFlight = true
+      if (cancelled) return
+      if (document.hidden || inFlight.current) { timer = setTimeout(load, delay); return }
+      inFlight.current = true
       try {
         const response = await request<{ image: string }>(`/studio/snapshot?scene=${encodeURIComponent(previewScene)}`)
-        if (!cancelled) { setImage(response.image ?? ''); setPreviewError('') }
+        if (!cancelled) { setImage(response.image ?? ''); setPreviewError(''); setLastFrame(response.image ? Date.now() : null) }
       } catch (error) {
-        if (!cancelled) {
-          setImage('')
-          setPreviewError((error as Error).message || 'Could not render native scene still preview')
-        }
-      } finally { inFlight = false }
+        if (!cancelled) { setImage(''); setLastFrame(null); setPreviewError((error as Error).message || 'Could not render native scene still preview') }
+      } finally {
+        inFlight.current = false
+        if (!cancelled) timer = setTimeout(load, delay)
+      }
     }
     void load()
-    const timer = setInterval(() => void load(), 5000)
-    return () => { cancelled = true; clearInterval(timer) }
-  }, [previewScene, status.connected])
+    return () => { cancelled = true; if (timer !== undefined) clearTimeout(timer) }
+  }, [previewScene, status.connected, active, refreshRate, revision])
   return <div className="preview-block">
-    <div className="preview-heading"><span><Monitor size={15}/>{label}</span><span>{status.connected ? 'Composite still preview · every 5 sec' : 'Local studio offline'}</span></div>
+    <div className="preview-heading"><span><Monitor size={15}/>{label}</span><span>{!status.connected ? 'Local studio offline' : refreshRate === 'paused' ? 'Preview paused' : refreshRate === 'fast' ? 'Still frames · 1s interval' : 'Still frames · 5s interval'}</span></div>
     <div className="preview-canvas">
-      {image ? <img src={image} alt={`MooBee scene: ${previewScene}`} /> : <div className="preview-empty"><Radio size={34}/><strong>{status.connected ? 'No preview available' : 'Your stream starts here'}</strong><span>{status.connected ? 'Add or enable a display source in this scene' : 'Add a native display source to preview this scene'}</span></div>}
+      {image ? <img src={image} alt={`MooBee scene: ${previewScene}`} /> : <div className="preview-empty"><Radio size={34}/><strong>{refreshRate === 'paused' ? 'Preview paused' : 'No preview available'}</strong><span>{status.connected ? 'Add or enable a display source in this scene' : 'Add a native display source to preview this scene'}</span></div>}
       {status.streaming && <span className="live-flag">LIVE</span>}
+      {lastFrame !== null && <span className="snapshot-timestamp" title="Time the last still frame was received">{new Date(lastFrame).toLocaleTimeString()}</span>}
     </div>
     {previewError && <small className="preview-error" role="status">{previewError}</small>}
   </div>
@@ -190,21 +197,25 @@ function MixerPanel({ status, perform, pending }: { status: StudioStatus; perfor
   </Panel>
 }
 
-function Studio({ status, perform, pending, setTab }: { status: StudioStatus; perform: (path: string, body: object) => Promise<boolean>; pending: boolean; setTab: (t: Tab) => void }) {
+function Studio({ status, perform, pending, setTab, active }: { status: StudioStatus; perform: (path: string, body: object) => Promise<boolean>; pending: boolean; setTab: (t: Tab) => void; active: boolean }) {
+  const [refreshRate, setRefreshRate] = useState<PreviewRefresh>('fast')
+  const selectedScene = status.studioMode ? status.previewScene : status.currentScene
+  const sceneRevision = JSON.stringify([status.sceneLayout, status.sources.map(source => [source.id, source.enabled, source.deviceId])])
+  const revisionFor = (name: string) => name === selectedScene ? sceneRevision : name
   return <div className="production-studio">
     <div className="production-toolbar">
       <div className="production-heading"><h1>Studio</h1><span className="production-mode">{status.connected ? 'Local workspace' : 'Offline'}</span></div>
       <div className="production-toolbar-actions">
-        <span className="production-preview-note">Display stills · 5s refresh</span>
+        <label className="preview-rate-control">Preview refresh <select aria-label="Preview refresh" value={refreshRate} onChange={e => setRefreshRate(e.target.value as PreviewRefresh)}><option value="fast">1 second</option><option value="normal">5 seconds</option><option value="paused">Paused</option></select></label>
         <button className={`tool-button ${status.studioMode ? 'tool-active' : ''}`} aria-pressed={status.studioMode} disabled={!status.connected || pending} onClick={() => void perform('/studio/action', { action: 'studioMode', studioModeEnabled: !status.studioMode })}><Layers size={15}/>Studio Mode</button>
         {status.studioMode && <button className="tool-button take-button" disabled={!status.connected || pending} onClick={() => void perform('/studio/action', { action: 'transition' })}><RefreshCcw size={15}/>Take</button>}
       </div>
     </div>
     <div className={`production-monitor-grid ${status.studioMode ? 'dual-monitor' : 'single-monitor'}`}>
-      {status.studioMode && <div className="production-monitor preview-monitor"><ScenePreview status={status} label="Preview" previewScene={status.previewScene || status.currentScene}/><span className="monitor-scene-name">{status.previewScene || status.currentScene || 'No scene'}</span></div>}
-      <div className="production-monitor program-monitor"><ScenePreview status={status} label="Program" previewScene={status.currentScene}/><span className="monitor-scene-name">{status.currentScene || 'No scene'} <small>· Not live output</small></span></div>
+      {status.studioMode && <div className="production-monitor preview-monitor"><ScenePreview status={status} label="Preview" previewScene={status.previewScene || status.currentScene} active={active} refreshRate={refreshRate} revision={revisionFor(status.previewScene || status.currentScene)}/><span className="monitor-scene-name">{status.previewScene || status.currentScene || 'No scene'}</span></div>}
+      <div className="production-monitor program-monitor"><ScenePreview status={status} label="Program" previewScene={status.currentScene} active={active} refreshRate={refreshRate} revision={revisionFor(status.currentScene)}/><span className="monitor-scene-name">{status.currentScene || 'No scene'} <small>· Not live output</small></span></div>
     </div>
-    <QuickCapture scenes={<ScenesPanel status={status} perform={perform} pending={pending}/>}
+    <QuickCapture active={active} scenes={<ScenesPanel status={status} perform={perform} pending={pending}/>}
       sources={<SourcesPanel status={status} perform={perform} pending={pending}/>}
       otherAudio={status.inputs.length ? <MixerPanel status={status} perform={perform} pending={pending}/> : undefined}
       openClips={() => setTab('Clips')} openSettings={() => setTab('Settings')}
@@ -574,7 +585,7 @@ export default function App() {
     <aside className={`sidebar ${drawerOpen ? 'drawer-open' : ''}`}><nav>{navigation.map(({ label, icon: Icon }) => <button key={label} className={`nav-item ${tab === label ? 'active' : ''}`} onClick={() => go(label)}><Icon size={19}/><span>{label}</span></button>)}</nav><div className="sidebar-bottom"><div className="release-label" title="Release tag and immutable GitHub commit"><span>BUILD {buildIdentity}</span></div><button onClick={() => go('Settings')}><CircleHelp size={16}/>Engine guide</button></div></aside>
     <main className={`workspace ${productionTab ? 'production-workspace' : ''}`}>
       {error && <div className="error-banner" role="alert"><span>{error}</span><button onClick={() => setError('')}><X size={17}/></button></div>}
-      {(tab === 'Studio' || tab === 'Scenes') && <Studio status={status} perform={perform} pending={pending} setTab={go}/>}
+      <div className="retained-studio" hidden={!productionTab}><Studio status={status} perform={perform} pending={pending} setTab={go} active={productionTab}/></div>
       {tab === 'Settings' && <Settings status={status}/>}
       {tab === 'Alerts' && <Alerts perform={perform}/>}
       {tab === 'Overlays' && <Overlays setTab={go}/>}
