@@ -1,3 +1,20 @@
+# MooBee Stream Studio v0.3.9-alpha.14 — MP4 shutdown recovery and Studio controls
+
+**Experimental alpha; hardware verification required.**
+
+- Addresses the reported direct Mac screen recording error `com.apple.ScreenCaptureKit.SCStreamErrorDomain:-3808` (stream already stopped or does not exist). Both macOS 14 AVAssetWriter and macOS 15+ recording paths continue to finalization only for that exact error; real capture/permission/encoder errors remain failures. Recovered videos require a finalized playable video track with plausible elapsed duration, then existing Rust MP4 structural validation and atomic publication.
+- Prevents a new direct recording task from starting while a previous Swift task is still active after timeout. The failed capture UI distinguishes previous saved clips from the current attempt.
+- Includes merged PR #41: adjustable graphic position/size, faster or paused still previews, and recording settings retained while navigating the app.
+- Adds Swift stop-policy regression tests on Intel and Apple Silicon. Real macOS recording and playback remain to be tested.
+
+## Regression test on installed Mac
+
+Quit the prior app, install this build, open Clips, and record four seconds with system audio off, then on. Repeat from Studio's separate composed Program recorder. Verify exactly one new clip per successful attempt, playback, duration, and audio where requested. Test Stop and Save, permission denial, and repeated captures. If capture stops early or no video is finalized, it must fail without publishing a new clip. Existing saved files must remain intact.
+
+No continuous production recording or RTMPS availability claim.
+
+---
+
 # MooBee Stream Studio v0.3.9-alpha.13 — Production workspace redesign
 
 **Experimental desktop hardware-test alpha; not a production streaming release.**

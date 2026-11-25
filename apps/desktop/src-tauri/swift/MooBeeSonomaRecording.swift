@@ -21,6 +21,8 @@ private final class SonomaMP4Sink: NSObject, SCStreamOutput, SCStreamDelegate {
     private var lastFrameTime: CMTime?
     private var frameCount = 0
     private var captureError: Error?
+    private var alreadyStopped = false
+    private var acceptingSamples = true
 
     init(output: URL, width: Int, height: Int, systemAudio: Bool) throws {
         writer = try AVAssetWriter(outputURL: output, fileType: .mp4)
@@ -76,7 +78,7 @@ private final class SonomaMP4Sink: NSObject, SCStreamOutput, SCStreamDelegate {
     // is confined to that serial queue; stop/finalization drains it before use.
     func stream(_ stream: SCStream, didOutputSampleBuffer buffer: CMSampleBuffer,
                 of type: SCStreamOutputType) {
-        guard CMSampleBufferIsValid(buffer), CMSampleBufferDataIsReady(buffer) else { return }
+        guard acceptingSamples, captureError == nil, CMSampleBufferIsValid(buffer), CMSampleBufferDataIsReady(buffer) else { return }
         let time = CMSampleBufferGetPresentationTimeStamp(buffer)
         guard time.isValid, time.isNumeric else { return }
         if type == .screen {
@@ -115,25 +117,28 @@ private final class SonomaMP4Sink: NSObject, SCStreamOutput, SCStreamDelegate {
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
         callbackQueue.async { [self] in
-            captureError = error
+            if isAlreadyStoppedStream(error) { alreadyStopped = true }
+            else if captureError == nil { captureError = error }
         }
     }
 
-    func finish() async throws {
+    func finish() async throws -> Bool {
         // SCStream.stopCapture() has returned, so drain its callback queue.
         // Do not make a successful MP4 visible without the writer finishing.
-        let state: (Int, Error?, AVAssetWriter.Status) = callbackQueue.sync {
-            if writer.status == .writing {
+        let state: (Int, Error?, AVAssetWriter.Status, Bool) = callbackQueue.sync {
+            acceptingSamples = false
+            if writer.status == .writing && captureError == nil {
                 if let lastFrameTime {
-                    writer.endSession(atSourceTime: lastFrameTime)
+                    writer.endSession(atSourceTime: CMTimeAdd(lastFrameTime, CMTime(value: 1, timescale: 30)))
                 }
                 video.markAsFinished()
                 audio?.markAsFinished()
             }
-            return (frameCount, captureError, writer.status)
+            return (frameCount, captureError, writer.status, alreadyStopped)
         }
-        if let error = state.1 { throw error }
+        if let error = state.1 { writer.cancelWriting(); throw error }
         guard state.0 >= 2, state.2 == .writing else {
+            if writer.status == .writing { writer.cancelWriting() }
             throw NSError(domain: "MooBeeSonomaRecorder", code: -6,
                           userInfo: [NSLocalizedDescriptionKey:
                             "No complete H.264 video frames were written"])
@@ -146,6 +151,7 @@ private final class SonomaMP4Sink: NSObject, SCStreamOutput, SCStreamDelegate {
                 domain: "MooBeeSonomaRecorder", code: -7,
                 userInfo: [NSLocalizedDescriptionKey: "MP4 writer did not finalize"])
         }
+        return state.3
     }
 }
 
@@ -196,17 +202,22 @@ func recordSonomaMP4(
         try stream.addStreamOutput(sink, type: .audio, sampleHandlerQueue: sink.callbackQueue)
     }
     try await stream.startCapture()
+    let started = ProcessInfo.processInfo.systemUptime
     do {
-        let deadline = Date().addingTimeInterval(TimeInterval(seconds))
-        while Date() < deadline && !shouldStop() {
+        let deadline = started + Double(seconds)
+        while ProcessInfo.processInfo.systemUptime < deadline && !shouldStop() {
             try await Task.sleep(nanoseconds: 250_000_000)
         }
     } catch {
         try? await stream.stopCapture()
         throw error
     }
-    try await stream.stopCapture()
-    try await sink.finish()
+    let elapsed = ProcessInfo.processInfo.systemUptime - started
+    let stopAlreadyCompleted = try await stopForMP4Finalization(stream)
+    let delegateAlreadyStopped = try await sink.finish()
+    if stopAlreadyCompleted || delegateAlreadyStopped {
+        try await validateRecoveredMP4(url, elapsed: elapsed)
+    }
     let size = try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber
     guard (size?.intValue ?? 0) >= 4096 else {
         throw NSError(domain: "MooBeeSonomaRecorder", code: -10,

@@ -9,6 +9,38 @@ import CoreMedia
 import Foundation
 import ScreenCaptureKit
 
+// Recover only the exact ScreenCaptureKit already-stopped error. Permission,
+// device, encoder and other stream failures must still fail the capture.
+func isAlreadyStoppedStream(_ error: Error) -> Bool {
+    let native = error as NSError
+    return native.domain == "com.apple.ScreenCaptureKit.SCStreamErrorDomain" && native.code == -3808
+}
+
+func recoveredDurationIsPlausible(_ duration: Double, elapsed: Double) -> Bool {
+    duration.isFinite && elapsed.isFinite && elapsed > 0 && duration >= 0.1 &&
+        duration >= elapsed - 0.75 && duration <= elapsed + 2.0
+}
+
+@available(macOS 14.0, *)
+func stopForMP4Finalization(_ stream: SCStream) async throws -> Bool {
+    do { try await stream.stopCapture(); return false }
+    catch { if isAlreadyStoppedStream(error) { return true }; throw error }
+}
+
+@available(macOS 14.0, *)
+func validateRecoveredMP4(_ url: URL, elapsed: Double) async throws {
+    let asset = AVURLAsset(url: url)
+    let tracks = try await asset.loadTracks(withMediaType: .video)
+    guard let video = tracks.first else {
+        throw NSError(domain: "MooBeeRecorder", code: -12, userInfo: [NSLocalizedDescriptionKey: "Stream already stopped and no finalized video track exists"])
+    }
+    let range = try await video.load(.timeRange)
+    let playable = try await asset.load(.isPlayable)
+    guard playable && recoveredDurationIsPlausible(range.duration.seconds, elapsed: elapsed) else {
+        throw NSError(domain: "MooBeeRecorder", code: -13, userInfo: [NSLocalizedDescriptionKey: "ScreenCaptureKit stopped before the requested capture ended; incomplete video not saved"])
+    }
+}
+
 /**
  * Thread-safe stop signal shared with Rust. This asks ScreenCaptureKit to
  * finalize the current session; it never publishes an unfinalized media file.
@@ -19,11 +51,13 @@ private final class RecordingStopControl: @unchecked Sendable {
     private var active = false
     private var stopping = false
 
-    func begin() {
+    func begin() -> Bool {
         lock.lock()
+        defer { lock.unlock() }
+        guard !active else { return false }
         active = true
         stopping = false
-        lock.unlock()
+        return true
     }
 
     func requestStop() -> Bool {
@@ -149,20 +183,23 @@ private func recordNativeMP4(
 
     try stream.addRecordingOutput(output)
     try await stream.startCapture()
+    let started = ProcessInfo.processInfo.systemUptime
     do {
         // Check at quarter-second intervals for explicit user stop requests.
         // Recording duration remains bounded even without a stop request.
-        let deadline = Date().addingTimeInterval(TimeInterval(seconds))
-        while Date() < deadline && !recordingStopControl.shouldStop() {
+        let deadline = started + Double(seconds)
+        while ProcessInfo.processInfo.systemUptime < deadline && !recordingStopControl.shouldStop() {
             try await Task.sleep(nanoseconds: 250_000_000)
         }
     } catch {
         try? await stream.stopCapture()
         throw error
     }
-    try await stream.stopCapture()
-    // Await the encoding/muxing completion event, not just stopCapture.
+    let elapsed = ProcessInfo.processInfo.systemUptime - started
+    let alreadyStopped = try await stopForMP4Finalization(stream)
+    // Await actual recording completion, even when stopCapture returns -3808.
     try await delegate.waitForFinalization()
+    if alreadyStopped { try await validateRecoveredMP4(url, elapsed: elapsed) }
 
     let size = try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber
     guard (size?.intValue ?? 0) >= 4096 else {
@@ -257,9 +294,11 @@ public func moobee_macos_record_mp4(
     }
 
     let result = RecordingBridgeResult()
-    recordingStopControl.begin()
+    guard recordingStopControl.begin() else {
+        copyError("A previous native MP4 task is still stopping; retry after it finishes", to: errorText, size: errorLength)
+        return -1
+    }
     Task { @MainActor in
-        defer { recordingStopControl.end() }
         do {
             if #available(macOS 15.0, *) {
                 try await recordNativeMP4(
@@ -279,6 +318,7 @@ public func moobee_macos_record_mp4(
                     shouldStop: { recordingStopControl.shouldStop() }
                 )
             }
+            recordingStopControl.end()
             result.complete(nil)
         } catch {
             // Preserve domain/code and OSStatus for errors that have only a
@@ -287,12 +327,14 @@ public func moobee_macos_record_mp4(
             let native = error as NSError
             let underlying = native.userInfo[NSUnderlyingErrorKey] as? NSError
             let details = underlying.map { " underlying=\($0.domain):\($0.code)" } ?? ""
+            recordingStopControl.end()
             result.complete("\(native.domain):\(native.code) — \(native.localizedDescription)\(details)")
         }
     }
 
     if result.finished.wait(timeout: .now() + .seconds(Int(durationSeconds) + 40)) == .timedOut {
-        copyError("Native MP4 capture timed out", to: errorText, size: errorLength)
+        _ = recordingStopControl.requestStop()
+        copyError("Native MP4 capture timed out; waiting for the native task to stop", to: errorText, size: errorLength)
         return -2
     }
     if let failure = result.error() {
