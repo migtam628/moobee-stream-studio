@@ -275,6 +275,12 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
       systemAudio: body.systemAudio, microphone: body.microphone
     })
   }
+  if (path === '/clips/program-mp4-stats' || path === '/clips/pause-program-mp4') {
+    if (typeof body.sessionId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(body.sessionId)) throw new Error('Invalid Program session')
+    if (path === '/clips/program-mp4-stats') return await invoke('continuous_program_stats', { sessionId: body.sessionId })
+    if (typeof body.paused !== 'boolean') throw new Error('Invalid pause state')
+    return { accepted: await invoke<boolean>('pause_continuous_program_mp4', { sessionId: body.sessionId, paused: body.paused }) }
+  }
   if (path === '/clips/stop-program-mp4') {
     if (typeof body.sessionId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(body.sessionId)) throw new Error('Invalid Program session')
     return { stopRequested: await invoke<boolean>('stop_continuous_program_mp4', { sessionId: body.sessionId }) }

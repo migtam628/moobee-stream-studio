@@ -17,16 +17,48 @@ const MAX_STALE_MS: u64 = 1_500;
 const MAX_DRAIN_PER_SOURCE_PER_TICK: usize = 64;
 const MAX_MP4_SECONDS: u32 = 30;
 
-// A stop request applies only to the matching Program MP4 session.
-static PROGRAM_STOP: std::sync::Mutex<Option<(String, bool)>> = std::sync::Mutex::new(None);
+// Control and telemetry are scoped to the active Program MP4 session.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProgramRecordingStats {
+    phase: &'static str,
+    recorded_frames: u32,
+    fps: u32,
+    elapsed_ms: u64,
+    paused_ms: u64,
+    file_bytes: u64,
+    late_frames: u32,
+    repeated_source_slots: u64,
+}
+struct ProgramSession {
+    id: String,
+    stop: bool,
+    pause: bool,
+    stats: ProgramRecordingStats,
+}
+static PROGRAM_STOP: std::sync::Mutex<Option<ProgramSession>> = std::sync::Mutex::new(None);
 struct ProgramStopGuard;
 impl ProgramStopGuard {
     fn begin(id: String) -> Self {
-        *PROGRAM_STOP.lock().unwrap_or_else(|e| e.into_inner()) = Some((id, false));
+        *PROGRAM_STOP.lock().unwrap_or_else(|e| e.into_inner()) = Some(ProgramSession {
+            id, stop: false, pause: false, stats: ProgramRecordingStats {
+                phase: "starting", recorded_frames: 0, fps: 0, elapsed_ms: 0,
+                paused_ms: 0, file_bytes: 0, late_frames: 0, repeated_source_slots: 0,
+            },
+        });
         Self
     }
     fn requested(&self) -> bool {
-        PROGRAM_STOP.lock().unwrap_or_else(|e| e.into_inner()).as_ref().is_some_and(|(_, stop)| *stop)
+        PROGRAM_STOP.lock().unwrap_or_else(|e| e.into_inner()).as_ref().is_some_and(|s| s.stop)
+    }
+    fn paused(&self) -> bool {
+        PROGRAM_STOP.lock().unwrap_or_else(|e| e.into_inner()).as_ref().is_some_and(|s| s.pause && !s.stop)
+    }
+    fn update(&self, stats: ProgramRecordingStats) {
+        if let Some(s) = PROGRAM_STOP.lock().unwrap_or_else(|e| e.into_inner()).as_mut() { s.stats = stats; }
+    }
+    fn finalizing(&self) {
+        if let Some(s) = PROGRAM_STOP.lock().unwrap_or_else(|e| e.into_inner()).as_mut() { s.stats.phase = "finalizing"; }
     }
 }
 impl Drop for ProgramStopGuard {
@@ -35,10 +67,25 @@ impl Drop for ProgramStopGuard {
 #[tauri::command]
 pub fn stop_continuous_program_mp4(session_id: String) -> bool {
     let mut state = PROGRAM_STOP.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some((id, stop)) = state.as_mut() {
-        if *id == session_id { *stop = true; return true; }
+    if let Some(s) = state.as_mut() {
+        if s.id == session_id && s.stats.phase != "finalizing" { s.stop = true; return true; }
     }
     false
+}
+#[tauri::command]
+pub fn pause_continuous_program_mp4(session_id: String, paused: bool) -> bool {
+    let mut state = PROGRAM_STOP.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(s) = state.as_mut() {
+        if s.id == session_id && !s.stop && matches!(s.stats.phase, "recording" | "paused") {
+            s.pause = paused; return true;
+        }
+    }
+    false
+}
+#[tauri::command]
+pub fn continuous_program_stats(session_id: String) -> Option<ProgramRecordingStats> {
+    PROGRAM_STOP.lock().unwrap_or_else(|e| e.into_inner()).as_ref()
+        .filter(|s| s.id == session_id).map(|s| s.stats.clone())
 }
 
 #[derive(Copy, Clone)]
@@ -75,6 +122,7 @@ pub struct ContinuousProgramReport {
     duration_seconds: f64,
     requested_max_seconds: u32,
     stopped_early: bool,
+    paused_ms: u64,
     frame_count: u32,
     width: u32,
     height: u32,
@@ -323,15 +371,24 @@ fn capture_to_dir(
     let started = Instant::now();
     let total_frames = profile.fps * seconds;
     let mut written_frames = 0u32;
+    let mut wall_tick = 0u32;
+    let mut paused_ticks = 0u32;
+    let mut file_bytes = 0u64;
     let mut received = vec![1u32; source_count];
     let mut repeats = vec![0u32; source_count];
     let mut late_frames = 0u32;
     let mut max_skew_ms = 0u64;
     let recording = (|| -> Result<(), String> {
-        for tick in 0..total_frames {
-            // The writer requires at least two frames. Finish only at a complete A/V tick.
-            if written_frames >= 2 && stop_guard.is_some_and(|guard| guard.requested()) { break; }
-            let target = started + clock.time(tick);
+        while written_frames < total_frames {
+            // Finish at a complete A/V tick. Limit pauses to 30 nominal seconds
+            // and bound the total session wall time even if inputs run slowly.
+            if written_frames >= 2 && stop_guard.is_some_and(|guard|
+                guard.requested() || paused_ticks >= profile.fps * 30 ||
+                started.elapsed() >= Duration::from_secs(u64::from(seconds) + 30)) { break; }
+            let paused = written_frames >= 2 && stop_guard.is_some_and(|guard| guard.paused());
+            let tick = written_frames;
+            let target = started + clock.time(wall_tick);
+            wall_tick += 1;
             std::thread::sleep(target.saturating_duration_since(Instant::now()));
             for (index, receiver) in receivers.iter().enumerate() {
                 let mut was_updated = false;
@@ -357,7 +414,7 @@ fn capture_to_dir(
                             return Err("One continuous Program display source disconnected".into()),
                     }
                 }
-                if !was_updated { repeats[index] = repeats[index].saturating_add(1); }
+                if !paused && !was_updated { repeats[index] = repeats[index].saturating_add(1); }
             }
             #[cfg(target_os = "macos")]
             if let Some(source) = primary_camera.as_mut() {
@@ -366,7 +423,7 @@ fn capture_to_dir(
                     latest[0] = frame;
                     last_received[0] = Instant::now();
                     received[0] = received[0].saturating_add(1);
-                } else { repeats[0] = repeats[0].saturating_add(1); }
+                } else if !paused { repeats[0] = repeats[0].saturating_add(1); }
             }
             let now = Instant::now();
             let most_recent = *last_received.iter().max().unwrap();
@@ -381,7 +438,7 @@ fn capture_to_dir(
                     *frame = new_frame;
                     *last = Instant::now();
                     webcam_frames = webcam_frames.saturating_add(1);
-                } else {
+                } else if !paused {
                     webcam_repeated_slots = webcam_repeated_slots.saturating_add(1);
                 }
                 if last.elapsed() > Duration::from_millis(MAX_STALE_MS) {
@@ -389,6 +446,18 @@ fn capture_to_dir(
                 }
                 validate_frame_geometry(frame.width(), frame.height(), total_pixels)?;
             }
+            if paused {
+                // Drain input queues while paused; no video or PCM is submitted
+                // to the encoder. Resume continues the contiguous media clock.
+                #[cfg(target_os = "macos")]
+                {
+                    let range = clock.audio_range(tick, 48_000)?;
+                    let frames = (range.end - range.start) as usize;
+                    if let Some(ref mut source) = mic { let _ = source.read(frames, mic_gain)?; }
+                    if let (Some(mixer), Some(inputs)) = (&mixer, &audio_inputs) { let _ = mixer.read(frames, inputs)?; }
+                }
+                paused_ticks += 1;
+            } else {
             #[cfg(target_os = "macos")]
             let mut composed = if let Some((_, frame, _)) = camera.as_ref() {
                 // Borrow all display/camera images; no full-resolution source clone.
@@ -419,13 +488,30 @@ fn capture_to_dir(
                 audio_clipped_samples = audio_clipped_samples.saturating_add(mixed.clipped);
             }
             written_frames += 1;
-            if Instant::now() > started + clock.time(tick + 1) {
+            if Instant::now() > started + clock.time(wall_tick) {
                 late_frames = late_frames.saturating_add(1);
+            }
+            }
+            if let Some(guard) = stop_guard {
+                if wall_tick == 1 || wall_tick % (profile.fps / 2).max(1) == 0 {
+                    file_bytes = fs::metadata(&temporary).map(|m| m.len()).unwrap_or(file_bytes);
+                    if file_bytes > 64 * 1024 * 1024 { return Err("Program MP4 exceeded the 64 MiB safety budget".into()); }
+                }
+                guard.update(ProgramRecordingStats {
+                    phase: if paused { "paused" } else { "recording" },
+                    recorded_frames: written_frames, fps: profile.fps,
+                    elapsed_ms: started.elapsed().as_millis() as u64,
+                    paused_ms: clock.time(paused_ticks).as_millis() as u64,
+                    file_bytes, late_frames,
+                    repeated_source_slots: repeats.iter().map(|n| u64::from(*n)).sum::<u64>() + u64::from(webcam_repeated_slots),
+                });
             }
         }
         Ok(())
     })();
     let elapsed_ms = started.elapsed().as_millis() as u64;
+    let paused_ms = clock.time(paused_ticks).as_millis() as u64;
+    if let Some(guard) = stop_guard { guard.finalizing(); }
     // Stop native input before waiting on the final container writer.
     drop(guard);
     drop(receivers);
@@ -480,7 +566,7 @@ fn capture_to_dir(
     Ok(ContinuousProgramReport {
         id, path: final_path.to_string_lossy().into_owned(), format: extension,
         bytes, duration_seconds: actual_duration, requested_max_seconds: seconds,
-        stopped_early: written_frames < total_frames,
+        stopped_early: written_frames < total_frames, paused_ms,
         frame_count: written_frames, width: profile.width, height: profile.height, fps: profile.fps,
         profile: profile.label,
         display_count: ids.len(), video_input_count: usize::from(video_device_id.is_some()), elapsed_ms, finalization_ms, audio_track_verified: false,
@@ -488,8 +574,8 @@ fn capture_to_dir(
         planned_audio_samples_48khz: clock.audio_range(written_frames - 1, 48_000)?.end,
         microphone_included: microphone, audio_input_count, audio_samples_written, audio_peak, audio_clipped_samples,
         overlay_included: graphic.is_some(),
-        measured_sampling_fps: if elapsed_ms == 0 { 0.0 }
-            else { f64::from(written_frames) * 1000.0 / elapsed_ms as f64 },
+        measured_sampling_fps: if elapsed_ms <= paused_ms { 0.0 }
+            else { f64::from(written_frames) * 1000.0 / (elapsed_ms - paused_ms) as f64 },
         source_frames_received: received,
         repeated_source_slots: repeats,
         late_output_frames: late_frames,
@@ -579,8 +665,22 @@ mod tests {
         let guard = ProgramStopGuard::begin("current".into());
         assert!(!stop_continuous_program_mp4("old".into()));
         assert!(!guard.requested());
+        use super::{continuous_program_stats, pause_continuous_program_mp4};
+        assert!(continuous_program_stats("old".into()).is_none());
+        assert!(!pause_continuous_program_mp4("current".into(), true));
+        let mut stats = continuous_program_stats("current".into()).unwrap();
+        stats.phase = "recording";
+        guard.update(stats);
+        assert!(!pause_continuous_program_mp4("old".into(), true));
+        assert!(pause_continuous_program_mp4("current".into(), true));
+        assert!(guard.paused());
+        assert!(pause_continuous_program_mp4("current".into(), false));
+        assert!(!guard.paused());
         assert!(stop_continuous_program_mp4("current".into()));
         assert!(guard.requested());
+        assert!(!pause_continuous_program_mp4("current".into(), true));
+        guard.finalizing();
+        assert!(!stop_continuous_program_mp4("current".into()));
         drop(guard);
         assert!(!stop_continuous_program_mp4("current".into()));
     }
