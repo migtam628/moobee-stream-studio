@@ -1,3 +1,22 @@
+# MooBee Stream Studio v0.3.9-alpha.15 — Native Mac video inputs
+
+**Experimental hardware-test alpha. Not a production streaming release.**
+
+- Includes merged PR #43, with native AVFoundation discovery of compatible cameras and USB/UVC HDMI capture cards by device name and stable identifier.
+- Studio Sources now separates desktop displays and native video inputs, provides refresh and explicit still-frame signal testing, and supports saving the selected video source in a scene.
+- A sole enabled Mac video input can feed the composed H.264 MP4 diagnostic, with optional microphone AAC and PNG overlay. The separate webcam inset must be off for this test. Native source input is bounded to 720p or lower; output scaling does not increase capture resolution.
+- Video input previews show the last manually tested still; they are not continuous gameplay video. A received frame does not establish a valid HDMI signal.
+- Retains the alpha.14 ScreenCaptureKit stop recovery, Studio redesign, adjustable graphic placement, and short display-recording tests.
+- All five PR #43 workflows passed. Real capture-card discovery, HDMI signal, recording and playback remain hardware-unverified. Windows card support, embedded HDMI audio, simultaneous capture card and webcam, sustained recording and RTMPS are not yet implemented.
+
+## Acceptance
+
+Connect the USB capture card and HDMI source. In Studio, refresh capture devices, select the named video input and click Test video signal. Confirm actual gameplay, not just a no-signal slate. Add the device as the sole enabled source, Take into Program if using Studio Mode, disable webcam inset, and record a baseline MP4. Verify motion and playback. Repeat after disconnect/reconnect. See [video capture device acceptance](VIDEO_CAPTURE_DEVICES.md).
+
+The next integrated milestone targets continuous live video input preview, concurrent camera layers, selected-device audio and sustained recording before authorized streaming. Go Live stays gated.
+
+---
+
 # MooBee Stream Studio v0.3.9-alpha.14 — MP4 shutdown recovery and Studio controls
 
 **Experimental alpha; hardware verification required.**
