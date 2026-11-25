@@ -150,6 +150,7 @@ try {
       ]
     }));
     window.__programRequests = [];
+    window.__snapshotCount = 0;
     const clip = {id:'e9525c58-0e63-40b3-94b6-a9d0f0de4e99', path:'/test/clip.mp4', format:'mp4', bytes:200000, durationSeconds:4, displayCount:1, microphoneIncluded:true, webcamIncluded:true, overlayIncluded:true, audioPeak:0.42, audioSamplesWritten:192000, width:1920, height:1080, fps:30};
     const canvas = document.createElement('canvas'); canvas.width=960; canvas.height=540;
     const ctx = canvas.getContext('2d');
@@ -160,7 +161,7 @@ try {
     window.__TAURI_INTERNALS__ = { invoke: async (cmd,args) => {
       if (cmd === 'list_displays') return [{id:0,name:'Test display',width:1920,height:1080},{id:1,name:'Other display',width:1280,height:720}];
       if (cmd === 'macos_mp4_availability') return {supported:true,requiredMacos:'14.0',microphoneSupported:true};
-      if (cmd === 'capture_scene_snapshot') return image;
+      if (cmd === 'capture_scene_snapshot') { window.__snapshotCount++; return image; }
       if (cmd === 'list_test_clips') return window.__programRequests.length ? [clip] : [];
       if (cmd === 'capture_continuous_program_mp4') { window.__programRequests.push(args); return clip; }
       throw new Error('Unexpected simulated command: '+cmd);
@@ -178,12 +179,28 @@ try {
   });
   await macPage.getByLabel('Import PNG overlay',{exact:true}).setInputFiles({name:'test-overlay.png',mimeType:'image/png',buffer:Buffer.from(png,'base64')});
   await macPage.getByRole('button',{name:'Remove graphic',exact:true}).waitFor();
+  await macPage.getByLabel('Graphic horizontal position',{exact:true}).fill('100');
+  await macPage.getByLabel('Graphic vertical position',{exact:true}).fill('75');
+  await macPage.getByLabel('Graphic width',{exact:true}).fill('30');
+  await macPage.getByLabel('Preview refresh',{exact:true}).selectOption('paused');
+  await macPage.getByText('Preview paused',{exact:true}).first().waitFor();
+  const pausedCount = await macPage.evaluate(() => window.__snapshotCount);
+  await macPage.waitForTimeout(1200);
+  if (await macPage.evaluate(() => window.__snapshotCount) !== pausedCount) throw new Error('Paused snapshots continued');
+  await macPage.getByRole('navigation').getByRole('button',{name:'Settings',exact:true}).click();
+  await macPage.getByRole('heading',{name:'Settings',exact:true}).waitFor();
+  await macPage.getByRole('navigation').getByRole('button',{name:'Studio',exact:true}).click();
+  if (!(await macPage.getByRole('checkbox',{name:'Enable microphone',exact:true}).isChecked())) throw new Error('Mic selection reset during navigation');
+  if (!(await macPage.getByRole('checkbox',{name:'Webcam inset',exact:true}).isChecked())) throw new Error('Camera selection reset during navigation');
+  if (await macPage.getByLabel('Graphic width',{exact:true}).inputValue() !== '30') throw new Error('Overlay settings reset');
+  await macPage.getByLabel('Preview refresh',{exact:true}).selectOption('fast');
+  await macPage.waitForFunction(count => window.__snapshotCount > count, pausedCount);
   await macPage.getByRole('button',{name:'Record Program test',exact:true}).click();
   await macPage.getByRole('button',{name:'Saved MP4 · View result',exact:true}).waitFor();
   const [request] = await macPage.evaluate(() => window.__programRequests);
   if (!request || request.displayIds.join() !== '0' || request.layout !== 'pip' || request.profile !== '1080p30' ||
       request.seconds !== 4 || request.webcam !== true || request.microphone !== true || Math.abs(request.micGain-0.6)>0.001 ||
-      request.overlay?.width !== 20 || request.overlay?.height !== 20) {
+      request.overlay?.width !== 20 || request.overlay?.height !== 20 || request.overlay?.placement?.xPercent !== 100 || request.overlay?.placement?.yPercent !== 75 || request.overlay?.placement?.widthPercent !== 30) {
     throw new Error('Production controls did not route Program scene, webcam, microphone, gain and graphic to native IPC');
   }
   if (await macPage.getByRole('meter',{name:'Last recorded microphone peak'}).getAttribute('aria-valuenow') !== '42') {
