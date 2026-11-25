@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "target": "v0.4.0-beta.1",
-  "reviewDate": "2026-11-23",
+  "reviewDate": "2026-11-25",
   "note": "Statuses are engineering tracking claims, not proof of device acceptance. Do not set verified without linked real-device evidence, human review, and required signoffs.",
   "gates": [
     {
@@ -13,20 +13,28 @@
     {
       "id": "program-video-compositor",
       "status": "in-progress",
-      "details": "Rust still-frame multi-display snapshot exists. Sustained timestamped 1080p30 Program frames feeding encoder not implemented.",
-      "evidence": []
+      "details": "Merged moving Mac video preview and interactive source transforms; bounded composed MP4 with session-scoped early stop and 30s cap is under review. Sustained timestamped native 1080p30 Program output and mixed display/video scenes remain unverified.",
+      "evidence": [
+        "https://github.com/migtam628/moobee-stream-studio/pull/45",
+        "https://github.com/migtam628/moobee-stream-studio/pull/47"
+      ]
     },
     {
       "id": "camera-and-overlays",
-      "status": "blocked",
-      "details": "Webcam, overlays, scene transitions, source transforms and Program video parity need integration.",
-      "evidence": []
+      "status": "in-progress",
+      "details": "Mac capture card/webcam moving preview and source geometry merged; static overlay diagnostic exists. Mixed display/video and scene-transition parity and real-device output remain unverified.",
+      "evidence": [
+        "https://github.com/migtam628/moobee-stream-studio/pull/45",
+        "https://github.com/migtam628/moobee-stream-studio/pull/47"
+      ]
     },
     {
       "id": "audio-mix-and-sync",
-      "status": "blocked",
-      "details": "Native microphone/system audio capture, faders, meters and A/V drift measurement are not production ready.",
-      "evidence": []
+      "status": "in-progress",
+      "details": "Mac named HDMI/mic/desktop PCM mix and live meters merged; optional AAC in bounded Program capture. Real audible audio, source clock drift, live fader adjustment during capture and Windows audio remain unverified.",
+      "evidence": [
+        "https://github.com/migtam628/moobee-stream-studio/pull/46"
+      ]
     },
     {
       "id": "windows-h264-aac",
