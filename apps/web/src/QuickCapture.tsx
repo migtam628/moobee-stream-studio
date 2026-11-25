@@ -391,7 +391,7 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
           <label className="layer-switch"><AudioLines size={16}/><span>Live audio meters<small>Explicit local capture · stops before recording</small></span><input aria-label="Live audio meters" type="checkbox" checked={liveMeter} disabled={!mac||busy} onChange={e=>setLiveMeter(e.target.checked)}/></label>
           {liveMeter && [...audioRows.map((row,i)=>({name:row.name,peak:audioLevels?.inputPeaks[i]})),{name:'Program mix',peak:audioLevels?.mixedPeak}].map(row=><div key={row.name}><div className="meter-caption"><span>{row.name}</span><b>{row.peak===undefined?'—':Math.round(row.peak*100)+'%'}</b></div><div className="production-meter" role="meter" aria-label={row.name+' live peak'} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round((row.peak??0)*100)} aria-valuetext={row.peak===undefined?'Waiting for samples':Math.round(row.peak*100)+' percent'}><span style={{width:Math.min(100,(row.peak??0)*100)+'%'}}/></div></div>)}
           {audioLevels && <small className="dock-note">Mixed clipping: {audioLevels.clippedSamples} samples / measured block</small>}
-          {(audioSelectionError||audioError) && <small className="preview-error" role="alert">{audioSelectionError||audioError}</small>
+          {(audioSelectionError||audioError) && <small className="preview-error" role="alert">{audioSelectionError||audioError}</small>}
           <p className="dock-note">Named inputs mix into Mac MP4 AAC tests. Live meters measure local PCM, not playback; device-clock sync remains unverified.</p>
           {otherAudio}
         </div>
