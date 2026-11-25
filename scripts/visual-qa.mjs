@@ -200,7 +200,7 @@ try {
   await mobile.screenshot({ path: new URL('mobile.png', dir).pathname, fullPage: true });
   if (await mobile.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 2)) throw new Error('Studio mobile horizontal overflow');
   await mobile.getByRole('button', { name: 'Open navigation' }).click();
-  await mobile.getByRole('button', { name: 'Clips', exact: true }).click();
+  await mobile.getByRole('navigation').getByRole('button', { name: 'Clips', exact: true }).click();
   await mobile.getByRole('heading', { name: 'Browser screen recording' }).waitFor();
   await mobile.screenshot({ path: new URL('mobile-clips.png', dir).pathname, fullPage: true });
 
