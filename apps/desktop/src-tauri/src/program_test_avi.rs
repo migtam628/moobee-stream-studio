@@ -44,6 +44,7 @@ fn capture_program_test_to_dir(
     display_ids: Vec<usize>,
     seconds: u32,
     layout: crate::scene_compositor::SceneLayout,
+    transforms: Option<Vec<crate::source_transform::SourceTransform>>,
 ) -> Result<ProgramTestAviReport, String> {
     use image::{codecs::jpeg::JpegEncoder, DynamicImage};
 
@@ -86,9 +87,7 @@ fn capture_program_test_to_dir(
                 }
                 images.push(image);
             }
-            let composite = crate::scene_compositor::composite_layout(
-                &images, TEST_WIDTH, TEST_HEIGHT, layout
-            )?;
+            let composite = if let Some(ref items)=transforms { crate::source_transform::composite(&images,TEST_WIDTH,TEST_HEIGHT,items)? } else { crate::scene_compositor::composite_layout(&images, TEST_WIDTH, TEST_HEIGHT, layout)? };
             let mut jpeg = Vec::new();
             let rgb = DynamicImage::ImageRgba8(composite).to_rgb8();
             JpegEncoder::new_with_quality(&mut jpeg, 72)
@@ -134,8 +133,10 @@ pub async fn capture_program_test_avi(
     display_ids: Vec<usize>,
     seconds: u32,
     layout: Option<String>,
+    transforms: Option<Vec<crate::source_transform::SourceTransform>>,
 ) -> Result<ProgramTestAviReport, String> {
     check_program_test(&display_ids, seconds)?;
+    crate::source_transform::validate_list(transforms.as_deref(),display_ids.len())?;
     let layout = crate::scene_compositor::SceneLayout::parse(layout.as_deref())?;
     #[cfg(any(target_os = "windows", target_os = "macos"))]
     {
@@ -152,7 +153,7 @@ pub async fn capture_program_test_avi(
         };
         tauri::async_runtime::spawn_blocking(move || {
             let _capture_guard = CaptureLock;
-            capture_program_test_to_dir(directory, display_ids, seconds, layout)
+            capture_program_test_to_dir(directory, display_ids, seconds, layout, transforms)
         }).await.map_err(|error| format!("Program AVI test worker stopped: {error}"))?
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
