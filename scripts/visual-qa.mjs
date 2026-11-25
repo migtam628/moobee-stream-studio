@@ -153,6 +153,7 @@ try {
     window.__snapshotCount = 0;
     window.__movingCalls = [];
     window.__captureOrder = [];
+    window.__audioCalls = [];
     const clip = {id:'e9525c58-0e63-40b3-94b6-a9d0f0de4e99', path:'/test/clip.mp4', format:'mp4', bytes:200000, durationSeconds:4, displayCount:1, microphoneIncluded:true, webcamIncluded:true, overlayIncluded:true, audioPeak:0.42, audioSamplesWritten:192000, width:1920, height:1080, fps:30};
     const canvas = document.createElement('canvas'); canvas.width=960; canvas.height=540;
     const ctx = canvas.getContext('2d');
@@ -161,6 +162,9 @@ try {
     ctx.font='36px sans-serif'; ctx.fillStyle='white'; ctx.fillText('Simulated display · UI wiring test',100,285);
     const image = canvas.toDataURL('image/png');
     window.__TAURI_INTERNALS__ = { invoke: async (cmd,args) => {
+      if (cmd === 'list_audio_inputs') return [{id:'mic-test',name:'USB Microphone',isDefault:true},{id:'hdmi-audio-test',name:'HDMI Capture Audio',isDefault:false}];
+      if (cmd === 'program_audio_levels') { window.__audioCalls.push(args.inputs); return {inputPeaks:args.inputs.map(x=>x.muted?0:0.25),mixedPeak:0.5,clippedSamples:0}; }
+      if (cmd === 'stop_program_audio_levels') { window.__captureOrder.push('stop-audio'); return null; }
       if (cmd === 'list_video_inputs') return [{id:'uvc-card-test',name:'USB HDMI Capture (simulated)',isDefault:false},{id:'webcam-test',name:'FaceTime Camera (simulated)',isDefault:true}];
       if (cmd === 'live_video_preview_frame') { window.__movingCalls.push(args); return {image,frameKey:String(window.__movingCalls.length),liveVideo:true,waiting:false}; }
       if (cmd === 'stop_video_previews') { window.__captureOrder.push('stop-preview'); return null; }
@@ -176,7 +180,20 @@ try {
   await macPage.goto(`http://127.0.0.1:${port}/`, {waitUntil:'domcontentloaded'});
   await macPage.getByRole('checkbox',{name:'Webcam inset',exact:true}).check();
   await macPage.getByRole('checkbox',{name:'Enable microphone',exact:true}).check();
+  await macPage.getByLabel('Microphone device',{exact:true}).selectOption('mic-test');
   await macPage.getByLabel('Microphone gain',{exact:true}).fill('0.6');
+  await macPage.getByRole('checkbox',{name:'Enable HDMI audio',exact:true}).check();
+  await macPage.getByLabel('Capture card audio device',{exact:true}).selectOption('hdmi-audio-test');
+  await macPage.getByLabel('HDMI gain',{exact:true}).fill('0.8');
+  await macPage.getByRole('checkbox',{name:'Enable desktop audio',exact:true}).check();
+  await macPage.getByLabel('Desktop gain',{exact:true}).fill('0.4');
+  await macPage.getByRole('checkbox',{name:'Live audio meters',exact:true}).check();
+  await macPage.waitForFunction(()=>window.__audioCalls.some(x=>x.length===3));
+  await macPage.waitForFunction(()=>document.querySelector('[aria-label="Program mix live peak"]')?.getAttribute('aria-valuenow')==='50');
+  await macPage.getByRole('button',{name:'Mute HDMI',exact:true}).click();
+  await macPage.waitForFunction(()=>window.__audioCalls.at(-1)?.[1]?.muted===true);
+  await macPage.getByRole('button',{name:'Unmute HDMI',exact:true}).click();
+  await macPage.getByLabel('HDMI gain',{exact:true}).fill('0.8');
   await macPage.getByLabel('Continuous Program test profile').selectOption('1080p30');
   const png = await macPage.evaluate(() => {
     const canvas=document.createElement('canvas');canvas.width=20;canvas.height=20;
@@ -209,6 +226,13 @@ try {
       request.overlay?.width !== 20 || request.overlay?.height !== 20 || request.overlay?.placement?.xPercent !== 100 || request.overlay?.placement?.yPercent !== 75 || request.overlay?.placement?.widthPercent !== 30) {
     throw new Error('Production controls did not route Program scene, webcam, microphone, gain and graphic to native IPC');
   }
+  if (request.audioInputs?.length !== 3 || request.audioInputs[0].deviceId !== 'mic-test' ||
+      request.audioInputs[1].deviceId !== 'hdmi-audio-test' || request.audioInputs[1].gain !== 0.8 ||
+      request.audioInputs[2].kind !== 'desktop' || request.audioInputs[2].gain !== 0.4) {
+    throw new Error('Named audio mix was not sent to native recording');
+  }
+  if (!(await macPage.evaluate(()=>window.__captureOrder.indexOf('stop-audio')>=0 && window.__captureOrder.indexOf('stop-audio')<window.__captureOrder.indexOf('record')))) throw new Error('Audio meter was not released before recording');
+  await macPage.getByRole('checkbox',{name:'Live audio meters',exact:true}).uncheck();
   if (await macPage.getByRole('meter',{name:'Last recorded microphone peak'}).getAttribute('aria-valuenow') !== '42') {
     throw new Error('Microphone meter did not reflect the returned capture result');
   }
