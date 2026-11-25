@@ -80,10 +80,11 @@ pub(crate) struct PreviewFrame {
     live_video: bool,
     waiting: bool,
 }
-fn preview(ids: Vec<String>, layout: SceneLayout, previous_key: Option<String>) -> Result<PreviewFrame,String> {
+fn preview(ids: Vec<String>, layout: SceneLayout, previous_key: Option<String>, transforms: Option<Vec<crate::source_transform::SourceTransform>>) -> Result<PreviewFrame,String> {
     use base64::Engine as _;
     use image::{DynamicImage, codecs::jpeg::JpegEncoder};
     validate_ids(&ids)?;
+    crate::source_transform::validate_list(transforms.as_deref(),ids.len())?;
     let mut frames = Vec::new();
     let mut keys = Vec::new();
     {
@@ -110,13 +111,13 @@ fn preview(ids: Vec<String>, layout: SceneLayout, previous_key: Option<String>) 
             }
         }
     }
-    let key = format!("{layout:?}:{}",keys.join(","));
+    let key = format!("{layout:?}:{transforms:?}:{}",keys.join(","));
     if previous_key.as_deref()==Some(key.as_str()) {
         return Ok(PreviewFrame{image:None,frame_key:Some(key),live_video:true,waiting:false});
     }
     // Bounded CPU composition at 640x360. No frame queue or disk writes.
     let images: Vec<RgbaImage> = frames.iter().map(|frame|(**frame).clone()).collect();
-    let canvas = composite_layout(&images,640,360,layout)?;
+    let canvas = if let Some(ref items)=transforms { crate::source_transform::composite(&images,640,360,items)? } else { composite_layout(&images,640,360,layout)? };
     let mut bytes = Vec::new();
     JpegEncoder::new_with_quality(&mut bytes,70).encode_image(&DynamicImage::ImageRgb8(DynamicImage::ImageRgba8(canvas).to_rgb8())).map_err(|e|e.to_string())?;
     Ok(PreviewFrame{image:Some(format!("data:image/jpeg;base64,{}",base64::engine::general_purpose::STANDARD.encode(bytes))),frame_key:Some(key),live_video:true,waiting:false})
@@ -128,9 +129,9 @@ fn stop() -> Result<(),String> {
     reg.guard = Weak::new();
     Ok(())
 }
-pub(crate) async fn frame(ids: Vec<String>, layout: Option<String>, previous_key: Option<String>) -> Result<PreviewFrame,String> {
+pub(crate) async fn frame(ids: Vec<String>, layout: Option<String>, previous_key: Option<String>, transforms: Option<Vec<crate::source_transform::SourceTransform>>) -> Result<PreviewFrame,String> {
     let layout = SceneLayout::parse(layout.as_deref())?;
-    tauri::async_runtime::spawn_blocking(move || preview(ids,layout,previous_key)).await.map_err(|e|e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || preview(ids,layout,previous_key,transforms)).await.map_err(|e|e.to_string())?
 }
 pub(crate) async fn stop_all() -> Result<(),String> {
     tauri::async_runtime::spawn_blocking(stop).await.map_err(|e|e.to_string())?
