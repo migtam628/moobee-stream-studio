@@ -24,7 +24,7 @@ private final class ProgramCamera: NSObject, AVCaptureVideoDataOutputSampleBuffe
     private var latest: CVPixelBuffer?
     private var sequence: UInt64 = 0
 
-    func start() throws {
+    func start(deviceID: String?) throws {
         if AVCaptureDevice.authorizationStatus(for: .video) == .notDetermined {
             let done = DispatchSemaphore(value: 0)
             AVCaptureDevice.requestAccess(for: .video) { _ in done.signal() }
@@ -35,12 +35,15 @@ private final class ProgramCamera: NSObject, AVCaptureVideoDataOutputSampleBuffe
         guard AVCaptureDevice.authorizationStatus(for: .video) == .authorized else {
             throw cameraError("Camera permission denied; enable MooBee in macOS Privacy & Security > Camera")
         }
-        guard let device = AVCaptureDevice.default(for: .video) else {
-            throw cameraError("No default webcam is available")
+        let selected = deviceID == nil ? AVCaptureDevice.default(for: .video) :
+            AVCaptureDevice.devices(for: .video).first { $0.uniqueID == deviceID }
+        guard let device = selected else {
+            throw cameraError("Selected video device is disconnected or unavailable; refresh video inputs")
         }
         let input = try AVCaptureDeviceInput(device: device)
         session.beginConfiguration()
-        if session.canSetSessionPreset(.vga640x480) { session.sessionPreset = .vga640x480 }
+        if deviceID != nil && session.canSetSessionPreset(.hd1280x720) { session.sessionPreset = .hd1280x720 }
+        else if session.canSetSessionPreset(.vga640x480) { session.sessionPreset = .vga640x480 }
         else if session.canSetSessionPreset(.medium) { session.sessionPreset = .medium }
         guard session.canAddInput(input), session.canAddOutput(output) else {
             session.commitConfiguration()
@@ -109,11 +112,12 @@ private final class ProgramCamera: NSObject, AVCaptureVideoDataOutputSampleBuffe
 }
 
 @_cdecl("moobee_program_camera_create")
-public func moobee_program_camera_create(_ error: UnsafeMutablePointer<CChar>?,
+public func moobee_program_camera_create(_ deviceID: UnsafePointer<CChar>?, _ error: UnsafeMutablePointer<CChar>?,
                                          _ capacity: Int32) -> UnsafeMutableRawPointer? {
     let camera = ProgramCamera()
     do {
-        try camera.start()
+        let selected = deviceID.map { String(cString: $0) }
+        try camera.start(deviceID: selected)
         return Unmanaged.passRetained(camera).toOpaque()
     } catch let cause {
         camera.stop()
@@ -138,4 +142,24 @@ public func moobee_program_camera_destroy(_ handle: UnsafeMutableRawPointer?) {
     guard let handle else { return }
     let camera = Unmanaged<ProgramCamera>.fromOpaque(handle).takeRetainedValue()
     camera.stop()
+}
+
+// Discovery does not start any camera or request capture permission.
+// Include external UVC devices by their stable AVFoundation unique IDs.
+// Device names are descriptive only; no assumption that every USB camera
+// is an HDMI capture card.
+@_cdecl("moobee_list_video_inputs")
+public func moobee_list_video_inputs(_ buffer: UnsafeMutablePointer<CChar>?, _ capacity: Int32) -> Int32 {
+    guard let buffer, capacity > 1 else { return -1 }
+    let devices = AVCaptureDevice.devices(for: .video)
+    let defaultID = AVCaptureDevice.default(for: .video)?.uniqueID
+    let entries: [[String: Any]] = devices.prefix(128).map { device in
+        ["id": device.uniqueID, "name": device.localizedName,
+         "isDefault": device.uniqueID == defaultID]
+    }
+    guard let data = try? JSONSerialization.data(withJSONObject: entries),
+          data.count < Int(capacity) else { return -1 }
+    for (index, byte) in data.enumerated() { buffer[index] = CChar(bitPattern: byte) }
+    buffer[data.count] = 0
+    return 0
 }

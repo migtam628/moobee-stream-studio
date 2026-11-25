@@ -141,28 +141,67 @@ function ScenesPanel({ status, perform, pending }: { status: StudioStatus; perfo
 
 function SourcesPanel({ status, perform, pending }: { status: StudioStatus; perform: (path: string, body: object) => Promise<boolean>; pending: boolean }) {
   const [displays, setDisplays] = useState<{ id: number; name: string; width: number; height: number }[]>([])
+  const [devices, setDevices] = useState<{ id: string; name: string; isDefault: boolean }[]>([])
   const [selected, setSelected] = useState('')
-  useEffect(() => {
+  const [scanning, setScanning] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [signal, setSignal] = useState('')
+  const [deviceError, setDeviceError] = useState('')
+  const mac = runningInTauri() && /Macintosh|Mac OS X/i.test(navigator.userAgent)
+  const refreshSources = useCallback(async () => {
     if (!runningInTauri()) return
-    let active = true
-    void request<{ displays: typeof displays }>('/capture/displays').then(result => {
-      if (!active) return
+    setScanning(true); setDeviceError(''); setSignal('')
+    try {
+      const result = await request<{ displays: typeof displays }>('/capture/displays')
       setDisplays(result.displays)
-      setSelected(value => result.displays.some(display => String(display.id) === value) ? value : String(result.displays[0]?.id ?? ''))
-    }).catch(() => {})
-    return () => { active = false }
-  }, [status.connected])
+      let next: typeof devices = []
+      if (mac) {
+        try { next = (await request<{ devices: typeof devices }>('/capture/video-inputs')).devices }
+        catch (cause) { setDeviceError('Video discovery: ' + String(cause)) }
+      }
+      setDevices(next)
+      const keys = [...result.displays.map(d => 'display:' + d.id), ...next.map(d => 'video:' + d.id)]
+      setSelected(value => keys.includes(value) ? value : keys[0] ?? '')
+    } catch (cause) { setDeviceError(String(cause)) }
+    finally { setScanning(false) }
+  }, [mac])
+  useEffect(() => { void refreshSources() }, [status.connected, refreshSources])
+  const selectedVideo = devices.find(item => 'video:' + item.id === selected)
+  const selectedDisplay = displays.find(item => 'display:' + item.id === selected)
   const addSource = async () => {
-    const display = displays.find(item => String(item.id) === selected)
-    if (!display) return
-    await perform('/studio/action', { action: 'addSource', kind: 'display', deviceId: String(display.id), name: display.name })
+    const device = selectedVideo ?? selectedDisplay
+    if (!device) return
+    await perform('/studio/action', { action: 'addSource', kind: selectedVideo ? 'video' : 'display', deviceId: String(device.id), name: device.name.slice(0,64) })
+  }
+  const testSignal = async () => {
+    if (!selectedVideo || testing) return
+    setTesting(true); setSignal(''); setDeviceError('')
+    try {
+      await request<{ image: string }>('/capture/test-video-input', { deviceId: selectedVideo.id })
+      setSignal('Video frame received · still preview only. Select the device as the sole enabled scene source.')
+    } catch (cause) { setDeviceError('Video signal test failed: ' + String(cause)) }
+    finally { setTesting(false) }
   }
   return <Panel title="Sources" icon={ListVideo} action={<div className="source-picker">
-    <select aria-label="Choose display to capture" title="Choose desktop display" value={selected} disabled={pending || !runningInTauri() || displays.length === 0} onChange={event => setSelected(event.target.value)}>
-      {displays.length ? displays.map(display => <option key={display.id} value={display.id}>{display.name} ({display.width}×{display.height})</option>) : <option value="">No displays</option>}
-    </select>
-    <button className="secondary-button" disabled={pending || !status.captureAvailable || !selected || !runningInTauri()} title="Add selected display to the selected scene" onClick={() => void addSource()}>+ Add</button>
+    <button className="icon-button" aria-label="Refresh capture devices" title="Refresh monitors, capture cards and cameras" disabled={scanning || testing || !runningInTauri()} onClick={() => void refreshSources()}><RefreshCcw size={14}/></button>
   </div>}>
+    <div className="clip-form">
+      <label>Capture source
+        <select aria-label="Choose capture source" value={selected} disabled={pending || scanning || testing || !runningInTauri()} onChange={event => { setSelected(event.target.value); setSignal(''); setDeviceError('') }}>
+          {!displays.length && !devices.length && <option value="">No capture devices</option>}
+          {displays.length > 0 && <optgroup label="Desktop displays">{displays.map(d => <option key={d.id} value={'display:' + d.id}>{d.name} ({d.width}×{d.height})</option>)}</optgroup>}
+          {devices.length > 0 && <optgroup label="Video capture devices · HDMI / cameras">{devices.map(d => <option key={d.id} value={'video:' + d.id}>{d.name}{d.isDefault ? ' (default)' : ''}</option>)}</optgroup>}
+        </select>
+      </label>
+      <div className="dock-action-row">
+        <button className="secondary-button" disabled={pending || scanning || testing || !selected} onClick={() => void addSource()}>+ Add source</button>
+        {mac && <button className="secondary-button" disabled={!selectedVideo || testing || scanning} onClick={() => void testSignal()}>{testing ? 'Testing…' : 'Test video signal'}</button>}
+      </div>
+      {mac && <small className="dock-note">{devices.length} video input(s) detected. USB/UVC devices appear by their macOS names. Detection does not confirm HDMI signal.</small>}
+      {signal && <small className="dock-note" role="status">{signal}</small>}
+      {deviceError && <small className="preview-error" role="alert">{deviceError}</small>}
+      {selectedVideo && <small className="dock-note">Mac recording test: enable just this video source. Disable the separate webcam inset. Video preview shows the last manually tested still, not live video.</small>}
+    </div>
     <div className="clip-form">
       <label>Scene layout
         <select aria-label="Scene layout" value={status.sceneLayout ?? 'grid'} disabled={pending || isStaticPreview || !status.connected}
@@ -181,7 +220,7 @@ function SourcesPanel({ status, perform, pending }: { status: StudioStatus; perf
       <button disabled={pending || isStaticPreview} title={`Remove ${source.name}`} aria-label={`Remove ${source.name}`} className="icon-button" onClick={() => {
         if (window.confirm(`Remove source "${source.name}" from this scene?`)) void perform('/studio/action', { action: 'removeSource', sceneItemId: source.id })
       }}><X size={17}/></button>
-    </div>) : <div className="empty-list">Choose a screen in the desktop edition and add it to your scene.</div>}</div>
+    </div>) : <div className="empty-list">Choose a display or supported video capture device and add it to your scene.</div>}</div>
   </Panel>
 }
 

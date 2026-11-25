@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { CheckCircle2, Copy, Film, FolderOpen, Monitor, Square, Video, AudioLines, Settings2, X, Volume2, Image as ImageIcon } from 'lucide-react'
 import { request, runningInTauri } from './api'
 import { isScreenCapturePermissionDenied } from './capturePermission'
-import { singleProgramDisplayId, programTestDisplayIds, programTestLayout } from './programDisplay'
+import { singleProgramDisplayId, programTestDisplayIds, programTestLayout, programVideoInput, type MinimalSceneCollection, validateSceneLayout } from './programDisplay'
 
 type Display = { id: number; name: string; width: number; height: number }
 type Availability = { supported: boolean; requiredMacos: string; osVersion?: string | null; reason?: string; microphoneSupported?: boolean; engine?: string }
@@ -17,6 +17,7 @@ type CapturedFile = {
   requestedMaxSeconds?: number
   audioTrackVerified?: boolean
   displayCount?: number
+  videoInputCount?: number
   elapsedMs?: number
   finalizationMs?: number
   webcamIncluded?: boolean
@@ -212,14 +213,19 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
     setError('')
     try {
       const collection = await request<unknown>('/studio/collection')
-      const displayIds = programTestDisplayIds(collection)
+      const videoDeviceId = programVideoInput(collection)
+      if (videoDeviceId && (mode !== 'mp4' || !mac || programWebcam)) throw new Error('Capture card recording requires Mac MP4; turn off the separate webcam inset.')
+      const displayIds = videoDeviceId ? [] : programTestDisplayIds(collection)
+      const state = collection as MinimalSceneCollection
+      const layout = videoDeviceId ? validateSceneLayout(state.scenes.find(scene => scene.name === state.currentScene)?.layout) : programTestLayout(collection)
       if (displayIds.some(id => !displays.some(display => display.id === id))) {
         throw new Error('One of the Program displays is disconnected. Refresh displays and check the scene.')
       }
       const result = await request<CapturedFile>(mode === 'mp4'
         ? '/clips/capture-program-continuous-mp4'
         : mode === 'continuous' ? '/clips/capture-program-continuous-avi' : '/clips/capture-program-test-avi', {
-        displayIds, seconds: programAviDuration, layout: programTestLayout(collection),
+        displayIds, seconds: programAviDuration, layout,
+        ...(videoDeviceId ? { videoDeviceId } : {}),
         ...(mode !== 'sampled' ? { profile: continuousProfile, overlay: graphic ? { ...graphic, placement } : null } : {}),
         ...(mode === 'mp4' ? { webcam: programWebcam, microphone: programMic, micGain } : {})
       })
@@ -270,7 +276,7 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
   }
 
   const isMacProgram = mac
-  const canProgram = supportedDesktop && !busy && !loading && !graphicLoading && displays.length > 0
+  const canProgram = supportedDesktop && !busy && !loading && !graphicLoading && (displays.length > 0 || mac)
   const overlayWidth = graphic ? Math.min(placement.widthPercent, 50 * 9 / 16 * graphic.width / graphic.height) : 0
   const overlayHeight = graphic ? overlayWidth * 16 / 9 * graphic.height / graphic.width : 0
   const peak = saved?.microphoneIncluded && typeof saved.audioPeak === 'number' ? saved.audioPeak : null
@@ -434,7 +440,7 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
           {(saved.bytes / (1024 * 1024)).toFixed(2)} MB
         </small>
         {saved.displayCount !== undefined && <p className="help-text" role="status">
-          {saved.displayCount} Program display source(s) composed · {saved.width ?? 640}×{saved.height ?? 360} · nominal {saved.fps ?? 10} fps {saved.format.toUpperCase()} ·
+          {saved.displayCount} display(s) · {saved.videoInputCount ?? 0} video device(s) · {saved.width ?? 640}×{saved.height ?? 360} · nominal {saved.fps ?? 10} fps {saved.format.toUpperCase()} ·
           {typeof saved.measuredSamplingFps === 'number' ? ` ${saved.measuredSamplingFps.toFixed(1)} fps measured sampling` : ' capture performance unknown'} ·
           {saved.elapsedMs !== undefined ? ` ${(saved.elapsedMs / 1000).toFixed(2)}s wall-clock capture` : ' elapsed time unknown'}.
           The nominal output clock can differ from wall-clock capture when frames arrive late.

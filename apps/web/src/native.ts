@@ -1,4 +1,4 @@
-import { validateSceneLayout, type SceneLayout } from './programDisplay'
+import { validateSceneLayout, validVideoInputId, type SceneLayout } from './programDisplay'
 import { invoke } from '@tauri-apps/api/core'
 import { version as appVersion } from '../../../package.json'
 import { offline, type Activity, type Alert, type StudioStatus } from './types'
@@ -6,6 +6,10 @@ import { offline, type Activity, type Alert, type StudioStatus } from './types'
 type Body = Record<string, unknown>
 type Source = StudioStatus['sources'][number]
 type Scene = { name: string; layout?: SceneLayout; sources: Source[] }
+type VideoInput = { id: string; name: string; isDefault: boolean }
+let videoInputs: VideoInput[] = []
+let testedVideo: { id: string; image: string } | null = null
+const macHost = () => /Macintosh|Mac OS X/i.test(navigator.userAgent)
 type Display = { id: number; name: string; width: number; height: number }
 type Saved = { version: 1; scenes: Scene[]; currentScene: string; previewScene: string; studioMode: boolean }
 const STORAGE_KEY = 'moobee-native-studio.v1'
@@ -29,12 +33,12 @@ function validateCollection(value: unknown): Saved {
     names.add(name.toLowerCase())
     const sources = scene.sources.map(source => {
       if (!source || !Number.isSafeInteger(source.id) || source.id < 1 || source.id > 1_000_000_000 ||
-          ids.has(source.id) || source.kind !== 'display' || typeof source.deviceId !== 'string' ||
-          !/^\d{1,4}$/.test(source.deviceId) || !validName(source.name) || typeof source.enabled !== 'boolean') {
-        throw new Error('Invalid display source in collection')
+          ids.has(source.id) || typeof source.deviceId !== 'string' ||
+          !((source.kind === 'display' && /^\d{1,4}$/.test(source.deviceId)) || (source.kind === 'video' && validVideoInputId(source.deviceId))) || !validName(source.name) || typeof source.enabled !== 'boolean') {
+        throw new Error('Invalid capture source in collection')
       }
       ids.add(source.id)
-      return { id: source.id, name: source.name.trim(), kind: 'display', deviceId: source.deviceId, enabled: source.enabled }
+      return { id: source.id, name: source.name.trim(), kind: source.kind, deviceId: source.deviceId, enabled: source.enabled }
     })
     const layout = validateSceneLayout(scene.layout)
     return { name, sources, ...(scene.layout === undefined ? {} : { layout }) }
@@ -75,7 +79,7 @@ function snapshot(): StudioStatus {
   return {
     ...offline,
     connected: true, address: 'local', engine: 'moobee-native-alpha',
-    captureAvailable: displays.length > 0,
+    captureAvailable: displays.length > 0 || videoInputs.length > 0,
     recordAvailable: false, broadcastAvailable: false,
     scenes: draft.scenes.map(scene => scene.name),
     currentScene: draft.currentScene, previewScene: draft.previewScene, studioMode: draft.studioMode,
@@ -141,12 +145,13 @@ function perform(body: Body) {
     if (!draft.studioMode) throw new Error('Enable Studio Mode to take a preview')
     draft.currentScene = draft.previewScene
   } else if (action === 'addSource') {
-    if (!active || !validName(body.name) || body.kind !== 'display' ||
-        typeof body.deviceId !== 'string' || !/^\d{1,4}$/.test(body.deviceId) ||
-        !displays.some(d => String(d.id) === body.deviceId)) throw new Error('Select a valid available display')
+    if (!active || !validName(body.name) || typeof body.deviceId !== 'string' ||
+        !((body.kind === 'display' && displays.some(d => String(d.id) === body.deviceId)) ||
+          (body.kind === 'video' && macHost() && validVideoInputId(body.deviceId) && videoInputs.some(d => d.id === body.deviceId)))) throw new Error('Select a valid available capture source')
+    if (body.kind === 'video' && active.sources.some(source => source.kind === 'video' && source.deviceId === body.deviceId)) throw new Error('This video input is already in the scene')
     if (active.sources.length >= 30) throw new Error('Source limit reached')
     const id = Math.max(0, ...draft.scenes.flatMap(s => s.sources.map(item => item.id))) + 1
-    active.sources.push({ id, name: body.name.trim(), kind: 'display', deviceId: body.deviceId, enabled: true })
+    active.sources.push({ id, name: body.name.trim(), kind: String(body.kind), deviceId: body.deviceId, enabled: true })
   } else if (action === 'sceneLayout') {
     if (!active) throw new Error('No active scene')
     if (body.layout === undefined) throw new Error('Choose a scene layout')
@@ -226,7 +231,11 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
   }
   if (path === '/clips/capture-program-continuous-avi' || path === '/clips/capture-program-continuous-mp4') {
     const ids = body.displayIds
-    if (!Array.isArray(ids) || ids.length < 1 || ids.length > 4 ||
+    const videoDeviceId = body.videoDeviceId
+    const mp4 = path.endsWith('-mp4')
+    const hasVideo = videoDeviceId !== undefined && videoDeviceId !== null
+    if (hasVideo && (!mp4 || !macHost() || !validVideoInputId(videoDeviceId) || body.webcam)) throw new Error('Select one Mac video input with webcam inset off')
+    if (!Array.isArray(ids) || (hasVideo ? ids.length !== 0 : ids.length < 1) || ids.length > 4 ||
         !ids.every(id => typeof id === 'number' && Number.isSafeInteger(id) && id >= 0 && id <= 24) ||
         new Set(ids).size !== ids.length ||
         typeof body.seconds !== 'number' || !Number.isSafeInteger(body.seconds) ||
@@ -234,7 +243,6 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
         (body.profile !== 'baseline' && body.profile !== '720p15' && body.profile !== '1080p30')) {
       throw new Error('Choose 1–4 unique Program displays, a 2–8 second duration and a supported capture profile')
     }
-    const mp4 = path.endsWith('-mp4')
     if (body.profile === '1080p30' && (!mp4 || Number(body.seconds) > 4)) throw new Error('1080p30 requires Mac MP4 and a 2–4 second test')
     if (body.webcam !== undefined && typeof body.webcam !== 'boolean') throw new Error('Invalid webcam selection')
     if (body.webcam && (!mp4 || ids.length > 3)) throw new Error('Webcam PiP requires macOS MP4 and one to three displays')
@@ -255,7 +263,7 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
       }
     }
     return await invoke(mp4 ? 'capture_continuous_program_mp4' : 'capture_continuous_program_avi', {
-      displayIds: ids, seconds: body.seconds, profile: body.profile, layout: validateSceneLayout(body.layout), overlay: body.overlay ?? null, ...(mp4 ? { webcam: body.webcam === true, microphone: body.microphone === true, micGain } : {})
+      displayIds: ids, seconds: body.seconds, profile: body.profile, layout: validateSceneLayout(body.layout), overlay: body.overlay ?? null, ...(mp4 ? { webcam: body.webcam === true, microphone: body.microphone === true, micGain, ...(hasVideo ? { videoDeviceId } : {}) } : {})
     })
   }
   if (path === '/clips/capture-program-test-avi') {
@@ -295,6 +303,21 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
     }
     return await invoke('probe_native_capture', { displayId: body.displayId, seconds: body.seconds })
   }
+  if (path === '/capture/video-inputs') {
+    if (!macHost()) return { devices: [], supported: false }
+    videoInputs = await invoke<VideoInput[]>('list_video_inputs')
+    if (testedVideo && !videoInputs.some(d => d.id === testedVideo?.id)) testedVideo = null
+    status = snapshot()
+    notify('status', status)
+    return { devices: videoInputs, supported: true }
+  }
+  if (path === '/capture/test-video-input') {
+    if (!macHost() || !validVideoInputId(body.deviceId)) throw new Error('Select an available Mac video input')
+    testedVideo = null
+    const image = await invoke<string>('test_video_input', { deviceId: body.deviceId })
+    testedVideo = { id: body.deviceId, image }
+    return { image }
+  }
   if (path === '/capture/displays') {
     await refresh()
     return { displays, available: displays.length > 0 }
@@ -303,6 +326,13 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
     const name = new URL(path, 'http://localhost').searchParams.get('scene') || draft.currentScene
     const scene = draft.scenes.find(s => s.name === name)
     if (!scene) throw new Error('Scene not found')
+    const enabled = scene.sources.filter(source => source.enabled)
+    const video = enabled.find(source => source.kind === 'video')
+    if (video) {
+      if (enabled.length !== 1) throw new Error('Enable only the selected capture card or camera for this video input test')
+      if (testedVideo?.id !== video.deviceId) throw new Error('Video input selected. Use Test video signal in Sources to acquire a still frame.')
+      return { image: testedVideo?.image ?? null }
+    }
     const enabledDisplays = scene.sources.filter(source => source.enabled && source.kind === 'display')
     if (!enabledDisplays.length) return { image: null }
     if (enabledDisplays.length > 4) {
