@@ -43,11 +43,12 @@ type CapturedFile = {
  * No synthetic status flags or fake broadcast controls are changed here.
  * The full Record/Go Live outputs remain gated on native A/V/RTMP acceptance.
  */
-export default function QuickCapture({ openClips, scenes, sources, otherAudio, streamControl, openSettings }: {
+export default function QuickCapture({ openClips, scenes, sources, otherAudio, streamControl, openSettings, active }: {
   openClips: () => void; scenes: ReactNode; sources: ReactNode; otherAudio?: ReactNode;
-  streamControl: ReactNode; openSettings: () => void
+  streamControl: ReactNode; openSettings: () => void; active: boolean
 }) {
   const diagnostics = useRef<HTMLDialogElement>(null)
+  useEffect(() => { if (!active && diagnostics.current?.open) diagnostics.current.close() }, [active])
   const desktop = runningInTauri()
   const mac = desktop && /Macintosh|Mac OS X/i.test(navigator.userAgent)
   const supportedDesktop = desktop && (mac || /Windows/i.test(navigator.userAgent))
