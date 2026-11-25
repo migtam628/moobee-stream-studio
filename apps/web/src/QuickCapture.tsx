@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { CheckCircle2, Copy, Film, FolderOpen, Monitor, Square, Video, AudioLines, Settings2, X, Volume2, Image as ImageIcon } from 'lucide-react'
 import { request, runningInTauri } from './api'
 import { isScreenCapturePermissionDenied } from './capturePermission'
-import { singleProgramDisplayId, programTestDisplayIds, programTestLayout, programVideoInput, type MinimalSceneCollection, validateSceneLayout } from './programDisplay'
+import { singleProgramDisplayId, programTestDisplayIds, programTestLayout, programTransforms, programVideoInput, type MinimalSceneCollection, validateSceneLayout } from './programDisplay'
 
 type AudioDevice = { id:string; name:string; isDefault:boolean }
 type AudioInput = { kind:'device'|'desktop'; deviceId:string|null; gain:number; muted:boolean }
@@ -270,6 +270,8 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
     try {
       const collection = await request<unknown>('/studio/collection')
       const videoDeviceId = programVideoInput(collection)
+      const transforms=programTransforms(collection)
+      if(transforms && mode==='mp4' && programWebcam)throw new Error('Disable the separate webcam inset to use manual source geometry.')
       if (videoDeviceId && (mode !== 'mp4' || !mac || programWebcam)) throw new Error('Capture card recording requires Mac MP4; turn off the separate webcam inset.')
       const displayIds = videoDeviceId ? [] : programTestDisplayIds(collection)
       const state = collection as MinimalSceneCollection
@@ -280,7 +282,7 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
       const result = await request<CapturedFile>(mode === 'mp4'
         ? '/clips/capture-program-continuous-mp4'
         : mode === 'continuous' ? '/clips/capture-program-continuous-avi' : '/clips/capture-program-test-avi', {
-        displayIds, seconds: programAviDuration, layout,
+        displayIds, seconds: programAviDuration, layout, transforms,
         ...(videoDeviceId ? { videoDeviceId } : {}),
         ...(mode !== 'sampled' ? { profile: continuousProfile, overlay: graphic ? { ...graphic, placement } : null } : {}),
         ...(mode === 'mp4' ? { webcam: programWebcam, microphone: programMic, micGain, audioInputs: audioRows.map(row=>row.input) } : {})
