@@ -78,7 +78,10 @@ function ScenePreview({ status, label, previewScene }: { status: StudioStatus; l
   useEffect(() => {
     if (!status.connected || !previewScene) { setImage(''); return }
     let cancelled = false
+    let inFlight = false
     async function load() {
+      if (inFlight || cancelled) return
+      inFlight = true
       try {
         const response = await request<{ image: string }>(`/studio/snapshot?scene=${encodeURIComponent(previewScene)}`)
         if (!cancelled) { setImage(response.image ?? ''); setPreviewError('') }
@@ -87,7 +90,7 @@ function ScenePreview({ status, label, previewScene }: { status: StudioStatus; l
           setImage('')
           setPreviewError((error as Error).message || 'Could not render native scene still preview')
         }
-      }
+      } finally { inFlight = false }
     }
     void load()
     const timer = setInterval(() => void load(), 5000)
@@ -161,7 +164,7 @@ function SourcesPanel({ status, perform, pending }: { status: StudioStatus; perf
           <option value="pip">Picture-in-picture · first source primary</option>
         </select>
       </label>
-      <small className="help-text">Reorder sources to choose the primary display and inset order. Applies to the selected scene's still preview and new native Program test recordings. Webcam is not supported yet.</small>
+      <small className="help-text">Reorder sources to choose the primary display and inset order. Applies to the selected scene's still preview and new native Program test recordings. Webcam and PNG are configured under Recording layers; they do not appear in still previews.</small>
     </div>
     <div className="rows-scroll">{status.sources.length ? status.sources.map((source, index) => <div className="source-row" key={source.id}>
       <Video size={16}/><span className="truncate">{source.name}</span>
@@ -188,14 +191,25 @@ function MixerPanel({ status, perform, pending }: { status: StudioStatus; perfor
 }
 
 function Studio({ status, perform, pending, setTab }: { status: StudioStatus; perform: (path: string, body: object) => Promise<boolean>; pending: boolean; setTab: (t: Tab) => void }) {
-  return <><div className="workspace-heading"><div><h1>Studio</h1><p>{isStaticPreview ? 'Explore the independent MooBee Stream Studio interface.' : 'Manage scenes and test native capture. Full recording, compositing and streaming are still in development.'}</p></div><span className={`status-pill ${status.connected ? 'positive' : ''}`}><span className="status-dot"/>{isStaticPreview ? 'Public preview' : status.connected ? 'Scene editor ready · output unavailable' : 'Local studio offline'}</span></div>
-    <div className="preview-grid"><ScenePreview status={status} label={status.studioMode ? 'Preview · next scene' : 'Preview · mirrored'} previewScene={status.previewScene || status.currentScene}/><div className="transition-slot"><button className="transition-button" disabled={!status.studioMode || !status.connected || pending} title="Take preview scene live" onClick={() => void perform('/studio/action', { action: 'transition' })}><RefreshCcw size={20}/><span>Take</span></button></div><ScenePreview status={status} label="Program · still preview (not live output)" previewScene={status.currentScene}/></div>
-    <div className="broadcast-toolbar"><button className={`tool-button ${status.studioMode ? 'tool-active' : ''}`} disabled={!status.connected || pending} onClick={() => void perform('/studio/action', { action: 'studioMode', studioModeEnabled: !status.studioMode })}><Layers size={17}/>{status.studioMode ? 'Studio Mode On' : 'Enable Studio Mode'}</button><button className={`tool-button ${status.recording ? 'tool-active' : ''}`} disabled={!status.recordAvailable || pending} title="Native recorder is under development" onClick={() => void perform('/studio/action', { action: 'record' })}><span className="record-dot"/>{status.recording ? 'Stop Recording' : 'Record (planned)'}</button><button className="tool-button" onClick={() => document.getElementById('quick-capture')?.scrollIntoView({ behavior: 'smooth' })}><Video size={16}/>Capture screen test</button><button className="tool-button" onClick={() => setTab('Overlays')}><LayoutGrid size={16}/>Overlays</button><button className="tool-button" onClick={() => setTab('Alerts')}><Bell size={16}/>Test Alerts</button><button className="tool-button" onClick={() => setTab('Settings')}><Settings2 size={16}/>Engine Settings</button></div>
-    <div className="control-grid"><ScenesPanel status={status} perform={perform} pending={pending}/><SourcesPanel status={status} perform={perform} pending={pending}/><MixerPanel status={status} perform={perform} pending={pending}/></div>
-    <div id="quick-capture"><Panel title="Quick screen capture — native test" icon={Video}>
-      <QuickCapture openClips={() => setTab('Clips')}/>
-    </Panel></div>
-  </>
+  return <div className="production-studio">
+    <div className="production-toolbar">
+      <div className="production-heading"><h1>Studio</h1><span className="production-mode">{status.connected ? 'Local workspace' : 'Offline'}</span></div>
+      <div className="production-toolbar-actions">
+        <span className="production-preview-note">Display stills · 5s refresh</span>
+        <button className={`tool-button ${status.studioMode ? 'tool-active' : ''}`} aria-pressed={status.studioMode} disabled={!status.connected || pending} onClick={() => void perform('/studio/action', { action: 'studioMode', studioModeEnabled: !status.studioMode })}><Layers size={15}/>Studio Mode</button>
+        {status.studioMode && <button className="tool-button take-button" disabled={!status.connected || pending} onClick={() => void perform('/studio/action', { action: 'transition' })}><RefreshCcw size={15}/>Take</button>}
+      </div>
+    </div>
+    <div className={`production-monitor-grid ${status.studioMode ? 'dual-monitor' : 'single-monitor'}`}>
+      {status.studioMode && <div className="production-monitor preview-monitor"><ScenePreview status={status} label="Preview" previewScene={status.previewScene || status.currentScene}/><span className="monitor-scene-name">{status.previewScene || status.currentScene || 'No scene'}</span></div>}
+      <div className="production-monitor program-monitor"><ScenePreview status={status} label="Program" previewScene={status.currentScene}/><span className="monitor-scene-name">{status.currentScene || 'No scene'} <small>· Not live output</small></span></div>
+    </div>
+    <QuickCapture scenes={<ScenesPanel status={status} perform={perform} pending={pending}/>}
+      sources={<SourcesPanel status={status} perform={perform} pending={pending}/>}
+      otherAudio={status.inputs.length ? <MixerPanel status={status} perform={perform} pending={pending}/> : undefined}
+      openClips={() => setTab('Clips')} openSettings={() => setTab('Settings')}
+      streamControl={<button className={`go-live dock-stream ${status.streaming ? 'stop-live' : ''}`} disabled={!status.broadcastAvailable || pending} title="Native RTMPS transport is not implemented" onClick={() => void perform('/studio/action', { action: 'stream' })}>{status.streaming ? <Square size={15}/> : <Radio size={16}/>} {status.streaming ? 'End Stream' : 'Go Live (unavailable)'}</button>}/>
+  </div>
 }
 
 function Settings({ status }: { status: StudioStatus }) {
@@ -247,7 +261,7 @@ function Settings({ status }: { status: StudioStatus }) {
       {captureError && <p className="help-text" role="alert">{captureError}</p>}
     </Panel><Panel title="Broadcast Readiness" icon={Shield}>
       <div className="info-block"><Link2 size={22}/><div><strong>Local scene API</strong><p>{status.connected ? 'Ready for scene control' : 'Start the desktop app or local API to edit scenes'} — no Native engine settings or third-party service.</p></div></div>
-      <div className="info-block"><CircleHelp size={22}/><div><strong>Encoding and streaming</strong><p>Not implemented in this alpha. Recording and Go Live remain disabled until MooBee can produce and verify actual encoded video output.</p></div></div>
+      <div className="info-block"><CircleHelp size={22}/><div><strong>Encoding and streaming</strong><p>Bounded native Program recording tests are available in Studio. Continuous production recording and Go Live remain unavailable pending hardware and RTMPS validation.</p></div></div>
       <p className="help-text">The web preview has no local device permission. macOS needs Screen Recording access; Windows may request screen or device permissions.</p>
     </Panel><Panel title="GitHub Releases & Updates" icon={RefreshCcw}>
       <GithubUpdates appVersion={appVersion}/>
@@ -551,12 +565,14 @@ function PlannedModule({ tab }: { tab: keyof typeof moduleDetails }) {
 export default function App() {
   const [tab, setTab] = useState<Tab>('Studio')
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [activityOpen, setActivityOpen] = useState(false)
+  const productionTab = tab === 'Studio' || tab === 'Scenes'
   const { status, activity, alert, pending, error, setError, perform, refresh } = useStudio()
   const go = (target: Tab) => { setTab(target); setDrawerOpen(false) }
-  return <div className="app-shell">
-    <header className="app-topbar"><div className="brand"><RadioTower size={27}/><span>MooBee <em>Studio</em></span></div><div className="top-divider"/><div className="project-select"><span>Workspace</span><strong>My Studio</strong></div><div className="top-spacer"/><div className="destination-pills"><span className="dest-label">Destinations</span><span className="destination"><span className="dest-icon twitch">T</span>Twitch <small>Not linked</small></span><span className="destination"><span className="dest-icon youtube">▶</span>YouTube <small>Not linked</small></span><span className="destination"><span className="dest-icon kick">K</span>Kick <small>Not linked</small></span></div><div className="top-divider"/><span className="profile">MT</span><button className="mobile-menu" type="button" aria-label={drawerOpen ? 'Close navigation' : 'Open navigation'} aria-expanded={drawerOpen} onClick={() => setDrawerOpen(!drawerOpen)}><LayoutGrid size={22}/></button></header>
+  return <div className={`app-shell production-shell ${productionTab ? 'studio-shell' : ''} ${activityOpen ? 'activity-open' : 'activity-closed'}`}>
+    <header className="app-topbar"><div className="brand"><RadioTower size={27}/><span>MooBee <em>Studio</em></span></div><div className="top-divider"/><div className="project-select"><span>Workspace</span><strong>My Studio</strong></div><div className="top-spacer"/><div className="destination-pills"><span className="dest-label">Destinations</span><span className="destination"><span className="dest-icon twitch">T</span>Twitch <small>Not linked</small></span><span className="destination"><span className="dest-icon youtube">▶</span>YouTube <small>Not linked</small></span><span className="destination"><span className="dest-icon kick">K</span>Kick <small>Not linked</small></span></div><div className="top-divider"/><button className="top-activity-toggle tool-button" type="button" aria-pressed={activityOpen} onClick={() => setActivityOpen(value => !value)}><Activity size={15}/>Activity</button><span className="profile">MT</span><button className="mobile-menu" type="button" aria-label={drawerOpen ? 'Close navigation' : 'Open navigation'} aria-expanded={drawerOpen} onClick={() => setDrawerOpen(!drawerOpen)}><LayoutGrid size={22}/></button></header>
     <aside className={`sidebar ${drawerOpen ? 'drawer-open' : ''}`}><nav>{navigation.map(({ label, icon: Icon }) => <button key={label} className={`nav-item ${tab === label ? 'active' : ''}`} onClick={() => go(label)}><Icon size={19}/><span>{label}</span></button>)}</nav><div className="sidebar-bottom"><div className="release-label" title="Release tag and immutable GitHub commit"><span>BUILD {buildIdentity}</span></div><button onClick={() => go('Settings')}><CircleHelp size={16}/>Engine guide</button></div></aside>
-    <main className="workspace">
+    <main className={`workspace ${productionTab ? 'production-workspace' : ''}`}>
       {error && <div className="error-banner" role="alert"><span>{error}</span><button onClick={() => setError('')}><X size={17}/></button></div>}
       {(tab === 'Studio' || tab === 'Scenes') && <Studio status={status} perform={perform} pending={pending} setTab={go}/>}
       {tab === 'Settings' && <Settings status={status}/>}
@@ -565,11 +581,11 @@ export default function App() {
       {tab === 'Clips' && <ClipLab/>}
       {(tab === 'Multistream' || tab === 'AI Sidekick' || tab === 'Chatbot' || tab === 'Analytics') && <PlannedModule tab={tab}/>}
     </main>
-    <aside className="right-rail"><div className="rail-tabs"><span><Activity size={16}/> Activity</span><span className="live-marker"/></div><div className="assistant-summary"><div><Sparkles size={21}/><strong>AI Sidekick</strong><span className="small-tag">Coming soon</span></div><p>Scene automations and an optional local AI co-host are planned for a later milestone.</p></div>
+    <aside className="right-rail" aria-label="Activity dock"><div className="rail-tabs"><span><Activity size={16}/> Activity</span><button className="icon-button" aria-label="Close activity" onClick={() => setActivityOpen(false)}><X size={15}/></button></div><div className="assistant-summary"><div><Sparkles size={21}/><strong>AI Sidekick</strong><span className="small-tag">Coming soon</span></div><p>Scene automations and an optional local AI co-host are planned for a later milestone.</p></div>
       <Panel title="Stream Activity" icon={Activity} action={<button className="icon-button" onClick={() => void refresh()} title="Refresh"><RefreshCcw size={15}/></button>}><div className="activity-list">{activity.length ? activity.slice(0, 14).map((item) => <div className="activity-item" key={item.id}><span className="activity-dot"/><div><p>{item.message}</p><small>{new Date(item.time).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</small></div></div>) : <div className="empty-list">Local scene changes and test alerts will appear here.</div>}</div></Panel>
       <Panel title="Quick Actions" icon={SlidersHorizontal}><div className="quick-actions"><button onClick={() => go('Alerts')}><Bell size={17}/>Test an alert</button><button onClick={() => go('Overlays')}><LayoutGrid size={17}/>Browser overlay</button><button onClick={() => go('Clips')}><Film size={17}/>Capture a test GIF</button><button onClick={() => go('Settings')}><Terminal size={17}/>Native engine settings</button></div></Panel>
-      {alert && <div className="recent-test"><Bell size={18}/>Last test: {alert.name}</div>}
+      {alert && activityOpen && <div className="recent-test"><Bell size={18}/>Last test: {alert.name}</div>}
     </aside>
-    <footer className="status-footer"><div className={`health ${status.connected ? 'healthy' : ''}`}><span className="status-dot"/>{status.connected ? (status.streaming ? 'Live Broadcast' : 'Scene Editor Ready · No Live Output') : 'Local engine offline'}</div><div className="footer-data"><span>Encoder <b>In development</b></span><span>Bitrate <b>{status.bitrateKbps === null ? '—' : `${status.bitrateKbps} kbps`}</b></span><span>Uptime <b>{formatElapsed(status.streamSeconds)}</b></span><span>Dropped <b>{status.droppedFrames === null ? '—' : status.droppedFrames}</b></span></div><button className={`go-live ${status.streaming ? 'stop-live' : ''}`} disabled={!status.broadcastAvailable || pending} title="The native streaming encoder is not implemented yet" onClick={() => void perform('/studio/action', { action: 'stream' })}>{status.streaming ? <Square size={18}/> : <Radio size={20}/>} {status.streaming ? 'End Stream' : 'Go Live (planned)'}</button></footer>
+    <footer className="status-footer"><div className={`health ${status.connected ? 'healthy' : ''}`}><span className="status-dot"/>{status.connected ? (status.streaming ? 'Live Broadcast' : 'Scene Editor Ready · No Live Output') : 'Local engine offline'}</div><div className="footer-data"><span>Encoder <b>In development</b></span><span>Bitrate <b>{status.bitrateKbps === null ? '—' : `${status.bitrateKbps} kbps`}</b></span><span>Uptime <b>{formatElapsed(status.streamSeconds)}</b></span><span>Dropped <b>{status.droppedFrames === null ? '—' : status.droppedFrames}</b></span></div>{alert && !activityOpen && <span className="footer-alert">Last test: {alert.name}</span>}<span className="footer-build" title={buildIdentity}>{buildIdentity}</span></footer>
   </div>
 }

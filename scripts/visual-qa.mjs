@@ -25,12 +25,37 @@ try {
   page.on('pageerror', error => errors.push(error.message));
   await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'domcontentloaded' });
   await page.getByRole('heading', { name: 'Studio' }).waitFor();
-  await page.getByText('Quick screen capture — native test').waitFor();
-  const nativeQuickCapture = page.locator('.quick-capture').getByRole('button', { name: 'Capture screen test' });
-  if (await nativeQuickCapture.isEnabled()) {
-    throw new Error('Native Quick Capture must be disabled in the browser-only edition');
+  await page.getByRole('button', { name: 'Record Program test' }).waitFor();
+  await page.getByText('Local workspace', { exact: true }).waitFor();
+  const program = page.getByRole('button', { name: 'Record Program test', exact: true });
+  if (await program.isEnabled()) throw new Error('Native Program record must be disabled in browser-only edition');
+  if (await page.getByRole('button', { name: 'Go Live (unavailable)', exact: true }).isEnabled()) throw new Error('Streaming gate must remain disabled');
+  if (await page.getByRole('checkbox', { name: 'Enable microphone', exact: true }).isEnabled()) throw new Error('Native microphone cannot run in browser');
+  const dockBounds = await page.locator('.production-docks').boundingBox();
+  const recordBounds = await program.boundingBox();
+  if (!dockBounds || !recordBounds || dockBounds.y + dockBounds.height > 901 || recordBounds.y + recordBounds.height > 901) {
+    throw new Error('Production controls should fit in the desktop viewport');
   }
+  const studioMode = page.getByRole('button', { name: 'Studio Mode', exact: true });
+  if (await studioMode.getAttribute('aria-pressed') === 'true') await studioMode.click();
+  await page.locator('.single-monitor').waitFor();
+  if (await page.locator('.production-monitor').count() !== 1) throw new Error('Single Program monitor layout incorrect');
   await page.screenshot({ path: new URL('desktop.png', dir).pathname, fullPage: true });
+  await studioMode.click();
+  await page.locator('.dual-monitor').waitFor();
+  if (await page.locator('.production-monitor').count() !== 2) throw new Error('Studio mode requires two monitors');
+  await page.getByRole('button', { name: 'Take', exact: true }).waitFor();
+  await page.screenshot({ path: new URL('desktop-studio-mode.png', dir).pathname, fullPage: true });
+  await page.getByRole('button', { name: 'Activity', exact: true }).click();
+  await page.getByRole('complementary', { name: 'Activity dock' }).waitFor();
+  await page.getByRole('button', { name: 'Close activity', exact: true }).click();
+  await page.getByRole('button', { name: 'Capture diagnostics', exact: true }).click();
+  await page.getByRole('heading', { name: 'Quick screen capture — native test' }).waitFor();
+  const nativeQuickCapture = page.locator('.quick-capture').getByRole('button', { name: 'Capture screen test' });
+  if (await nativeQuickCapture.isEnabled()) throw new Error('Native Quick Capture must be disabled in browser-only edition');
+  await page.getByRole('button', { name: 'Close capture diagnostics' }).click();
+  if (await page.locator('dialog[open]').count()) throw new Error('Diagnostics dialog did not close');
+
   await page.getByRole('button', { name: 'Settings', exact: true }).first().click();
   await page.getByText('Runtime Service Diagnostics').waitFor();
   await page.getByText('RTMP / RTMPS broadcast').waitFor();
@@ -110,12 +135,72 @@ try {
   const filename = await saveLink.getAttribute('download');
   if (!filename?.endsWith('.webm')) throw new Error('Browser recorder did not expose a WebM download');
   await recordingPage.screenshot({ path: new URL('browser-recorder.png', dir).pathname, fullPage: true });
+  // Exercise the production dock's real frontend IPC route with a simulated
+  // macOS host. This checks request wiring, not camera/encoder hardware.
+  const macPage = await browser.newPage({ viewport: { width: 1440, height: 900 },
+    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_2) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36' });
+  macPage.on('pageerror', error => errors.push(error.message));
+  await macPage.addInitScript(() => {
+    window.isTauri = true;
+    localStorage.setItem('moobee-native-studio.v1', JSON.stringify({
+      version: 1, currentScene: 'Gameplay', previewScene: 'Preview', studioMode: true,
+      scenes: [
+        { name: 'Gameplay', layout: 'pip', sources: [{id: 1, name: 'Test display', kind: 'display', deviceId: '0', enabled: true}] },
+        { name: 'Preview', layout: 'grid', sources: [{id: 2, name: 'Other display', kind: 'display', deviceId: '1', enabled: true}] }
+      ]
+    }));
+    window.__programRequests = [];
+    const clip = {id:'e9525c58-0e63-40b3-94b6-a9d0f0de4e99', path:'/test/clip.mp4', format:'mp4', bytes:200000, durationSeconds:4, displayCount:1, microphoneIncluded:true, webcamIncluded:true, overlayIncluded:true, audioPeak:0.42, audioSamplesWritten:192000, width:1920, height:1080, fps:30};
+    const canvas = document.createElement('canvas'); canvas.width=960; canvas.height=540;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle='#132738'; ctx.fillRect(0,0,960,540);
+    ctx.fillStyle='#396986'; ctx.fillRect(60,90,840,360);
+    ctx.font='36px sans-serif'; ctx.fillStyle='white'; ctx.fillText('Simulated display · UI wiring test',100,285);
+    const image = canvas.toDataURL('image/png');
+    window.__TAURI_INTERNALS__ = { invoke: async (cmd,args) => {
+      if (cmd === 'list_displays') return [{id:0,name:'Test display',width:1920,height:1080},{id:1,name:'Other display',width:1280,height:720}];
+      if (cmd === 'macos_mp4_availability') return {supported:true,requiredMacos:'14.0',microphoneSupported:true};
+      if (cmd === 'capture_scene_snapshot') return image;
+      if (cmd === 'list_test_clips') return window.__programRequests.length ? [clip] : [];
+      if (cmd === 'capture_continuous_program_mp4') { window.__programRequests.push(args); return clip; }
+      throw new Error('Unexpected simulated command: '+cmd);
+    }};
+  });
+  await macPage.goto(`http://127.0.0.1:${port}/`, {waitUntil:'domcontentloaded'});
+  await macPage.getByRole('checkbox',{name:'Webcam inset',exact:true}).check();
+  await macPage.getByRole('checkbox',{name:'Enable microphone',exact:true}).check();
+  await macPage.getByLabel('Microphone gain',{exact:true}).fill('0.6');
+  await macPage.getByLabel('Continuous Program test profile').selectOption('1080p30');
+  const png = await macPage.evaluate(() => {
+    const canvas=document.createElement('canvas');canvas.width=20;canvas.height=20;
+    const ctx=canvas.getContext('2d');ctx.fillStyle='rgba(255,0,0,0.5)';ctx.fillRect(0,0,20,20);
+    return canvas.toDataURL('image/png').split(',')[1];
+  });
+  await macPage.getByLabel('Import PNG overlay',{exact:true}).setInputFiles({name:'test-overlay.png',mimeType:'image/png',buffer:Buffer.from(png,'base64')});
+  await macPage.getByRole('button',{name:'Remove graphic',exact:true}).waitFor();
+  await macPage.getByRole('button',{name:'Record Program test',exact:true}).click();
+  await macPage.getByRole('button',{name:'Saved MP4 · View result',exact:true}).waitFor();
+  const [request] = await macPage.evaluate(() => window.__programRequests);
+  if (!request || request.displayIds.join() !== '0' || request.layout !== 'pip' || request.profile !== '1080p30' ||
+      request.seconds !== 4 || request.webcam !== true || request.microphone !== true || Math.abs(request.micGain-0.6)>0.001 ||
+      request.overlay?.width !== 20 || request.overlay?.height !== 20) {
+    throw new Error('Production controls did not route Program scene, webcam, microphone, gain and graphic to native IPC');
+  }
+  if (await macPage.getByRole('meter',{name:'Last recorded microphone peak'}).getAttribute('aria-valuenow') !== '42') {
+    throw new Error('Microphone meter did not reflect the returned capture result');
+  }
+  await macPage.screenshot({path:new URL('desktop-native-simulated.png',dir).pathname,fullPage:true});
+  await macPage.getByRole('button',{name:'Saved MP4 · View result',exact:true}).click();
+  await macPage.getByText('Static graphic overlay included in output.',{exact:true}).waitFor();
+  await macPage.getByRole('button',{name:'Close capture diagnostics'}).click();
+  await macPage.close();
   const mobile = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
   await mobile.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'domcontentloaded' });
   await mobile.getByRole('heading', { name: 'Studio' }).waitFor();
   await mobile.screenshot({ path: new URL('mobile.png', dir).pathname, fullPage: true });
+  if (await mobile.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 2)) throw new Error('Studio mobile horizontal overflow');
   await mobile.getByRole('button', { name: 'Open navigation' }).click();
-  await mobile.getByRole('button', { name: 'Clips', exact: true }).click();
+  await mobile.getByRole('navigation').getByRole('button', { name: 'Clips', exact: true }).click();
   await mobile.getByRole('heading', { name: 'Browser screen recording' }).waitFor();
   await mobile.screenshot({ path: new URL('mobile-clips.png', dir).pathname, fullPage: true });
 

@@ -66,6 +66,20 @@ jobs:
       - name: Audit beta blockers (informational; beta publishing remains disabled)
         run: node scripts/check-beta-readiness.mjs
       - run: npm run build
+      - name: Install Chromium for release UI validation
+        if: startsWith(github.ref, 'refs/heads/release/')
+        run: npx playwright install --with-deps chromium
+      - name: Gate release on production workspace and simulated native IPC
+        if: startsWith(github.ref, 'refs/heads/release/')
+        run: npm run test:e2e
+      - name: Preserve release UI verification screenshots
+        if: always() && startsWith(github.ref, 'refs/heads/release/')
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-ui-verification
+          path: .qa/*.png
+          include-hidden-files: true
+          if-no-files-found: ignore
       - uses: dtolnay/rust-toolchain@stable
       - name: Install FFmpeg for CI-only media verification
         run: |
