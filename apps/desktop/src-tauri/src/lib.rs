@@ -18,6 +18,7 @@ mod program_microphone;
 mod program_overlay;
 mod media_clock;
 mod audio_mix;
+mod program_audio;
 mod stream_mux;
 
 use axum::{
@@ -142,6 +143,27 @@ struct DisplayInfo {
     height: u32,
 }
 
+#[tauri::command]
+async fn list_audio_inputs() -> Result<serde_json::Value,String> {
+    #[cfg(target_os="macos")]
+    { tauri::async_runtime::spawn_blocking(program_audio::list).await.map_err(|e|e.to_string())? }
+    #[cfg(not(target_os="macos"))]
+    { Err("Native audio input discovery requires macOS".into()) }
+}
+#[tauri::command]
+async fn program_audio_levels(inputs: Vec<program_audio::AudioInput>) -> Result<Option<program_audio::AudioLevels>,String> {
+    #[cfg(target_os="macos")]
+    { tauri::async_runtime::spawn_blocking(move||program_audio::levels(inputs)).await.map_err(|e|e.to_string())? }
+    #[cfg(not(target_os="macos"))]
+    { let _=inputs; Err("Native audio meters require macOS".into()) }
+}
+#[tauri::command]
+async fn stop_program_audio_levels() -> Result<(),String> {
+    #[cfg(target_os="macos")]
+    { tauri::async_runtime::spawn_blocking(program_audio::stop).await.map_err(|e|e.to_string())? }
+    #[cfg(not(target_os="macos"))]
+    { Ok(()) }
+}
 #[tauri::command]
 async fn list_video_inputs() -> Result<serde_json::Value, String> {
     #[cfg(target_os = "macos")]
@@ -305,7 +327,7 @@ pub fn run() {
             tauri::async_runtime::spawn(serve_overlays(runner_state));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![emit_test_alert, list_displays, list_video_inputs, test_video_input, live_video_preview_frame, stop_video_previews, capture_display, scene_compositor::capture_scene_snapshot, clip::capture_test_clip, clip::list_test_clips, clip::read_test_clip, clip::reveal_test_clip, capture_probe::probe_native_capture, native_avi::capture_silent_avi, program_test_avi::capture_program_test_avi, program_continuous_avi::capture_continuous_program_avi, program_continuous_avi::capture_continuous_program_mp4, macos_mp4::capture_macos_mp4, macos_mp4::stop_macos_mp4, macos_mp4::macos_mp4_availability, native_service_diagnostics, open_screen_recording_settings])
+        .invoke_handler(tauri::generate_handler![emit_test_alert, list_displays, list_video_inputs, list_audio_inputs, program_audio_levels, stop_program_audio_levels, test_video_input, live_video_preview_frame, stop_video_previews, capture_display, scene_compositor::capture_scene_snapshot, clip::capture_test_clip, clip::list_test_clips, clip::read_test_clip, clip::reveal_test_clip, capture_probe::probe_native_capture, native_avi::capture_silent_avi, program_test_avi::capture_program_test_avi, program_continuous_avi::capture_continuous_program_avi, program_continuous_avi::capture_continuous_program_mp4, macos_mp4::capture_macos_mp4, macos_mp4::stop_macos_mp4, macos_mp4::macos_mp4_availability, native_service_diagnostics, open_screen_recording_settings])
         .run(tauri::generate_context!())
         .expect("failed to run MooBee Live desktop");
 }

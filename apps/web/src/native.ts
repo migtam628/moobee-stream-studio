@@ -14,6 +14,15 @@ type MovingFrame = { image: string | null; frameKey: string | null; liveVideo: b
 const pendingPreview = new Set<Promise<MovingFrame>>()
 let previewUsed = false
 let captureActive = false
+let meterUsed = false
+let pendingMeter: Promise<unknown> | null = null
+let meterStopping: Promise<void> | null = null
+async function releaseAudioMeter(): Promise<void> {
+  if (meterStopping) return meterStopping
+  if (!meterUsed) return
+  meterStopping = (async () => { if (pendingMeter) await pendingMeter.catch(() => {}); await invoke('stop_program_audio_levels'); meterUsed = false })()
+  try { await meterStopping } finally { meterStopping = null }
+}
 let releasing: Promise<void> | null = null
 async function releaseVideoPreviews(): Promise<void> {
   if (releasing) return releasing
@@ -28,7 +37,7 @@ async function releaseVideoPreviews(): Promise<void> {
 async function captureWithPreviewReleased<T>(command: string, args: Record<string,unknown>): Promise<T> {
   if (captureActive) throw new Error('Another native capture is active')
   captureActive = true
-  try { await releaseVideoPreviews(); return await invoke<T>(command,args) }
+  try { await releaseAudioMeter(); await releaseVideoPreviews(); return await invoke<T>(command,args) }
   finally { captureActive = false }
 }
 async function movingPreview(ids: string[], layout: SceneLayout, previousKey: string | null): Promise<MovingFrame> {
@@ -278,6 +287,7 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
     if (body.microphone && !mp4) throw new Error('Microphone AAC requires macOS MP4')
     const micGain = body.micGain ?? 1
     if (typeof micGain !== 'number' || !Number.isFinite(micGain) || micGain < 0 || micGain > 2) throw new Error('Invalid microphone gain')
+    if (body.audioInputs !== undefined && (!mp4 || !Array.isArray(body.audioInputs) || body.audioInputs.length > 3)) throw new Error('Named audio sources require Mac MP4')
     if (body.overlay !== undefined && body.overlay !== null) {
       const o = body.overlay as { width: number; height: number; rgbaBase64: string; placement?: { xPercent: number; yPercent: number; widthPercent: number } }
       if (typeof o !== 'object' || !Number.isInteger(o.width) || !Number.isInteger(o.height) ||
@@ -291,7 +301,7 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
       }
     }
     return await captureWithPreviewReleased(mp4 ? 'capture_continuous_program_mp4' : 'capture_continuous_program_avi', {
-      displayIds: ids, seconds: body.seconds, profile: body.profile, layout: validateSceneLayout(body.layout), overlay: body.overlay ?? null, ...(mp4 ? { webcam: body.webcam === true, microphone: body.microphone === true, micGain, ...(hasVideo ? { videoDeviceId } : {}) } : {})
+      displayIds: ids, seconds: body.seconds, profile: body.profile, layout: validateSceneLayout(body.layout), overlay: body.overlay ?? null, ...(mp4 ? { webcam: body.webcam === true, microphone: body.microphone === true, micGain, ...(body.audioInputs !== undefined ? { audioInputs: body.audioInputs } : {}), ...(hasVideo ? { videoDeviceId } : {}) } : {})
     })
   }
   if (path === '/clips/capture-program-test-avi') {
@@ -331,6 +341,19 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
     }
     return await captureWithPreviewReleased('probe_native_capture', { displayId: body.displayId, seconds: body.seconds })
   }
+  if (path === '/capture/audio-inputs') {
+    if (!macHost()) return { devices: [], supported: false }
+    return { devices: await invoke('list_audio_inputs'), supported: true }
+  }
+  if (path === '/capture/audio-levels') {
+    if (!macHost() || captureActive || meterStopping) return { levels: null }
+    if (pendingMeter) return { levels: null }
+    meterUsed = true
+    const task = invoke('program_audio_levels',{inputs:body.inputs})
+    pendingMeter = task
+    try { return { levels: await task } } finally { pendingMeter = null }
+  }
+  if (path === '/capture/stop-audio-levels') { await releaseAudioMeter(); return { stopped: true } }
   if (path === '/capture/stop-video-previews') { await releaseVideoPreviews(); return { stopped: true } }
   if (path === '/capture/video-inputs') {
     if (!macHost()) return { devices: [], supported: false }
