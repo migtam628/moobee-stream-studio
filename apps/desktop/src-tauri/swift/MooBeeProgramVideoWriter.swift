@@ -30,15 +30,34 @@ private final class ProgramVideoWriter {
     let width: Int
     let height: Int
     let fps: Int32
+    let outputDirectory: String
     var count: Int64 = 0
     var finishing = false
 
-    init(path: String, width: Int, height: Int, fps: Int32, microphone: Bool) throws {
+    // Use the destination volume rather than global system storage. Capacity
+    // is a snapshot, not a reservation; the encoder can still report disk errors.
+    private static func checkFreeSpace(_ directory: String, minimum: UInt64) throws {
+        let attributes = try FileManager.default.attributesOfFileSystem(forPath: directory)
+        guard let available = attributes[.systemFreeSize] as? NSNumber else {
+            throw writerError("Unable to determine available recording disk space")
+        }
+        guard available.uint64Value >= minimum else {
+            throw writerError("Insufficient recording disk space")
+        }
+    }
+
+    init(path: String, width: Int, height: Int, fps: Int32, microphone: Bool, bitrateKbps: Int32) throws {
         guard (width == 640 && height == 360 && fps == 10) ||
               (width == 1280 && height == 720 && fps == 15) ||
               (width == 1920 && height == 1080 && fps == 30) else {
             throw writerError("Unsupported composed H.264 test profile")
         }
+        guard [Int32(1500), 3000, 6000].contains(bitrateKbps) else {
+            throw writerError("Invalid MP4 bitrate preset")
+        }
+        let directory = URL(fileURLWithPath: path).deletingLastPathComponent().path
+        try Self.checkFreeSpace(directory, minimum: 96 * 1024 * 1024)
+        self.outputDirectory = directory
         self.width = width
         self.height = height
         self.fps = fps
@@ -48,7 +67,7 @@ private final class ProgramVideoWriter {
             AVVideoWidthKey: width,
             AVVideoHeightKey: height,
             AVVideoCompressionPropertiesKey: [
-                AVVideoAverageBitRateKey: width == 1920 ? 6_000_000 : 3_000_000,
+                AVVideoAverageBitRateKey: Int(bitrateKbps) * 1000,
                 AVVideoExpectedSourceFrameRateKey: Int(fps),
                 AVVideoMaxKeyFrameIntervalKey: Int(fps) * 2,
                 AVVideoAllowFrameReorderingKey: false
@@ -87,8 +106,11 @@ private final class ProgramVideoWriter {
     }
 
     func append(_ rgba: UnsafePointer<UInt8>, length: Int) throws {
-        guard !finishing, count < Int64(fps) * 30, length == width * height * 4 else {
+        guard !finishing, count < Int64(fps) * 60, length == width * height * 4 else {
             throw writerError("Invalid composed frame or frame budget exceeded")
+        }
+        if count % Int64(fps) == 0 {
+            try Self.checkFreeSpace(outputDirectory, minimum: 16 * 1024 * 1024)
         }
         // Bounded backpressure, not an unbounded queued recording.
         let deadline = ProcessInfo.processInfo.systemUptime + 0.5
@@ -187,14 +209,14 @@ private final class ProgramVideoWriter {
 
 @_cdecl("moobee_program_writer_create")
 public func moobee_program_writer_create(
-    _ path: UnsafePointer<CChar>?, _ width: Int32, _ height: Int32, _ fps: Int32, _ microphone: Int32,
+    _ path: UnsafePointer<CChar>?, _ width: Int32, _ height: Int32, _ fps: Int32, _ microphone: Int32, _ bitrateKbps: Int32,
     _ error: UnsafeMutablePointer<CChar>?, _ capacity: Int32
 ) -> UnsafeMutableRawPointer? {
     do {
         guard let path, let value = String(validatingUTF8: path) else {
             throw writerError("Invalid composed MP4 path")
         }
-        let sink = try ProgramVideoWriter(path: value, width: Int(width), height: Int(height), fps: fps, microphone: microphone == 1)
+        let sink = try ProgramVideoWriter(path: value, width: Int(width), height: Int(height), fps: fps, microphone: microphone == 1, bitrateKbps: bitrateKbps)
         return Unmanaged.passRetained(sink).toOpaque()
     } catch let cause { reportError(cause, error, capacity); return nil }
 }
