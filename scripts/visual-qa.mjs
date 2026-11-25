@@ -159,6 +159,8 @@ try {
     ctx.font='36px sans-serif'; ctx.fillStyle='white'; ctx.fillText('Simulated display · UI wiring test',100,285);
     const image = canvas.toDataURL('image/png');
     window.__TAURI_INTERNALS__ = { invoke: async (cmd,args) => {
+      if (cmd === 'list_video_inputs') return [{id:'uvc-card-test',name:'USB HDMI Capture (simulated)',isDefault:false}];
+      if (cmd === 'test_video_input') { window.__testedDevice = args.deviceId; return image; }
       if (cmd === 'list_displays') return [{id:0,name:'Test display',width:1920,height:1080},{id:1,name:'Other display',width:1280,height:720}];
       if (cmd === 'macos_mp4_availability') return {supported:true,requiredMacos:'14.0',microphoneSupported:true};
       if (cmd === 'capture_scene_snapshot') { window.__snapshotCount++; return image; }
@@ -210,6 +212,19 @@ try {
   await macPage.getByRole('button',{name:'Saved MP4 · View result',exact:true}).click();
   await macPage.getByText('Static graphic overlay included in output.',{exact:true}).waitFor();
   await macPage.getByRole('button',{name:'Close capture diagnostics'}).click();
+  await macPage.getByRole('button',{name:'Studio Mode',exact:true}).click();
+  await macPage.getByLabel('Choose capture source',{exact:true}).selectOption('video:uvc-card-test');
+  await macPage.getByRole('button',{name:'Test video signal',exact:true}).click();
+  await macPage.getByText(/Video frame received/).waitFor();
+  if (await macPage.evaluate(() => window.__testedDevice) !== 'uvc-card-test') throw new Error('Wrong video input tested');
+  await macPage.getByRole('button',{name:'+ Add source',exact:true}).click();
+  const displayRow = macPage.locator('.source-row').filter({hasText:'Test display'});
+  await displayRow.getByTitle('Hide source').click();
+  await macPage.getByRole('checkbox',{name:'Webcam inset',exact:true}).uncheck();
+  await macPage.getByRole('button',{name:'Record Program test',exact:true}).click();
+  await macPage.waitForFunction(() => window.__programRequests.length === 2);
+  const cardRequest = await macPage.evaluate(() => window.__programRequests[1]);
+  if (cardRequest.videoDeviceId !== 'uvc-card-test' || cardRequest.displayIds.length || cardRequest.webcam) throw new Error('Capture card Program input not routed correctly');
   await macPage.close();
   const mobile = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
   await mobile.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'domcontentloaded' });
