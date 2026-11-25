@@ -243,11 +243,15 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
     const micGain = body.micGain ?? 1
     if (typeof micGain !== 'number' || !Number.isFinite(micGain) || micGain < 0 || micGain > 2) throw new Error('Invalid microphone gain')
     if (body.overlay !== undefined && body.overlay !== null) {
-      const o = body.overlay as { width: number; height: number; rgbaBase64: string }
+      const o = body.overlay as { width: number; height: number; rgbaBase64: string; placement?: { xPercent: number; yPercent: number; widthPercent: number } }
       if (typeof o !== 'object' || !Number.isInteger(o.width) || !Number.isInteger(o.height) ||
           o.width < 1 || o.width > 480 || o.height < 1 || o.height > 270 ||
           typeof o.rgbaBase64 !== 'string' || o.rgbaBase64.length !== Math.ceil(o.width * o.height * 4 / 3) * 4) {
         throw new Error('Invalid bounded graphic overlay')
+      }
+      if (o.placement !== undefined) {
+        const p = o.placement
+        if (!p || typeof p !== 'object' || !Number.isInteger(p.xPercent) || p.xPercent < 0 || p.xPercent > 100 || !Number.isInteger(p.yPercent) || p.yPercent < 0 || p.yPercent > 100 || !Number.isInteger(p.widthPercent) || p.widthPercent < 10 || p.widthPercent > 50) throw new Error('Invalid graphic placement')
       }
     }
     return await invoke(mp4 ? 'capture_continuous_program_mp4' : 'capture_continuous_program_avi', {
