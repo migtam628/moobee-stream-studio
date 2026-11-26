@@ -10,6 +10,7 @@ type VideoInput = { id: string; name: string; isDefault: boolean }
 let videoInputs: VideoInput[] = []
 let testedVideo: { id: string; image: string } | null = null
 const macHost = () => /Macintosh|Mac OS X/i.test(navigator.userAgent)
+const windowsHost = () => /Windows/i.test(navigator.userAgent)
 type MovingFrame = { image: string | null; frameKey: string | null; liveVideo: boolean; waiting: boolean }
 const pendingPreview = new Set<Promise<MovingFrame>>()
 let previewUsed = false
@@ -270,7 +271,7 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
     return await invoke('macos_mp4_availability')
   }
   if (path === '/clips/recover-finalized-program') {
-    if (!macHost()) throw new Error('Program MP4 recovery requires macOS')
+    if (!macHost() && !windowsHost()) throw new Error('Program MP4 recovery requires Mac or Windows')
     return await invoke('recover_finalized_program_recordings')
   }
   if (path === '/clips/reveal') {
@@ -319,8 +320,10 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
         (body.profile !== 'baseline' && body.profile !== '720p15' && body.profile !== '1080p30')) {
       throw new Error('Choose 1–4 unique Program displays, a supported duration (MP4 up to 60 seconds or whole-minute segments up to 5 minutes, AVI up to 8) and capture profile')
     }
+    if (mp4 && !macHost() && !windowsHost()) throw new Error('Native MP4 requires Mac or Windows')
+    if (mp4 && windowsHost() && (body.seconds > 60 || body.webcam || body.microphone || body.audioInputs !== undefined || hasVideo)) throw new Error('Windows MP4 supports silent display capture up to 60 seconds only')
     if (body.bitrateKbps !== undefined && (!mp4 || typeof body.bitrateKbps !== 'number' || ![1500,3000,6000].includes(body.bitrateKbps))) throw new Error('Invalid MP4 bitrate preset')
-    if (body.profile === '1080p30' && !mp4) throw new Error('1080p30 requires Mac MP4')
+    if (body.profile === '1080p30' && !mp4) throw new Error('1080p30 requires native MP4')
     if (body.sessionId !== undefined && (!mp4 || typeof body.sessionId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(body.sessionId))) throw new Error('Invalid Program session')
     if (body.webcam !== undefined && typeof body.webcam !== 'boolean') throw new Error('Invalid webcam selection')
     if (body.webcam && (!mp4 || ids.length > 3)) throw new Error('Webcam PiP requires macOS MP4 and one to three displays')
