@@ -456,7 +456,7 @@ fn capture_to_dir(
     } else { None };
     let mut webcam_frames = if webcam { 1u32 } else { 0 };
     let mut webcam_repeated_slots = 0u32;
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos",target_os = "windows"))]
     let mut primary_camera = video_device_id.as_deref().map(|id| crate::program_camera::ProgramCamera::start_selected(Some(id))).transpose()?;
     let source_count = ids.len() + usize::from(video_device_id.is_some());
     let available = if ids.is_empty() { Vec::new() } else { xcap::Monitor::all()
@@ -491,7 +491,7 @@ fn capture_to_dir(
         latest.push(frame);
         last_received.push(Instant::now());
     }
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos",target_os = "windows"))]
     if let Some(source) = primary_camera.as_mut() {
         let frame = source.first_frame()?;
         total_pixels = validate_frame_geometry(frame.width(), frame.height(), total_pixels)?;
@@ -592,7 +592,7 @@ fn capture_to_dir(
                 }
                 if !paused && !was_updated { repeats[index] = repeats[index].saturating_add(1); }
             }
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos",target_os = "windows"))]
             if let Some(source) = primary_camera.as_mut() {
                 if let Some(frame) = source.poll()? {
                     validate_frame_geometry(frame.width(), frame.height(), 0)?;
@@ -730,7 +730,7 @@ fn capture_to_dir(
     drop(receivers);
     #[cfg(target_os = "macos")]
     drop(camera);
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos",target_os = "windows"))]
     drop(primary_camera);
     #[cfg(target_os = "macos")]
     drop(mic);
@@ -838,7 +838,7 @@ async fn capture_continuous_program(
     overlay: Option<crate::program_overlay::OverlayInput>, video_device_id: Option<String>, audio_inputs: Option<Vec<crate::program_audio::AudioInput>>, transforms: Option<Vec<crate::source_transform::SourceTransform>>, session_id: Option<String>, bitrate_kbps: Option<u32>,
 ) -> Result<ContinuousProgramReport, String> {
     if session_id.as_ref().is_some_and(|id| uuid::Uuid::parse_str(id).is_err()) { return Err("Invalid Program recording session ID".into()); }
-    if cfg!(target_os = "windows") && matches!(format, ProgramFormat::Mp4) && (webcam || video_device_id.is_some() || seconds > MAX_MP4_SECONDS) { return Err("Windows MP4 supports display recording up to 60 seconds only".into()); }
+    if cfg!(target_os = "windows") && matches!(format, ProgramFormat::Mp4) && (webcam || seconds > MAX_MP4_SECONDS) { return Err("Windows MP4 supports one video device or displays up to 60 seconds; separate webcam inset is Mac-only".into()); }
     let validate_duration = if matches!(format, ProgramFormat::Mp4) { validate_mp4_request } else { validate_request };
     if let Some(ref inputs) = audio_inputs {
         crate::program_audio::validate(inputs)?;
@@ -849,8 +849,8 @@ async fn capture_continuous_program(
     crate::source_transform::validate_list(transforms.as_deref(), display_ids.len()+usize::from(video_device_id.is_some()))?;
     if transforms.is_some() && webcam { return Err("Disable the separate webcam inset for manual scene transforms".into()); }
     let mut selected_profile = if let Some(ref id) = video_device_id {
-        if !cfg!(target_os = "macos") || !matches!(format, ProgramFormat::Mp4) || !display_ids.is_empty() || webcam || id.is_empty() || id.len() > 1024 || id.chars().any(char::is_control) {
-            return Err("Video device recording requires Mac MP4, one selected video input only, and webcam inset off".into());
+        if !cfg!(any(target_os = "macos",target_os = "windows")) || !matches!(format, ProgramFormat::Mp4) || !display_ids.is_empty() || webcam || id.is_empty() || id.len() > 1024 || id.chars().any(char::is_control) {
+            return Err("Video device recording requires native MP4, one selected video input only, and webcam inset off".into());
         }
         validate_duration(&[0], seconds, &profile)?
     } else { validate_duration(&display_ids, seconds, &profile)? };

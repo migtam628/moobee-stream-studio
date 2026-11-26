@@ -15,9 +15,10 @@ mod windows_mp4_sink;
 mod windows_audio;
 #[cfg(target_os = "macos")]
 mod program_mp4_sink;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos",target_os = "windows"))]
+#[cfg_attr(target_os = "windows",path="windows_camera.rs")]
 mod program_camera;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos",target_os = "windows"))]
 mod video_preview;
 #[cfg(target_os = "macos")]
 mod program_microphone;
@@ -179,34 +180,34 @@ async fn stop_program_audio_levels() -> Result<(),String> {
 }
 #[tauri::command]
 async fn list_video_inputs() -> Result<serde_json::Value, String> {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos",target_os = "windows"))]
     { serde_json::to_value(program_camera::list_video_inputs().await?).map_err(|e| e.to_string()) }
-    #[cfg(not(target_os = "macos"))]
-    { Err("Native video input discovery is currently implemented for macOS only".into()) }
+    #[cfg(not(any(target_os = "macos",target_os = "windows")))]
+    { Err("Native video input discovery requires Mac or Windows".into()) }
 }
 
 #[tauri::command]
 async fn live_video_preview_frame(device_ids: Vec<String>, layout: Option<String>, previous_key: Option<String>, transforms: Option<Vec<source_transform::SourceTransform>>) -> Result<serde_json::Value,String> {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos",target_os = "windows"))]
     { serde_json::to_value(video_preview::frame(device_ids,layout,previous_key,transforms).await?).map_err(|e|e.to_string()) }
-    #[cfg(not(target_os = "macos"))]
-    { let _=(device_ids,layout,previous_key,transforms); Err("Live video input preview requires macOS".into()) }
+    #[cfg(not(any(target_os = "macos",target_os = "windows")))]
+    { let _=(device_ids,layout,previous_key,transforms); Err("Live video input preview requires Mac or Windows".into()) }
 }
 
 #[tauri::command]
 async fn stop_video_previews() -> Result<(),String> {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos",target_os = "windows"))]
     { video_preview::stop_all().await }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos",target_os = "windows")))]
     { Ok(()) }
 }
 
 #[tauri::command]
 async fn test_video_input(device_id: String) -> Result<String, String> {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos",target_os = "windows"))]
     { program_camera::test_video_input(device_id).await }
-    #[cfg(not(target_os = "macos"))]
-    { let _ = device_id; Err("Native video input testing is currently implemented for macOS only".into()) }
+    #[cfg(not(any(target_os = "macos",target_os = "windows")))]
+    { let _ = device_id; Err("Native video input testing requires Mac or Windows".into()) }
 }
 
 #[tauri::command]

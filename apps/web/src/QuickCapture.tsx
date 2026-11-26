@@ -313,7 +313,7 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
       const videoDeviceId = programVideoInput(collection)
       const transforms=programTransforms(collection)
       if(transforms && mode==='mp4' && programWebcam)throw new Error('Disable the separate webcam inset to use manual source geometry.')
-      if (videoDeviceId && (mode !== 'mp4' || !mac || programWebcam)) throw new Error('Capture card recording requires Mac MP4; turn off the separate webcam inset.')
+      if (videoDeviceId && (mode !== 'mp4' || !supportedDesktop || programWebcam)) throw new Error('Capture card recording requires native MP4; turn off the separate webcam inset.')
       const displayIds = videoDeviceId ? [] : programTestDisplayIds(collection)
       const state = collection as MinimalSceneCollection
       const layout = videoDeviceId ? validateSceneLayout(state.scenes.find(scene => scene.name === state.currentScene)?.layout) : programTestLayout(collection)

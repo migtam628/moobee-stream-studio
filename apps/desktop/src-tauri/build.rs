@@ -59,12 +59,13 @@ fn main() {
     }
     println!("cargo:rerun-if-changed=windows/MooBeeProgramWriter.cpp");
     println!("cargo:rerun-if-changed=windows/MooBeeWasapi.cpp");
+    println!("cargo:rerun-if-changed=windows/MooBeeVideoInput.cpp");
     if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         // The MSVC Windows SDK supplies Media Foundation and COM. No runtime
         // helper executable or third-party encoder is packaged.
-        cc::Build::new().cpp(true).file("windows/MooBeeProgramWriter.cpp").file("windows/MooBeeWasapi.cpp")
+        cc::Build::new().cpp(true).file("windows/MooBeeProgramWriter.cpp").file("windows/MooBeeWasapi.cpp").file("windows/MooBeeVideoInput.cpp")
             .flag_if_supported("/std:c++17").compile("moobee_mf");
-        for lib in ["mfplat","mfreadwrite","mfuuid","ole32"] {
+        for lib in ["mf","mfplat","mfreadwrite","mfuuid","ole32"] {
             println!("cargo:rustc-link-lib={lib}");
         }
     }
