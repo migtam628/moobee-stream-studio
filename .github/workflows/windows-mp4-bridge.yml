@@ -1,0 +1,40 @@
+name: Validate Windows native H.264 MP4 adapter
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  windows-mp4:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+      - run: npm ci
+      - run: npm run build
+      - name: Compile native desktop and linked Windows SDK bridge
+        working-directory: apps/desktop/src-tauri
+        run: cargo check
+      - name: Validate pixel conversion, recording controls and storage
+        working-directory: apps/desktop/src-tauri
+        run: |
+          cargo test --lib windows_mp4_sink::tests
+          cargo test --lib program_mp4_storage::tests
+          cargo test --lib program_continuous_avi::tests
+          cargo test --lib source_transform::tests
+          cargo test --lib mp4_validation::tests
+      - name: Encode and finalize synthetic H.264 MP4 with Media Foundation
+        working-directory: apps/desktop/src-tauri
+        run: cargo test --lib windows_mp4_sink::tests::synthetic_windows_mp4_finalizes -- --ignored --exact
