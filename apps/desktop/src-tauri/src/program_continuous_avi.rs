@@ -370,11 +370,11 @@ fn receive_first_frame(receiver: &Receiver<xcap::Frame>) -> Result<image::RgbaIm
 }
 
 #[derive(Clone, Copy)]
-enum ProgramFormat { Avi, Mp4, Flv }
+enum ProgramFormat { Avi, Mp4, Flv, Live }
 
 impl ProgramFormat {
     fn extension(self) -> &'static str {
-        match self { Self::Avi => "avi", Self::Mp4 => "mp4", Self::Flv => "flv" }
+        match self { Self::Avi => "avi", Self::Mp4 => "mp4", Self::Flv => "flv", Self::Live => "rtmps" }
     }
 }
 
@@ -389,12 +389,20 @@ enum FrameSink {
     Mp4(crate::windows_mp4_sink::WindowsMp4Sink),
     #[cfg(target_os = "macos")]
     Flv(crate::live_flv::NativeSink),
+    #[cfg(target_os = "macos")]
+    Live(crate::live_program_sink::Sink),
 }
 
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 impl FrameSink {
-    fn open(path: &std::path::Path, format: ProgramFormat, profile: EncodingProfile, microphone: bool) -> Result<Self, String> {
+    fn open(path: &std::path::Path, format: ProgramFormat, profile: EncodingProfile, microphone: bool, live_connector:Option<Box<dyn FnOnce()->Result<crate::live_publish_worker::Worker,String>>>) -> Result<Self, String> {
         match format {
+            ProgramFormat::Live => {
+                #[cfg(target_os = "macos")]
+                { Ok(Self::Live(crate::live_program_sink::Sink::open(profile.width,profile.height,profile.fps,profile.bitrate_kbps,microphone,live_connector.ok_or("Missing authorized publisher connector")?)?)) }
+                #[cfg(target_os = "windows")]
+                { let _=live_connector; Err("Native live encoding requires macOS".into()) }
+            }
             ProgramFormat::Flv => {
                 #[cfg(target_os = "macos")]
                 { Ok(Self::Flv(crate::live_flv::NativeSink::open(path,profile.width,profile.height,profile.fps,profile.bitrate_kbps,microphone)?)) }
@@ -430,6 +438,8 @@ impl FrameSink {
             Self::Mp4(writer) => writer.append(canvas.as_raw()),
             #[cfg(target_os = "macos")]
             Self::Flv(writer) => writer.append(canvas),
+            #[cfg(target_os = "macos")]
+            Self::Live(writer) => writer.append(canvas),
         }
     }
 
@@ -438,7 +448,16 @@ impl FrameSink {
             Self::Mp4(writer) => writer.append_audio(pcm),
             #[cfg(target_os = "macos")]
             Self::Flv(writer) => writer.append_audio(pcm),
+            #[cfg(target_os = "macos")]
+            Self::Live(writer) => writer.append_audio(pcm),
             Self::Avi(_) => Err("AVI does not support the composed AAC diagnostic".into()),
+        }
+    }
+    fn sent_bytes(&self)->u64{
+        match self{
+            #[cfg(target_os="macos")]
+            Self::Live(w)=>w.sent_bytes(),
+            _=>0,
         }
     }
     fn finish(&mut self) -> Result<(), (String, bool)> {
@@ -448,6 +467,8 @@ impl FrameSink {
             Self::Mp4(writer) => writer.finish(),
             #[cfg(target_os = "macos")]
             Self::Flv(writer) => writer.finish().map_err(|e|(e,false)),
+            #[cfg(target_os = "macos")]
+            Self::Live(writer) => writer.finish().map_err(|e|(e,false)),
         }
     }
 }
@@ -456,7 +477,12 @@ impl FrameSink {
 fn capture_to_dir(
     directory: PathBuf, ids: Vec<usize>, seconds: u32, profile: EncodingProfile, format: ProgramFormat, layout: crate::scene_compositor::SceneLayout, webcam: bool,
     microphone: bool, mic_gain: f32, overlay: Option<crate::program_overlay::OverlayInput>, video_device_id: Option<String>, audio_inputs: Option<Vec<crate::program_audio::AudioInput>>, transforms: Option<Vec<crate::source_transform::SourceTransform>>, stop_guard: Option<&ProgramStopGuard>,
+    live_output:Option<LiveOutput>,
 ) -> Result<ContinuousProgramReport, String> {
+    let live=matches!(format,ProgramFormat::Live);
+    if live!=live_output.is_some(){return Err("Live output configuration mismatch".into())}
+    let live_stop=live_output.as_ref().map(|o|o.stop.clone());
+    let live_connector=live_output.map(|o|o.connect);
     let clock = crate::media_clock::MediaClock::new(profile.fps)?;
     let graphic = overlay.map(|input| input.prepare(profile.width, profile.height)).transpose()?;
     #[cfg(target_os = "macos")]
@@ -512,23 +538,24 @@ fn capture_to_dir(
         latest.push(frame);
         last_received.push(Instant::now());
     }
-    fs::create_dir_all(&directory)
-        .map_err(|error| format!("Unable to create private clips directory: {error}"))?;
+    if !live{fs::create_dir_all(&directory)
+        .map_err(|error| format!("Unable to create private clips directory: {error}"))?;}
     let id = uuid::Uuid::new_v4().to_string();
     let extension = format.extension();
     let final_path = directory.join(format!("clip-{id}.{extension}"));
     let temporary = directory.join(format!(".clip-{id}.part.{extension}"));
     let audio_input_count = audio_inputs.as_ref().map_or(usize::from(microphone), |inputs| inputs.len());
-    let mut writer = match FrameSink::open(&temporary, format, profile, audio_input_count > 0) {
+    if live_stop.as_ref().is_some_and(|s|s.load(Ordering::Acquire)){return Err("Live Program cancelled before connection".into())}
+    let mut writer = match FrameSink::open(&temporary, format, profile, audio_input_count > 0,live_connector) {
         Ok(writer) => writer,
-        Err(error) => { let _ = fs::remove_file(&temporary); return Err(error); }
+        Err(error) => { if !live{let _ = fs::remove_file(&temporary);} return Err(error); }
     };
 
     #[cfg(target_os = "macos")]
     let mut mic = if microphone && audio_inputs.is_none() {
         match crate::program_microphone::ProgramMicrophone::start() {
             Ok(source) => Some(source),
-            Err(error) => { drop(writer); let _ = fs::remove_file(&temporary); return Err(error); }
+            Err(error) => { drop(writer); if !live{let _ = fs::remove_file(&temporary);} return Err(error); }
         }
     } else { None };
     #[cfg(target_os = "macos")]
@@ -536,7 +563,7 @@ fn capture_to_dir(
         if inputs.is_empty() { None } else {
             match crate::program_audio::Mixer::open(inputs) {
                 Ok(mixer) => Some(mixer),
-                Err(error) => { drop(writer); let _=fs::remove_file(&temporary); return Err(error); }
+                Err(error) => { drop(writer); if !live{let _=fs::remove_file(&temporary);} return Err(error); }
             }
         }
     } else { None };
@@ -546,7 +573,7 @@ fn capture_to_dir(
         if inputs.is_empty(){None}else{
             match crate::windows_audio::Mixer::open(inputs){
                 Ok(mixer)=>Some(mixer),
-                Err(error)=>{drop(writer);let _=fs::remove_file(&temporary);return Err(error);}
+                Err(error)=>{drop(writer);if !live{let _=fs::remove_file(&temporary);}return Err(error);}
             }
         }
     };
@@ -570,6 +597,8 @@ fn capture_to_dir(
     let mut transitions_completed=0u32;
     let recording = (|| -> Result<(), String> {
         while written_frames < total_frames {
+            if live_stop.as_ref().is_some_and(|s|s.load(Ordering::Acquire)){break;}
+            if live&&started.elapsed()>=Duration::from_secs(u64::from(seconds)+2){return Err("Live Program exceeded its wall-clock budget".into())}
             // Finish at a complete A/V tick. Limit pauses to 30 nominal seconds
             // and bound the total session wall time even if inputs run slowly.
             if written_frames >= 2 && stop_guard.is_some_and(|guard|
@@ -754,15 +783,16 @@ fn capture_to_dir(
     drop(windows_mixer);
     if let Err(error) = recording {
         drop(writer);
-        let _ = fs::remove_file(&temporary);
+        if !live{let _ = fs::remove_file(&temporary);}
         return Err(error);
     }
     let finalizing = Instant::now();
     let result = writer.finish();
+    let sent_bytes=writer.sent_bytes();
     drop(writer);
     if let Err((error, still_writing)) = result {
         // A timed-out AVFoundation writer may still own the private file.
-        if !still_writing { let _ = fs::remove_file(&temporary); }
+        if !still_writing { if !live{let _ = fs::remove_file(&temporary);} }
         return Err(error);
     }
     let inspected = (|| -> Result<(u64, f64), String> {
@@ -778,6 +808,7 @@ fn capture_to_dir(
             ProgramFormat::Mp4 => {
                 crate::program_mp4_storage::validate_finished(&temporary)
             }
+            ProgramFormat::Live => Ok((sent_bytes,f64::from(written_frames)/f64::from(profile.fps))),
             ProgramFormat::Flv => {
                 let bytes=fs::metadata(&temporary).map_err(|e|e.to_string())?.len();
                 if !(14..=64*1024*1024).contains(&bytes){return Err("FLV outside file budget".into())}
@@ -787,16 +818,17 @@ fn capture_to_dir(
     })();
     let (bytes, actual_duration) = match inspected {
         Ok(value) => value,
-        Err(error) => { let _ = fs::remove_file(&temporary); return Err(error); }
+        Err(error) => { if !live{let _ = fs::remove_file(&temporary);} return Err(error); }
     };
     let finalization_ms = finalizing.elapsed().as_millis() as u64;
     match format {
+        ProgramFormat::Live => {},
         ProgramFormat::Flv => {
-            if let Err(e)=crate::program_mp4_storage::publish_ready(&temporary,&final_path){let _=fs::remove_file(&temporary);return Err(e);}
+            if let Err(e)=crate::program_mp4_storage::publish_ready(&temporary,&final_path){if !live{let _=fs::remove_file(&temporary);}return Err(e);}
         }
         ProgramFormat::Avi => {
             if let Err(error) = fs::rename(&temporary, &final_path) {
-                let _ = fs::remove_file(&temporary);
+                if !live{let _ = fs::remove_file(&temporary);}
                 return Err(format!("Unable to publish completed Program video: {error}"));
             }
         }
@@ -814,10 +846,10 @@ fn capture_to_dir(
         }
     }
     Ok(ContinuousProgramReport {
-        id, path: final_path.to_string_lossy().into_owned(), format: extension,
+        id, path: if live{String::new()}else{final_path.to_string_lossy().into_owned()}, format: extension,
         bytes, duration_seconds: actual_duration, requested_max_seconds: seconds,
         stopped_early: written_frames < total_frames, paused_ms,
-        target_bitrate_kbps: matches!(format, ProgramFormat::Mp4|ProgramFormat::Flv).then_some(profile.bitrate_kbps),
+        target_bitrate_kbps: matches!(format, ProgramFormat::Mp4|ProgramFormat::Flv|ProgramFormat::Live).then_some(profile.bitrate_kbps),
         frame_count: written_frames, width: profile.width, height: profile.height, fps: profile.fps,
         profile: profile.label,
         display_count: ids.len(), video_input_count: usize::from(video_device_id.is_some()), elapsed_ms, finalization_ms, audio_track_verified: false,
@@ -834,6 +866,43 @@ fn capture_to_dir(
         transitions_completed,
         segmented_session: None,
     })
+}
+
+// The connector is injected by an explicitly authorized native caller.
+// Neither the browser nor Tauri command dispatcher can invoke this path yet.
+#[cfg(any(target_os="macos",target_os="windows"))]
+struct LiveOutput{
+    connect:Box<dyn FnOnce()->Result<crate::live_publish_worker::Worker,String>>,
+    stop:std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+#[cfg(target_os="macos")]
+pub(crate) fn capture_authorized_live_program(
+    display_ids:Vec<usize>,video_device_id:Option<String>,seconds:u32,profile:&str,
+    bitrate_kbps:Option<u32>,layout:Option<&str>,
+    overlay:Option<crate::program_overlay::OverlayInput>,audio_inputs:Vec<crate::program_audio::AudioInput>,
+    transforms:Option<Vec<crate::source_transform::SourceTransform>>,
+    stop:std::sync::Arc<std::sync::atomic::AtomicBool>,
+    connect:impl FnOnce()->Result<crate::live_publish_worker::Worker,String>+'static,
+)->Result<ContinuousProgramReport,String>{
+    if !(2..=60).contains(&seconds){return Err("Live integration test supports 2–60 seconds".into())}
+    let mut p=encoding_profile(profile)?;
+    p.bitrate_kbps=validate_bitrate(bitrate_kbps,p.bitrate_kbps)?;
+    if let Some(id)=video_device_id.as_ref(){
+        if !display_ids.is_empty()||id.is_empty()||id.len()>1024||id.chars().any(char::is_control){
+            return Err("Select one video device or up to four displays".into())
+        }
+    }else{crate::scene_compositor::validate_ids(&display_ids)?;}
+    crate::program_audio::validate(&audio_inputs)?;
+    crate::source_transform::validate_list(transforms.as_deref(),display_ids.len()+usize::from(video_device_id.is_some()))?;
+    let layout=crate::scene_compositor::SceneLayout::parse(layout)?;
+    if stop.load(Ordering::Acquire){return Err("Live Program cancelled before capture".into())}
+    use crate::clip::{CaptureLock,CAPTURE_BUSY};
+    CAPTURE_BUSY.compare_exchange(false,true,Ordering::AcqRel,Ordering::Acquire)
+        .map_err(|_|"Another native capture is active")?;
+    let _guard=CaptureLock;
+    capture_to_dir(PathBuf::new(),display_ids,seconds,p,ProgramFormat::Live,layout,false,false,1.,overlay,
+        video_device_id,Some(audio_inputs),transforms,None,Some(LiveOutput{connect:Box::new(connect),stop}))
 }
 
 #[tauri::command]
@@ -915,7 +984,7 @@ async fn capture_continuous_program(
                 if let Some(g)=stop_guard.as_ref(){g.allow_takes(display_ids.clone(),video_device_id.clone());}
             }
             if !matches!(format, ProgramFormat::Mp4) || seconds <= MAX_MP4_SECONDS {
-                return capture_to_dir(directory, display_ids, seconds, selected_profile, format, layout, webcam, microphone, mic_gain, overlay, video_device_id, audio_inputs, transforms, stop_guard.as_ref());
+                return capture_to_dir(directory, display_ids, seconds, selected_profile, format, layout, webcam, microphone, mic_gain, overlay, video_device_id, audio_inputs, transforms, stop_guard.as_ref(),None);
             }
             let plan = segment_plan(seconds)?;
             let mut segments = Vec::with_capacity(plan.len());
@@ -932,7 +1001,7 @@ async fn capture_continuous_program(
                 // promise a seamless continuous recording or gapless audio.
                 match capture_to_dir(directory.clone(), display_ids.clone(), length, selected_profile, format,
                     layout, webcam, microphone, mic_gain, overlay.clone(), video_device_id.clone(),
-                    audio_inputs.clone(), transforms.clone(), stop_guard.as_ref()) {
+                    audio_inputs.clone(), transforms.clone(), stop_guard.as_ref(),None) {
                     Ok(report) => {
                         segments.push(RecordingSegment {
                             id: report.id.clone(), path: report.path.clone(), bytes: report.bytes,
