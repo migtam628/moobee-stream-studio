@@ -156,6 +156,11 @@ pub(crate) mod tls {
         fn write(&mut self,data:&[u8])->io::Result<usize>{self.socket.set_write_timeout(Some(self.timeout()?))?;self.socket.write(data)}
         fn flush(&mut self)->io::Result<()>{self.timeout()?;self.socket.flush()}
     }
+    pub(crate) fn validate_destination(server_url:&str,stream_key:&str)->Result<()>{
+        endpoint(server_url)?;
+        rtmp::publish(stream_key)?;
+        Ok(())
+    }
     /// Explicit future caller only. DNS resolution is OS-blocking and must
     /// be isolated from the UI; socket I/O and negotiation are bounded.
     pub(crate) fn connect_tls(server_url:&str,stream_key:&str)->Result<Publisher<native_tls::TlsStream<DeadlineSocket>>>{
