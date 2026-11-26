@@ -299,9 +299,9 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
         !ids.every(id => typeof id === 'number' && Number.isSafeInteger(id) && id >= 0 && id <= 24) ||
         new Set(ids).size !== ids.length ||
         typeof body.seconds !== 'number' || !Number.isSafeInteger(body.seconds) ||
-        body.seconds < 2 || body.seconds > (mp4 ? 60 : 8) ||
+        body.seconds < 2 || body.seconds > (mp4 ? 300 : 8) || (mp4 && body.seconds > 60 && body.seconds % 60 !== 0) ||
         (body.profile !== 'baseline' && body.profile !== '720p15' && body.profile !== '1080p30')) {
-      throw new Error('Choose 1–4 unique Program displays, a supported duration (MP4 up to 60 seconds, AVI up to 8) and capture profile')
+      throw new Error('Choose 1–4 unique Program displays, a supported duration (MP4 up to 60 seconds or whole-minute segments up to 5 minutes, AVI up to 8) and capture profile')
     }
     if (body.bitrateKbps !== undefined && (!mp4 || typeof body.bitrateKbps !== 'number' || ![1500,3000,6000].includes(body.bitrateKbps))) throw new Error('Invalid MP4 bitrate preset')
     if (body.profile === '1080p30' && !mp4) throw new Error('1080p30 requires Mac MP4')

@@ -14,7 +14,7 @@ impl Placement {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct OverlayInput {
     width: u32,

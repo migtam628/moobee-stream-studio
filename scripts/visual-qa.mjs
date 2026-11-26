@@ -175,6 +175,7 @@ try {
       if (cmd === 'list_test_clips') return window.__programRequests.length ? [clip] : [];
       if (cmd === 'capture_continuous_program_mp4') {
         window.__captureOrder.push('record'); window.__programRequests.push(args);
+        if (args.seconds === 120) return {...clip, durationSeconds:60, requestedMaxSeconds:60, segmentedSession:{requestedSeconds:120,completedSeconds:60,totalBytes:clip.bytes,stoppedEarly:true,warning:'Segment 2 failed: simulated device disconnect. Previously finalized clips were retained.',segments:[{id:clip.id,path:clip.path,bytes:clip.bytes,durationSeconds:60,frameCount:1800}]}};
         if (args.seconds === 60) return await new Promise(resolve => { window.__pendingProgram = {id:args.sessionId, resolve, paused:false}; });
         return clip;
       }
@@ -320,7 +321,13 @@ try {
   await macPage.getByRole('button',{name:'Saved MP4 · View result',exact:true}).waitFor();
   const longer = await macPage.evaluate(()=>window.__programRequests.at(-1));
   if (longer.seconds!==60 || longer.bitrateKbps!==3000 || !longer.sessionId) throw new Error('Long Program capture did not route session');
+  await macPage.getByLabel('Composed Program video test duration',{exact:true}).selectOption('120');
+  await macPage.getByRole('button',{name:'Record Program test',exact:true}).click();
+  await macPage.getByText('Segment 2 failed: simulated device disconnect. Previously finalized clips were retained.',{exact:true}).first().waitFor();
+  const segmented = await macPage.evaluate(()=>window.__programRequests.at(-1));
+  if(segmented.seconds!==120 || !segmented.sessionId) throw new Error('Segmented Program capture did not route session');
   await macPage.getByRole('button',{name:'Capture diagnostics',exact:true}).click();
+  await macPage.getByText('Segmented session: 1 saved clip(s)',{exact:true}).waitFor();
   await macPage.getByRole('button',{name:'Recover finalized Program recordings',exact:true}).click();
   await macPage.getByText('Recovered 1 finalized recording(s); 0 already present; 0 could not be recovered.',{exact:true}).waitFor();
   await macPage.close();

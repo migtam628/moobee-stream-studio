@@ -11,7 +11,7 @@ type Display = { id: number; name: string; width: number; height: number }
 type Availability = { supported: boolean; requiredMacos: string; osVersion?: string | null; reason?: string; microphoneSupported?: boolean; engine?: string }
 type OverlayPlacement = { xPercent: number; yPercent: number; widthPercent: number }
 type GraphicOverlay = { width: number; height: number; rgbaBase64: string }
-type ProgramStats = { phase:'starting'|'recording'|'paused'|'finalizing'; recordedFrames:number; fps:number; elapsedMs:number; pausedMs:number; fileBytes:number; lateFrames:number; repeatedSourceSlots:number }
+type ProgramStats = { phase:'starting'|'recording'|'paused'|'finalizing'; recordedFrames:number; fps:number; elapsedMs:number; pausedMs:number; fileBytes:number; lateFrames:number; repeatedSourceSlots:number; segmentIndex?:number; segmentCount?:number; completedSegments?:number }
 type CapturedFile = {
   id: string
   path: string
@@ -22,6 +22,7 @@ type CapturedFile = {
   stoppedEarly?: boolean
   pausedMs?: number
   targetBitrateKbps?: number
+  segmentedSession?: {requestedSeconds:number; completedSeconds:number; totalBytes:number; stoppedEarly:boolean; warning?:string|null; segments:{id:string;path:string;bytes:number;durationSeconds:number;frameCount:number}[]}
   audioTrackVerified?: boolean
   displayCount?: number
   videoInputCount?: number
@@ -500,9 +501,10 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
           </label>}
           <label className="dock-field">Recording length
             <select aria-label="Composed Program video test duration" value={programAviDuration} disabled={busy} onChange={event => setProgramAviDuration(Number(event.target.value))}>
-              {(mac ? [2,4,6,8,15,30,45,60] : [2,4,6,8]).map(seconds => <option key={seconds} value={seconds}>{seconds} seconds</option>)}
+              {(mac ? [2,4,6,8,15,30,45,60,120,180,240,300] : [2,4,6,8]).map(seconds => <option key={seconds} value={seconds}>{seconds > 60 ? `${seconds/60} min · segmented` : `${seconds} seconds`}</option>)}
             </select>
           </label>
+          {mac && programAviDuration > 60 && <small className="dock-note">Separate 60-second MP4 clips. Sources restart between clips; gaps are expected. Completed clips remain saved if a later segment fails.</small>}
           <button className="primary-button program-record" type="button" disabled={!canProgram} onClick={() => void captureProgramVideoTest(isMacProgram ? 'mp4' : 'continuous')}><span className="record-dot"/>{busy ? 'Capturing / finalizing…' : 'Record Program test'}</button>
           {programSession && busy && <button className="secondary-button" type="button" disabled={stopRequested} onClick={() => void stopProgramCapture()}><Square size={15}/>{stopRequested ? 'Stopping and finalizing…' : 'Stop and save Program MP4'}</button>}
           {programSession && busy && <>
@@ -510,6 +512,7 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
             <div aria-label="Program recording statistics" role="status" className="dock-note">
               {programStats ? <>
                 <b>{programStats.phase} · {programStats.fps > 0 ? (programStats.recordedFrames/programStats.fps).toFixed(1) : '0.0'}s media</b>
+                {(programStats.segmentCount??1)>1 && <div>Segment {programStats.segmentIndex} / {programStats.segmentCount} · {programStats.completedSegments} previously finalized</div>}
                 <div>{programStats.recordedFrames} submitted frames · {(programStats.elapsedMs/1000).toFixed(1)}s wall time</div>
                 <div>{(programStats.fileBytes/1048576).toFixed(2)} MiB written · {programStats.recordedFrames > 0 ? (programStats.fileBytes*8*programStats.fps/programStats.recordedFrames/1000).toFixed(0) : '—'} kbps file average (buffered)</div>
                 <div>{programStats.lateFrames} late slots · {programStats.repeatedSourceSlots} repeated source slots</div>
@@ -522,6 +525,7 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
           {streamControl}
           <div className="dock-action-row"><button className="secondary-button" onClick={openClips}><Film size={14}/>Clips</button><button className="secondary-button" onClick={openSettings}><Settings2 size={14}/>Settings</button></div>
           <button className="secondary-button diagnostics-button" onClick={openDiagnostics}><Monitor size={14}/>Capture diagnostics</button>
+          {saved?.segmentedSession?.warning && <small className="preview-error" role="status">{saved.segmentedSession.warning}</small>}
           {saved && <button className="dock-result" onClick={openDiagnostics}><CheckCircle2 size={15}/>Saved {saved.format.toUpperCase()} · View result</button>}
           {error && <button className="dock-error" onClick={openDiagnostics} title={error}>Capture failed · View details</button>}
         </div>
@@ -614,6 +618,12 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
           {' · '}
           {(saved.bytes / (1024 * 1024)).toFixed(2)} MB
         </small>
+        {saved.segmentedSession && <div className="help-text">
+          <strong>Segmented session: {saved.segmentedSession.segments.length} saved clip(s)</strong>
+          <p>{saved.segmentedSession.completedSeconds.toFixed(2)}s total media / {saved.segmentedSession.requestedSeconds}s requested · {(saved.segmentedSession.totalBytes/1048576).toFixed(2)} MiB{saved.segmentedSession.stoppedEarly ? ' · ended early' : ''}. Separate files; gaps between clips are possible. Details below refer to the last clip.</p>
+          {saved.segmentedSession.warning && <p role="alert">{saved.segmentedSession.warning}</p>}
+          {saved.segmentedSession.segments.map((segment,i)=><p key={segment.id}>Segment {i+1} · {segment.durationSeconds.toFixed(2)}s · {(segment.bytes/1048576).toFixed(2)} MiB<br/><code>{segment.path}</code></p>)}
+        </div>}
         {saved.displayCount !== undefined && <p className="help-text" role="status">
           {saved.displayCount} display(s) · {saved.videoInputCount ?? 0} video device(s) · {saved.width ?? 640}×{saved.height ?? 360} · nominal {saved.fps ?? 10} fps {saved.format.toUpperCase()} ·
           {typeof saved.measuredSamplingFps === 'number' ? ` ${saved.measuredSamplingFps.toFixed(1)} fps measured sampling` : ' capture performance unknown'} ·
