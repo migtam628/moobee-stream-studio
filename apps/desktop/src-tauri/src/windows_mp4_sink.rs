@@ -1,8 +1,9 @@
-//! Synchronous Windows Media Foundation H.264 sink; no audio in this phase.
+//! Synchronous Windows Media Foundation H.264/AAC sink with optional 48 kHz stereo PCM.
 use std::{ffi::{c_void,CStr},os::{raw::c_char,windows::ffi::OsStrExt},path::{Path,PathBuf}};
 unsafe extern "C" {
-    fn moobee_win_writer_create(path:*const u16,width:u32,height:u32,fps:u32,bitrate:u32,error:*mut c_char,capacity:i32)->*mut c_void;
+    fn moobee_win_writer_create(path:*const u16,width:u32,height:u32,fps:u32,bitrate:u32,audio:i32,error:*mut c_char,capacity:i32)->*mut c_void;
     fn moobee_win_writer_append(handle:*mut c_void,nv12:*const u8,len:usize,error:*mut c_char,capacity:i32)->i32;
+    fn moobee_win_writer_append_audio(handle:*mut c_void,pcm:*const i16,frames:usize,error:*mut c_char,capacity:i32)->i32;
     fn moobee_win_writer_finish(handle:*mut c_void,error:*mut c_char,capacity:i32)->i32;
     fn moobee_win_writer_destroy(handle:*mut c_void);
     fn moobee_win_disk_space(path:*const u16,bytes:*mut u64)->i32;
@@ -45,15 +46,22 @@ fn rgba_to_nv12(rgba:&[u8],w:usize,h:usize,out:&mut [u8])->Result<(),String>{
     }}
     Ok(())
 }
+fn pcm16(pcm:&[f32])->Result<Vec<i16>,String>{
+    if pcm.is_empty()||pcm.len()%2!=0||pcm.len()>9600||pcm.iter().any(|v|!v.is_finite()){return Err("Invalid stereo PCM block".into())}
+    Ok(pcm.iter().map(|v|(v.clamp(-1.,1.)*32768.).round().clamp(-32768.,32767.) as i16).collect())
+}
 pub(crate) struct WindowsMp4Sink{handle:*mut c_void,width:u32,height:u32,fps:u32,count:u32,directory:PathBuf,nv12:Vec<u8>}
 impl WindowsMp4Sink{
     pub(crate) fn new(path:&Path,width:u32,height:u32,fps:u32,bitrate:u32)->Result<Self,String>{
+        Self::new_with_audio(path,width,height,fps,bitrate,false)
+    }
+    pub(crate) fn new_with_audio(path:&Path,width:u32,height:u32,fps:u32,bitrate:u32,audio:bool)->Result<Self,String>{
         validate_profile(width,height,fps,bitrate)?;
         let directory=path.parent().ok_or("Missing output folder")?.to_path_buf();
         check_space(&directory,96*1024*1024)?;
         if std::fs::symlink_metadata(path).is_ok(){return Err("Recording path already exists".into())}
         let mut error=[0;512];
-        let handle=unsafe{moobee_win_writer_create(wide(path)?.as_ptr(),width,height,fps,bitrate,error.as_mut_ptr(),512)};
+        let handle=unsafe{moobee_win_writer_create(wide(path)?.as_ptr(),width,height,fps,bitrate,i32::from(audio),error.as_mut_ptr(),512)};
         if handle.is_null(){return Err(message(&error))}
         Ok(Self{handle,width,height,fps,count:0,directory,nv12:vec![0;(width*height*3/2) as usize]})
     }
@@ -63,6 +71,12 @@ impl WindowsMp4Sink{
         let mut error=[0;512];
         if unsafe{moobee_win_writer_append(self.handle,self.nv12.as_ptr(),self.nv12.len(),error.as_mut_ptr(),512)}!=0{return Err(message(&error))}
         self.count+=1;Ok(())
+    }
+    pub(crate) fn append_audio(&mut self,pcm:&[f32])->Result<(),String>{
+        let pcm=pcm16(pcm)?;
+        let mut error=[0;512];
+        if unsafe{moobee_win_writer_append_audio(self.handle,pcm.as_ptr(),pcm.len()/2,error.as_mut_ptr(),512)}!=0{return Err(message(&error))}
+        Ok(())
     }
     pub(crate) fn finish(&mut self)->Result<(),(String,bool)>{
         let mut error=[0;512];
@@ -80,6 +94,36 @@ mod tests{
         rgba_to_nv12(&[255,0,0,255].repeat(4),2,2,&mut out).unwrap();assert_eq!(out,[82,82,82,82,90,240]);
         assert!(rgba_to_nv12(&[0;12],3,1,&mut out).is_err());
         assert!(validate_profile(1920,1080,60,6000).is_err());
+    }
+    #[test]fn pcm_conversion_is_finite_and_saturating(){
+        assert_eq!(pcm16(&[-2.,2.,0.,0.5]).unwrap(),vec![-32768,32767,0,16384]);
+        assert!(pcm16(&[f32::NAN,0.]).is_err());
+        assert!(pcm16(&[0.]).is_err());
+    }
+    #[test]
+    #[ignore="requires Windows Media Foundation AAC and H.264 encoders"]
+    fn synthetic_windows_av_finalizes(){
+        let dir=std::env::temp_dir().join(format!("moobee-mf-av-{}",uuid::Uuid::new_v4()));
+        std::fs::create_dir(&dir).unwrap();
+        let path=dir.join("synthetic.mp4");
+        let mut sink=WindowsMp4Sink::new_with_audio(&path,640,360,10,1500,true).unwrap();
+        let clock=crate::media_clock::MediaClock::new(10).unwrap();
+        for tick in 0..20{
+            let frame=image::RgbaImage::from_pixel(640,360,image::Rgba([20,40,100,255]));
+            sink.append(frame.as_raw()).unwrap();
+            let pcm=clock.audio_range(tick,48000).unwrap().flat_map(|i|{
+                let v=0.15*(i as f32*440.*std::f32::consts::TAU/48000.).sin();[v,v]
+            }).collect::<Vec<_>>();
+            sink.append_audio(&pcm).unwrap();
+        }
+        sink.finish().unwrap();drop(sink);
+        let(_,duration)=crate::program_mp4_storage::validate_finished(&path).unwrap();
+        assert!((duration-2.0).abs()<0.2);
+        // Check the actual MP4 stream descriptors; independent decode remains hardware QA.
+        let bytes=std::fs::read(&path).unwrap();
+        assert!(bytes.windows(4).any(|w|w==b"mp4a"));
+        assert!(bytes.windows(4).any(|w|w==b"avc1"));
+        std::fs::remove_dir_all(dir).unwrap();
     }
     #[test]
     #[ignore="requires Windows Media Foundation H.264 encoder; execute separately on Windows"]

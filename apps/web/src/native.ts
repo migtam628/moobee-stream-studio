@@ -321,7 +321,7 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
       throw new Error('Choose 1–4 unique Program displays, a supported duration (MP4 up to 60 seconds or whole-minute segments up to 5 minutes, AVI up to 8) and capture profile')
     }
     if (mp4 && !macHost() && !windowsHost()) throw new Error('Native MP4 requires Mac or Windows')
-    if (mp4 && windowsHost() && (body.seconds > 60 || body.webcam || body.microphone || body.audioInputs !== undefined || hasVideo)) throw new Error('Windows MP4 supports silent display capture up to 60 seconds only')
+    if (mp4 && windowsHost() && (body.seconds > 60 || body.webcam || hasVideo)) throw new Error('Windows MP4 supports display capture up to 60 seconds only')
     if (body.bitrateKbps !== undefined && (!mp4 || typeof body.bitrateKbps !== 'number' || ![1500,3000,6000].includes(body.bitrateKbps))) throw new Error('Invalid MP4 bitrate preset')
     if (body.profile === '1080p30' && !mp4) throw new Error('1080p30 requires native MP4')
     if (body.sessionId !== undefined && (!mp4 || typeof body.sessionId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(body.sessionId))) throw new Error('Invalid Program session')
@@ -331,7 +331,8 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
     if (body.microphone && !mp4) throw new Error('Microphone AAC requires macOS MP4')
     const micGain = body.micGain ?? 1
     if (typeof micGain !== 'number' || !Number.isFinite(micGain) || micGain < 0 || micGain > 2) throw new Error('Invalid microphone gain')
-    if (body.audioInputs !== undefined && (!mp4 || !Array.isArray(body.audioInputs) || body.audioInputs.length > 3)) throw new Error('Named audio sources require Mac MP4')
+    if (body.audioInputs !== undefined && (!mp4 || !Array.isArray(body.audioInputs) || body.audioInputs.length > 3)) throw new Error('Audio sources require native MP4')
+    if (windowsHost() && Array.isArray(body.audioInputs) && (body.audioInputs.length > 2 || body.audioInputs.some(i=>!i || !['device','desktop'].includes(i.kind) || i.deviceId != null))) throw new Error('Windows audio supports default endpoints only')
     if (body.overlay !== undefined && body.overlay !== null) {
       const o = body.overlay as { width: number; height: number; rgbaBase64: string; placement?: { xPercent: number; yPercent: number; widthPercent: number } }
       if (typeof o !== 'object' || !Number.isInteger(o.width) || !Number.isInteger(o.height) ||

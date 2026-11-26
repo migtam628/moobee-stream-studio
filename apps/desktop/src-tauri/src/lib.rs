@@ -11,6 +11,8 @@ mod program_continuous_avi;
 mod program_mp4_storage;
 #[cfg(target_os = "windows")]
 mod windows_mp4_sink;
+#[cfg(target_os = "windows")]
+mod windows_audio;
 #[cfg(target_os = "macos")]
 mod program_mp4_sink;
 #[cfg(target_os = "macos")]

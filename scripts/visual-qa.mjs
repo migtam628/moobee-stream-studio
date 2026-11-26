@@ -388,11 +388,12 @@ try {
   await winPage.goto(`http://127.0.0.1:${port}/`,{waitUntil:'domcontentloaded'});
   await winPage.getByLabel('Continuous Program test profile',{exact:true}).selectOption('1080p30');
   await winPage.getByLabel('Program MP4 target bitrate',{exact:true}).selectOption('3000');
-  if(await winPage.getByRole('checkbox',{name:'Enable microphone',exact:true}).isEnabled())throw new Error('Windows audio incorrectly enabled');
+  await winPage.getByRole('checkbox',{name:'Enable microphone',exact:true}).check();
+  await winPage.getByRole('checkbox',{name:'Enable desktop audio',exact:true}).check();
   await winPage.getByRole('button',{name:'Record Program test',exact:true}).click();
   await winPage.getByRole('button',{name:'Saved MP4 · View result',exact:true}).waitFor();
   const winRequest=await winPage.evaluate(()=>window.__winRequest);
-  if(winRequest.profile!=='1080p30'||winRequest.bitrateKbps!==3000||winRequest.microphone||winRequest.webcam||winRequest.audioInputs!==undefined||!winRequest.sessionId)throw new Error('Windows silent MP4 routing failed');
+  if(winRequest.profile!=='1080p30'||winRequest.bitrateKbps!==3000||!winRequest.microphone||winRequest.webcam||winRequest.audioInputs?.length!==2||winRequest.audioInputs[0].kind!=='device'||winRequest.audioInputs[1].kind!=='desktop'||winRequest.audioInputs.some(i=>i.deviceId!==null)||!winRequest.sessionId)throw new Error('Windows A/V MP4 routing failed');
   await winPage.close();
   const mobile = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
   await mobile.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'domcontentloaded' });

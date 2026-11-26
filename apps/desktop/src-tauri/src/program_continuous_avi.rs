@@ -88,6 +88,8 @@ pub struct ProgramRecordingStats {
     completed_segments: u32,
     transition_busy: bool,
     transitions_completed: u32,
+    audio_peak: f32,
+    audio_missing_source_frames: u64,
 }
 struct ProgramSession {
     id: String,
@@ -107,6 +109,7 @@ impl ProgramStopGuard {
                 paused_ms: 0, file_bytes: 0, late_frames: 0, repeated_source_slots: 0,
                 segment_index: 1, segment_count: 1, completed_segments: 0,
                 transition_busy:false, transitions_completed:0,
+                audio_peak:0., audio_missing_source_frames:0,
             },
         });
         Self
@@ -147,6 +150,7 @@ impl ProgramStopGuard {
                 paused_ms: 0, file_bytes: 0, late_frames: 0, repeated_source_slots: 0,
                 segment_index: index, segment_count: count, completed_segments: index - 1,
                 transition_busy:false, transitions_completed:0,
+                audio_peak:0., audio_missing_source_frames:0,
             };
         }
     }
@@ -284,6 +288,7 @@ pub struct ContinuousProgramReport {
     microphone_included: bool,
     audio_input_count: usize,
     audio_samples_written: u64,
+    audio_missing_source_frames: u64,
     audio_peak: f32,
     audio_clipped_samples: usize,
     overlay_included: bool,
@@ -397,7 +402,7 @@ impl FrameSink {
                 #[cfg(target_os = "macos")]
                 { Ok(Self::Mp4(crate::program_mp4_sink::ProgramMp4Sink::new_with_settings(path, profile.width, profile.height, profile.fps, microphone, profile.bitrate_kbps)?)) }
                 #[cfg(target_os = "windows")]
-                { if microphone { return Err("Windows MP4 audio capture is not implemented".into()); } Ok(Self::Mp4(crate::windows_mp4_sink::WindowsMp4Sink::new(path,profile.width,profile.height,profile.fps,profile.bitrate_kbps)?)) }
+                { Ok(Self::Mp4(crate::windows_mp4_sink::WindowsMp4Sink::new_with_audio(path,profile.width,profile.height,profile.fps,profile.bitrate_kbps,microphone)?)) }
             }
         }
     }
@@ -418,7 +423,6 @@ impl FrameSink {
         }
     }
 
-    #[cfg(target_os = "macos")]
     fn append_audio(&mut self, pcm: &[f32]) -> Result<(),String> {
         match self {
             Self::Mp4(writer) => writer.append_audio(pcm),
@@ -522,8 +526,20 @@ fn capture_to_dir(
             }
         }
     } else { None };
+    #[cfg(target_os = "windows")]
+    let windows_mixer = {
+        let inputs=audio_inputs.clone().unwrap_or_else(||if microphone {vec![crate::program_audio::AudioInput{kind:"device".into(),device_id:None,gain:mic_gain,muted:false}]}else{vec![]});
+        if inputs.is_empty(){None}else{
+            match crate::windows_audio::Mixer::open(inputs){
+                Ok(mixer)=>Some(mixer),
+                Err(error)=>{drop(writer);let _=fs::remove_file(&temporary);return Err(error);}
+            }
+        }
+    };
+    let mut audio_missing_source_frames=0u64;
     let mut audio_samples_written = 0u64;
     let mut audio_peak = 0.0f32;
+    let mut block_audio_peak = 0.0f32;
     let mut audio_clipped_samples = 0usize;
     let started = Instant::now();
     let total_frames = profile.fps * seconds;
@@ -606,6 +622,7 @@ fn capture_to_dir(
                 }
                 validate_frame_geometry(frame.width(), frame.height(), total_pixels)?;
             }
+            block_audio_peak=0.;
             if paused {
                 // Drain input queues while paused; no video or PCM is submitted
                 // to the encoder. Resume continues the contiguous media clock.
@@ -616,6 +633,8 @@ fn capture_to_dir(
                     if let Some(ref mut source) = mic { let _ = source.read(frames, mic_gain)?; }
                     if let (Some(mixer), Some(inputs)) = (&mixer, &audio_inputs) { let _ = mixer.read(frames, inputs)?; }
                 }
+                #[cfg(target_os = "windows")]
+                if let Some(mixer)=&windows_mixer{mixer.discard()?;}
                 paused_ticks += 1;
             } else {
             if let Some(take)=stop_guard.and_then(|g|g.next_take()){
@@ -648,6 +667,7 @@ fn capture_to_dir(
                 let mixed = source.read((range.end-range.start) as usize, mic_gain)?;
                 writer.append_audio(&mixed.samples)?;
                 audio_samples_written = range.end;
+                block_audio_peak=mixed.peak;
                 audio_peak = audio_peak.max(mixed.peak);
                 audio_clipped_samples = audio_clipped_samples.saturating_add(mixed.clipped);
             }
@@ -657,8 +677,20 @@ fn capture_to_dir(
                 let (mixed,_) = mixer.read((range.end-range.start) as usize,inputs)?;
                 writer.append_audio(&mixed.samples)?;
                 audio_samples_written = range.end;
+                block_audio_peak=mixed.peak;
                 audio_peak = audio_peak.max(mixed.peak);
                 audio_clipped_samples = audio_clipped_samples.saturating_add(mixed.clipped);
+            }
+            #[cfg(target_os = "windows")]
+            if let Some(mixer)=&windows_mixer{
+                let range=clock.audio_range(tick,48000)?;
+                let(mixed,missing)=mixer.read((range.end-range.start) as usize)?;
+                writer.append_audio(&mixed.samples)?;
+                audio_samples_written=range.end;
+                audio_missing_source_frames=audio_missing_source_frames.saturating_add(missing);
+                block_audio_peak=mixed.peak;
+                audio_peak=audio_peak.max(mixed.peak);
+                audio_clipped_samples=audio_clipped_samples.saturating_add(mixed.clipped);
             }
             written_frames += 1;
             if finished_take {
@@ -683,6 +715,7 @@ fn capture_to_dir(
                     file_bytes, late_frames,
                     segment_index: 1, segment_count: 1, completed_segments: 0,
                     transition_busy:false, transitions_completed:0,
+                audio_peak:block_audio_peak, audio_missing_source_frames,
                     repeated_source_slots: repeats.iter().map(|n| u64::from(*n)).sum::<u64>() + u64::from(webcam_repeated_slots),
                 });
             }
@@ -703,6 +736,8 @@ fn capture_to_dir(
     drop(mic);
     #[cfg(target_os = "macos")]
     drop(mixer);
+    #[cfg(target_os = "windows")]
+    drop(windows_mixer);
     if let Err(error) = recording {
         drop(writer);
         let _ = fs::remove_file(&temporary);
@@ -766,7 +801,7 @@ fn capture_to_dir(
         display_count: ids.len(), video_input_count: usize::from(video_device_id.is_some()), elapsed_ms, finalization_ms, audio_track_verified: false,
         webcam_included: webcam, webcam_frames, webcam_repeated_slots,
         planned_audio_samples_48khz: clock.audio_range(written_frames - 1, 48_000)?.end,
-        microphone_included: microphone, audio_input_count, audio_samples_written, audio_peak, audio_clipped_samples,
+        microphone_included: microphone, audio_input_count, audio_samples_written, audio_missing_source_frames, audio_peak, audio_clipped_samples,
         overlay_included: graphic.is_some(),
         measured_sampling_fps: if elapsed_ms <= paused_ms { 0.0 }
             else { f64::from(written_frames) * 1000.0 / (elapsed_ms - paused_ms) as f64 },
@@ -803,11 +838,13 @@ async fn capture_continuous_program(
     overlay: Option<crate::program_overlay::OverlayInput>, video_device_id: Option<String>, audio_inputs: Option<Vec<crate::program_audio::AudioInput>>, transforms: Option<Vec<crate::source_transform::SourceTransform>>, session_id: Option<String>, bitrate_kbps: Option<u32>,
 ) -> Result<ContinuousProgramReport, String> {
     if session_id.as_ref().is_some_and(|id| uuid::Uuid::parse_str(id).is_err()) { return Err("Invalid Program recording session ID".into()); }
-    if cfg!(target_os = "windows") && matches!(format, ProgramFormat::Mp4) && (webcam || microphone || video_device_id.is_some() || audio_inputs.is_some() || seconds > MAX_MP4_SECONDS) { return Err("Windows MP4 supports silent display recording up to 60 seconds only".into()); }
+    if cfg!(target_os = "windows") && matches!(format, ProgramFormat::Mp4) && (webcam || video_device_id.is_some() || seconds > MAX_MP4_SECONDS) { return Err("Windows MP4 supports display recording up to 60 seconds only".into()); }
     let validate_duration = if matches!(format, ProgramFormat::Mp4) { validate_mp4_request } else { validate_request };
     if let Some(ref inputs) = audio_inputs {
         crate::program_audio::validate(inputs)?;
-        if !cfg!(target_os = "macos") || !matches!(format, ProgramFormat::Mp4) { return Err("Named audio inputs require Mac MP4".into()); }
+        if !cfg!(any(target_os = "macos",target_os = "windows")) || !matches!(format, ProgramFormat::Mp4) { return Err("Audio inputs require native MP4".into()); }
+        #[cfg(target_os = "windows")]
+        crate::windows_audio::validate(inputs)?;
     }
     crate::source_transform::validate_list(transforms.as_deref(), display_ids.len()+usize::from(video_device_id.is_some()))?;
     if transforms.is_some() && webcam { return Err("Disable the separate webcam inset for manual scene transforms".into()); }
