@@ -36,6 +36,7 @@ type CapturedFile = {
   microphoneIncluded?: boolean
   audioInputCount?: number
   audioSamplesWritten?: number
+  audioMissingSourceFrames?: number
   audioPeak?: number
   audioClippedSamples?: number
   overlayIncluded?: boolean
@@ -323,7 +324,7 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
         displayIds, seconds: programAviDuration, layout, transforms,
         ...(videoDeviceId ? { videoDeviceId } : {}),
         ...(mode !== 'sampled' ? { profile: continuousProfile, overlay: graphic ? { ...graphic, placement } : null } : {}),
-        ...(mode === 'mp4' ? { sessionId, ...(programBitrate === 'auto' ? {} : {bitrateKbps:Number(programBitrate)}), webcam: programWebcam, microphone: programMic, micGain, ...(mac ? {audioInputs: audioRows.map(row=>row.input)} : {}) } : {})
+        ...(mode === 'mp4' ? { sessionId, ...(programBitrate === 'auto' ? {} : {bitrateKbps:Number(programBitrate)}), webcam: programWebcam, microphone: programMic, micGain, audioInputs: audioRows.map(row=>row.input) } : {})
       })
       setSaved(result)
       await refreshSavedClips()
@@ -466,24 +467,24 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
       <section className="production-dock mixer-dock panel" aria-label="Audio Mixer">
         <div className="panel-head"><div className="panel-title"><AudioLines size={17}/>Audio Mixer</div><span className="subdued">Test inputs</span></div>
         <div className="dock-body">
-          <label className="layer-switch"><Volume2 size={16}/><span>Mic / Aux <small>Select native audio device</small></span><input type="checkbox" aria-label="Enable microphone" checked={programMic} disabled={!mac || busy} onChange={e => setProgramMic(e.target.checked)}/></label>
+          <label className="layer-switch"><Volume2 size={16}/><span>Mic / Aux <small>Select native audio device</small></span><input type="checkbox" aria-label="Enable microphone" checked={programMic} disabled={!supportedDesktop || busy} onChange={e => setProgramMic(e.target.checked)}/></label>
           {mac && <label className="dock-field">Microphone device<select aria-label="Microphone device" value={micDevice} disabled={busy || scanningAudio} onChange={e=>setMicDevice(e.target.value)}><option value="">System default</option>{audioDevices.map(d=><option key={d.id} value={d.id}>{d.name}{d.isDefault?' (default)':''}</option>)}</select></label>}
           <div className="meter-caption"><span>Last recorded peak</span><b>{peak === null ? '—' : `${Math.round(peak*100)}%`}</b></div>
           <div className="production-meter" role="meter" aria-label="Last recorded microphone peak" aria-valuemin={0} aria-valuemax={100} aria-valuenow={peak === null ? 0 : Math.round(Math.min(1,peak)*100)} aria-valuetext={peak === null ? 'No recording measured' : `${Math.round(peak*100)} percent`}>
             <span style={{width: `${peak === null ? 0 : Math.min(1,peak)*100}%`}}/>
           </div>
-          <label className="gain-label">Gain <b>{Math.round(micGain*100)}%</b><input type="range" aria-label="Microphone gain" min="0" max="2" step="0.1" value={micGain} disabled={!mac || !programMic || busy} onChange={e => setMicGain(Number(e.target.value))}/></label>
-          <button className="secondary-button mute-button" disabled={!mac || !programMic || busy} onClick={() => setMicGain(micGain === 0 ? 1 : 0)}>{micGain === 0 ? 'Unmute mic' : 'Mute mic'}</button>
+          <label className="gain-label">Gain <b>{Math.round(micGain*100)}%</b><input type="range" aria-label="Microphone gain" min="0" max="2" step="0.1" value={micGain} disabled={!supportedDesktop || !programMic || busy} onChange={e => setMicGain(Number(e.target.value))}/></label>
+          <button className="secondary-button mute-button" disabled={!supportedDesktop || !programMic || busy} onClick={() => setMicGain(micGain === 0 ? 1 : 0)}>{micGain === 0 ? 'Unmute mic' : 'Mute mic'}</button>
           <label className="layer-switch"><Volume2 size={16}/><span>HDMI / USB Audio<small>Choose capture card audio endpoint</small></span><input type="checkbox" aria-label="Enable HDMI audio" checked={cardAudio} disabled={!mac||busy} onChange={e=>setCardAudio(e.target.checked)}/></label>
           {cardAudio && <><label className="dock-field">Capture card audio<select aria-label="Capture card audio device" value={cardDevice} disabled={busy||scanningAudio} onChange={e=>setCardDevice(e.target.value)}><option value="">Select device</option>{audioDevices.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}</select></label><label className="gain-label">HDMI gain <b>{Math.round(cardGain*100)}%</b><input aria-label="HDMI gain" type="range" min="0" max="2" step="0.1" value={cardGain} disabled={busy} onChange={e=>setCardGain(Number(e.target.value))}/></label><button className="secondary-button" disabled={busy} onClick={()=>setCardGain(cardGain===0?1:0)}>{cardGain===0?'Unmute HDMI':'Mute HDMI'}</button></>}
-          <label className="layer-switch"><Volume2 size={16}/><span>Desktop Audio<small>ScreenCaptureKit · Mac</small></span><input aria-label="Enable desktop audio" type="checkbox" checked={desktopAudio} disabled={!mac||busy} onChange={e=>setDesktopAudio(e.target.checked)}/></label>
+          <label className="layer-switch"><Volume2 size={16}/><span>Desktop Audio<small>{mac?'ScreenCaptureKit · Mac':'WASAPI · default playback'}</small></span><input aria-label="Enable desktop audio" type="checkbox" checked={desktopAudio} disabled={!supportedDesktop||busy} onChange={e=>setDesktopAudio(e.target.checked)}/></label>
           {desktopAudio && <><label className="gain-label">Desktop gain <b>{Math.round(desktopGain*100)}%</b><input aria-label="Desktop gain" type="range" min="0" max="2" step="0.1" value={desktopGain} disabled={busy} onChange={e=>setDesktopGain(Number(e.target.value))}/></label><button className="secondary-button" disabled={busy} onClick={()=>setDesktopGain(desktopGain===0?1:0)}>{desktopGain===0?'Unmute desktop':'Mute desktop'}</button></>}
           <button className="secondary-button" disabled={!mac||busy||scanningAudio} onClick={()=>void refreshAudio()}>Refresh audio devices</button>
           <label className="layer-switch"><AudioLines size={16}/><span>Live audio meters<small>Explicit local capture · stops before recording</small></span><input aria-label="Live audio meters" type="checkbox" checked={liveMeter} disabled={!mac||busy} onChange={e=>setLiveMeter(e.target.checked)}/></label>
           {liveMeter && [...audioRows.map((row,i)=>({name:row.name,peak:audioLevels?.inputPeaks[i]})),{name:'Program mix',peak:audioLevels?.mixedPeak}].map(row=><div key={row.name}><div className="meter-caption"><span>{row.name}</span><b>{row.peak===undefined?'—':Math.round(row.peak*100)+'%'}</b></div><div className="production-meter" role="meter" aria-label={row.name+' live peak'} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round((row.peak??0)*100)} aria-valuetext={row.peak===undefined?'Waiting for samples':Math.round(row.peak*100)+' percent'}><span style={{width:Math.min(100,(row.peak??0)*100)+'%'}}/></div></div>)}
           {audioLevels && <small className="dock-note">Mixed clipping: {audioLevels.clippedSamples} samples / measured block</small>}
           {(audioSelectionError||audioError) && <small className="preview-error" role="alert">{audioSelectionError||audioError}</small>}
-          <p className="dock-note">Named inputs mix into Mac MP4 AAC tests. Live meters measure local PCM, not playback; device-clock sync remains unverified.</p>
+          <p className="dock-note">{mac?'Named inputs mix into Mac MP4 AAC tests. Live meters measure local PCM, not playback.':'Windows uses default microphone/playback endpoints. Pre-recording meters and named inputs are Mac-only.'} Device-clock sync remains unverified.</p>
           {otherAudio}
         </div>
       </section>
@@ -523,7 +524,7 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
             </div>
           </>}
           {programStopError && <small className="preview-error" role="status">{programStopError}</small>}
-          <small className="dock-note">{mac ? 'H.264 MP4 · optional AAC' : supportedDesktop ? 'Windows H.264 MP4 · silent test'  : 'Requires Mac/Windows app'} · bounded diagnostic</small>
+          <small className="dock-note">{mac ? 'H.264 MP4 · optional AAC' : supportedDesktop ? 'Windows H.264 MP4 · optional AAC'  : 'Requires Mac/Windows app'} · bounded diagnostic</small>
           {streamControl}
           <div className="dock-action-row"><button className="secondary-button" onClick={openClips}><Film size={14}/>Clips</button><button className="secondary-button" onClick={openSettings}><Settings2 size={14}/>Settings</button></div>
           <button className="secondary-button diagnostics-button" onClick={openDiagnostics}><Monitor size={14}/>Capture diagnostics</button>
@@ -637,7 +638,7 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
         {typeof saved.pausedMs === 'number' && saved.pausedMs > 0 && <p className="help-text">{(saved.pausedMs/1000).toFixed(2)}s paused input omitted from the nominal recording timeline.</p>}
         {saved.stoppedEarly && <p className="help-text" role="status">Program recording stopped early and finalized.</p>}
         {saved.overlayIncluded && <p className="help-text">Static graphic overlay included in output.</p>}
-        {(saved.microphoneIncluded || (saved.audioInputCount??0)>0) && <p className="help-text" role="status">AAC requested · {saved.audioSamplesWritten ?? 0} PCM frames supplied at 48 kHz · peak {Math.round((saved.audioPeak ?? 0)*100)}% · {saved.audioClippedSamples ?? 0} clipped samples. Confirm the AAC track and audible audio independently; capture timestamps and drift are not verified.</p>}
+        {(saved.microphoneIncluded || (saved.audioInputCount??0)>0) && <p className="help-text" role="status">AAC requested · {saved.audioSamplesWritten ?? 0} PCM frames supplied at 48 kHz · peak {Math.round((saved.audioPeak ?? 0)*100)}% · {saved.audioClippedSamples ?? 0} clipped samples. {typeof saved.audioMissingSourceFrames==='number'&&saved.audioMissingSourceFrames>0 ? ` Windows source shortfall: ${saved.audioMissingSourceFrames} source frames filled with silence.` : ''} Confirm the AAC track and audible audio independently; capture timestamps and drift are not verified.</p>}
         {saved.webcamIncluded && <p className="help-text" role="status">Webcam inset included · {saved.webcamFrames ?? 0} received frames · {saved.webcamRepeatedSlots ?? 0} repeated slots. Verify the actual clip.</p>}
         {saved.sourceFramesReceived && <p className="help-text" role="status">
           Continuous native frame input · received per source: {saved.sourceFramesReceived.join(', ')} ·
