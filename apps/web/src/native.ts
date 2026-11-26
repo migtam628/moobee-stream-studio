@@ -253,6 +253,10 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
   if (path === '/clips/macos-mp4-availability') {
     return await invoke('macos_mp4_availability')
   }
+  if (path === '/clips/recover-finalized-program') {
+    if (!macHost()) throw new Error('Program MP4 recovery requires macOS')
+    return await invoke('recover_finalized_program_recordings')
+  }
   if (path === '/clips/reveal') {
     if (typeof body.clipId !== 'string' ||
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(body.clipId)) {
