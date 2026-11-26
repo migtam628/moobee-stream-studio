@@ -380,6 +380,8 @@ try {
       if(cmd==='capture_scene_snapshot')return canvas.toDataURL('image/png');
       if(cmd==='macos_mp4_availability')return {supported:false};
       if(cmd==='list_audio_inputs')return [{id:'win-mic',name:'USB Microphone',isDefault:true},{id:'win-hdmi',name:'USB HDMI Capture Audio',isDefault:false}];
+      if(cmd==='program_audio_levels'){window.__winMeter=args;return {inputPeaks:[0.25,0.5,0.1],mixedPeak:0.7,clippedSamples:0};}
+      if(cmd==='stop_program_audio_levels'){window.__winMeterStopped=true;return null;}
       if(cmd==='list_test_clips')return window.__winRequest?[clip]:[];
       if(cmd==='continuous_program_stats')return null;
       if(cmd==='capture_continuous_program_mp4'){window.__winRequest=args;return clip;}
@@ -394,10 +396,14 @@ try {
   await winPage.getByRole('checkbox',{name:'Enable HDMI audio',exact:true}).check();
   await winPage.getByLabel('Capture card audio device',{exact:true}).selectOption('win-hdmi');
   await winPage.getByRole('checkbox',{name:'Enable desktop audio',exact:true}).check();
+  await winPage.getByRole('checkbox',{name:'Live audio meters',exact:true}).check();
+  await winPage.getByRole('meter',{name:'Program mix live peak',exact:true}).waitFor();
+  await winPage.waitForFunction(()=>window.__winMeter?.inputs?.length===3);
   await winPage.getByRole('button',{name:'Record Program test',exact:true}).click();
   await winPage.getByRole('button',{name:'Saved MP4 · View result',exact:true}).waitFor();
   const winRequest=await winPage.evaluate(()=>window.__winRequest);
   if(winRequest.profile!=='1080p30'||winRequest.bitrateKbps!==3000||!winRequest.microphone||winRequest.webcam||winRequest.audioInputs?.length!==3||winRequest.audioInputs[0].kind!=='device'||winRequest.audioInputs[0].deviceId!=='win-mic'||winRequest.audioInputs[1].kind!=='device'||winRequest.audioInputs[1].deviceId!=='win-hdmi'||winRequest.audioInputs[2].kind!=='desktop'||winRequest.audioInputs[2].deviceId!==null||!winRequest.sessionId)throw new Error('Windows A/V MP4 routing failed');
+  if(!await winPage.evaluate(()=>window.__winMeterStopped))throw new Error('Windows meter was not released before recording');
   await winPage.close();
   const mobile = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
   await mobile.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'domcontentloaded' });
