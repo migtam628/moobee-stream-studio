@@ -193,7 +193,7 @@ try {
         if (window.__pendingProgram?.id !== args.sessionId) return false;
         const pending = window.__pendingProgram;
         window.__pendingProgram = null;
-        pending.resolve({...clip, requestedMaxSeconds:30, stoppedEarly:true});
+        pending.resolve({...clip, requestedMaxSeconds:60, targetBitrateKbps:3000, stoppedEarly:true});
         return true;
       }
       throw new Error('Unexpected simulated command: '+cmd);
@@ -320,6 +320,9 @@ try {
   await macPage.getByRole('button',{name:'Saved MP4 · View result',exact:true}).waitFor();
   const longer = await macPage.evaluate(()=>window.__programRequests.at(-1));
   if (longer.seconds!==60 || longer.bitrateKbps!==3000 || !longer.sessionId) throw new Error('Long Program capture did not route session');
+  await macPage.getByRole('button',{name:'Capture diagnostics',exact:true}).click();
+  await macPage.getByRole('button',{name:'Recover finalized Program recordings',exact:true}).click();
+  await macPage.getByText('Recovered 1 finalized recording(s); 0 already present; 0 could not be recovered.',{exact:true}).waitFor();
   await macPage.close();
   const mobile = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
   await mobile.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'domcontentloaded' });
