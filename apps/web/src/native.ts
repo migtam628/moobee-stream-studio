@@ -1,4 +1,4 @@
-import { validateSceneLayout, validVideoInputId, validateTransform, sceneTransforms, type SourceTransform, type SceneLayout } from './programDisplay'
+import { programTestDisplayIds, programVideoInput, programTransforms, programTestLayout, validateSceneLayout, validVideoInputId, validateTransform, sceneTransforms, type SourceTransform, type SceneLayout } from './programDisplay'
 import { invoke } from '@tauri-apps/api/core'
 import { version as appVersion } from '../../../package.json'
 import { offline, type Activity, type Alert, type StudioStatus } from './types'
@@ -14,6 +14,7 @@ type MovingFrame = { image: string | null; frameKey: string | null; liveVideo: b
 const pendingPreview = new Set<Promise<MovingFrame>>()
 let previewUsed = false
 let captureActive = false
+let activeProgramSession: string | null = null
 let meterUsed = false
 let pendingMeter: Promise<unknown> | null = null
 let meterStopping: Promise<void> | null = null
@@ -133,9 +134,11 @@ async function refresh(): Promise<StudioStatus> {
 function validName(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0 && value.trim().length <= 64 && !/[<>\r\n]/.test(value)
 }
-function perform(body: Body) {
+async function perform(body: Body) {
   const action = body.action
   const sceneName = body.sceneName
+  if (captureActive && ['renameScene','deleteScene','studioMode'].includes(String(action))) throw new Error('Finish native capture before changing scene names or Studio Mode')
+  if (captureActive && action === 'scene' && !draft.studioMode) throw new Error('Use Studio Mode Take to switch Program during supported recording')
   const active = draft.scenes.find(scene => scene.name === (draft.studioMode ? draft.previewScene : draft.currentScene))
   if (action === 'addScene') {
     if (!validName(sceneName)) throw new Error('Scene names must contain 1–64 characters')
@@ -180,6 +183,18 @@ function perform(body: Body) {
     if (!draft.studioMode) draft.previewScene = draft.currentScene
   } else if (action === 'transition') {
     if (!draft.studioMode) throw new Error('Enable Studio Mode to take a preview')
+    if (captureActive) {
+      if (!activeProgramSession) throw new Error('Scene Take is unavailable during this capture')
+      const target = {...collection(),currentScene:draft.previewScene}
+      const videoDeviceId=programVideoInput(target)
+      const displayIds=videoDeviceId?[]:programTestDisplayIds(target)
+      const layout=videoDeviceId?validateSceneLayout(target.scenes.find(s=>s.name===target.currentScene)?.layout):programTestLayout(target)
+      const kind=body.kind??'cut',durationMs=body.durationMs??300
+      if(typeof kind!=='string'||!['cut','fade','slide','wipe'].includes(kind)||typeof durationMs!=='number'||!Number.isInteger(durationMs)||durationMs<150||durationMs>1000)throw new Error('Invalid Program transition')
+      await invoke('queue_program_scene_take',{sessionId:activeProgramSession,displayIds,videoDeviceId:videoDeviceId??null,layout,transforms:programTransforms(target)??null,kind,durationMs})
+      draft.currentScene=target.currentScene
+      return commit('Program Take queued for native encoding (completion reported by recorder)')
+    }
     draft.currentScene = draft.previewScene
   } else if (action === 'addSource') {
     if (!active || !validName(body.name) || typeof body.deviceId !== 'string' ||
@@ -231,6 +246,7 @@ function commit(message: string) {
   return { ok: true, status }
 }
 function replaceCollection(value: unknown) {
+  if(captureActive)throw new Error('Finish native capture before replacing the scene collection')
   const next = validateCollection(value)
   draft = next
   return commit('Scene collection imported')
@@ -327,9 +343,11 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
     }
     const transforms = body.transforms === undefined || body.transforms === null ? undefined :
       Array.isArray(body.transforms) && body.transforms.length === (hasVideo?1:ids.length) ? body.transforms.map(validateTransform) : (()=>{throw new Error('Invalid source transform count')})()
-    return await captureWithPreviewReleased(mp4 ? 'capture_continuous_program_mp4' : 'capture_continuous_program_avi', {
+    if(captureActive)throw new Error('Another native capture is active')
+    activeProgramSession=mp4 && typeof body.sessionId==='string'?body.sessionId:null
+    try { return await captureWithPreviewReleased(mp4 ? 'capture_continuous_program_mp4' : 'capture_continuous_program_avi', {
       displayIds: ids, seconds: body.seconds, profile: body.profile, layout: validateSceneLayout(body.layout), transforms:transforms??null, overlay: body.overlay ?? null, ...(mp4 ? { sessionId: body.sessionId ?? null, bitrateKbps: body.bitrateKbps ?? null, webcam: body.webcam === true, microphone: body.microphone === true, micGain, ...(body.audioInputs !== undefined ? { audioInputs: body.audioInputs } : {}), ...(hasVideo ? { videoDeviceId } : {}) } : {})
-    })
+    }) } finally { activeProgramSession=null }
   }
   if (path === '/clips/capture-program-test-avi') {
     const ids = body.displayIds
