@@ -62,6 +62,11 @@ impl<T:Read+Write> Publisher<T>{
         if let Err(e)=self.send_media(&packet){queue.fail();return Err(e)}
         Ok(true)
     }
+    /// Pump due queued packets after publish authorization. The caller owns
+    /// clock scheduling and transport readiness.
+    pub(crate) fn pump(&mut self,pacer:&mut crate::live_packet_pacer::Pacer,queue:&mut crate::live_media_queue::MediaQueue,elapsed_ms:u64)->Result<crate::live_packet_pacer::Tick>{
+        pacer.tick(queue,elapsed_ms,|packet|self.send_media(packet))
+    }
     /// Read one inbound chunk while publishing. The owner must continuously
     /// service inbound traffic independently of media pacing; this synchronous
     /// method is intentionally not exposed as a UI command.

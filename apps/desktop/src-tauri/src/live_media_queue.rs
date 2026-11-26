@@ -68,6 +68,7 @@ impl MediaQueue{
         }
         Ok(())
     }
+    pub(crate) fn peek(&self)->Option<&Packet>{if self.failed{None}else{self.queue.front()}}
     pub(crate) fn pop(&mut self)->Option<Packet>{
         if self.failed{return None}
         let p=self.queue.pop_front()?;self.bytes-=p.payload.len();self.dequeued=self.dequeued.saturating_add(1);Some(p)
