@@ -23,3 +23,6 @@ The Audio Mixer discovers active Windows capture endpoints through IMMDeviceEnum
 Tests cover named input validation, UTF-16 endpoint IDs and Unicode labels, duplicate rejection, and simulated Windows UI-to-native routing of three audio sources. Physical testing must verify enumeration, distinct sources, removal/reconnection, actual signal, AAC playback, clipping, pause/resume and synchronization. Pre-recording Windows meters, independent clock drift correction and Windows camera/capture-card video remain outstanding. No installer builds or publication requested.
 
 References: https://learn.microsoft.com/en-us/windows/win32/coreaudio/device-properties and https://learn.microsoft.com/en-us/windows/win32/api/mmdeviceapi/nf-mmdeviceapi-immdeviceenumerator-getdevice.
+
+## Priority 6D — Windows idle audio meters
+Opt-in local metering uses a dedicated MTA thread, 20 ms PCM blocks, bounded latest results, a five-second inactivity lease, gain/mute updates and explicit release before recording. Pre-recording peaks are not playback or recording-time per-input telemetry. Device startup, driver teardown latency, clock drift and physical audio still require validation. No installers requested.
