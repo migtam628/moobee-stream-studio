@@ -54,6 +54,14 @@ impl<T:Read+Write> Publisher<T>{
         let Phase::Live(id)=self.state.phase() else{return Err("RTMP publish is not authorized".into())};
         self.send_raw(&rtmp::media(packet,id,OUT_CHUNK)?)
     }
+    /// Send at most one validated queued packet. The future scheduler must
+    /// service inbound traffic between bounded batches.
+    pub(crate) fn send_queued(&mut self,queue:&mut crate::live_media_queue::MediaQueue)->Result<bool>{
+        if queue.stats().restart_required{return Err("Media queue requires a fresh publishing session".into())}
+        let Some(packet)=queue.pop() else{return Ok(false)};
+        if let Err(e)=self.send_media(&packet){queue.fail();return Err(e)}
+        Ok(true)
+    }
     /// Read one inbound chunk while publishing. The owner must continuously
     /// service inbound traffic independently of media pacing; this synchronous
     /// method is intentionally not exposed as a UI command.
@@ -175,7 +183,12 @@ mod tests{
     }
     #[test]fn simulated_end_to_end_publish_and_stop(){
         let mut p=Publisher::establish(fixture(true),"live","rtmps://example.invalid/live","fixture-key",7,&[9;1528]).unwrap();
-        p.send_media(&crate::stream_mux::aac_sequence()).unwrap();
+        let mut queue=crate::live_media_queue::MediaQueue::default();
+        queue.push(crate::stream_mux::avc_sequence(&[0x67,0x64,0,0x28],&[0x68,0xee]).unwrap()).unwrap();
+        queue.push(crate::stream_mux::aac_sequence()).unwrap();
+        queue.push(crate::stream_mux::avc_access_unit(&[&[0x65,1]],0,0,true).unwrap()).unwrap();
+        while p.send_queued(&mut queue).unwrap(){}
+        assert_eq!(queue.stats().dequeued_packets,3);
         let output=&p.io.output[3073..];
         let mut decoder=Reader::default();let mut input=output;let mut commands=Vec::new();let mut media=false;let mut pong=false;
         while !input.is_empty(){if let Some(m)=decoder.next_chunk(&mut input).unwrap(){
