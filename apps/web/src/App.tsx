@@ -107,8 +107,9 @@ function ScenePreview({ status, label, previewScene, active, refreshRate, revisi
     const timeout=setTimeout(()=>setOutgoing(current=>current===outgoing?null:current),5000)
     return ()=>clearTimeout(timeout)
   },[outgoing])
+  const hasIncomingImage=Boolean(image)
   useEffect(()=>{
-    if(!outgoing||!incomingReady||!outgoingRef.current)return
+    if(!outgoing||!incomingReady||!hasIncomingImage||!outgoingRef.current)return
     const frames:Keyframe[]=outgoing.kind==='fade'?[{opacity:1},{opacity:0}]:
       outgoing.kind==='slide'?[{transform:'translateX(0)'},{transform:'translateX(-100%)'}]:
       [{clipPath:'inset(0 0 0 0)'},{clipPath:'inset(0 0 0 100%)'}]
@@ -119,7 +120,7 @@ function ScenePreview({ status, label, previewScene, active, refreshRate, revisi
       void animation.finished.then(()=>{if(!cancelled)setOutgoing(current=>current===outgoing?null:current)}).catch(()=>{})
     }catch{setOutgoing(current=>current===outgoing?null:current)}
     return ()=>{cancelled=true;animation?.cancel()}
-  },[outgoing,incomingReady])
+  },[outgoing,incomingReady,hasIncomingImage])
   useEffect(() => {
     if (!active || !status.connected || !previewScene || refreshRate === 'paused') return
     let cancelled = false
