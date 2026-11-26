@@ -33,6 +33,8 @@ mod live_media_queue;
 mod live_packet_pacer;
 #[cfg(target_os = "macos")]
 mod macos_avc;
+#[cfg(target_os = "macos")]
+mod macos_aac;
 
 use axum::{
     extract::State,
