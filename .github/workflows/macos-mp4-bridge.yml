@@ -87,6 +87,7 @@ jobs:
           cargo test --lib stream_mux::tests
           cargo test --lib rtmp_receive::tests
           cargo test --lib rtmp_session
+          cargo test --lib live_media_queue::tests
       # A cargo check or test binary is not an installed Tauri application.
       # Verify at least one actual .app contains the Swift runtime rpath and
       # permission reasons before considering hardware acceptance.
