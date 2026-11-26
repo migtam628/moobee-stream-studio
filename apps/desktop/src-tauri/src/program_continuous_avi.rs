@@ -21,7 +21,7 @@ const MAX_SEGMENTED_SECONDS: u32 = 300;
 // Longer tests are sequences of separately finalized 60-second clips.
 fn segment_plan(seconds: u32) -> Result<Vec<u32>, String> {
     if (2..=MAX_MP4_SECONDS).contains(&seconds) { return Ok(vec![seconds]); }
-    if seconds > MAX_SEGMENTED_SECONDS || seconds % MAX_MP4_SECONDS != 0 {
+    if seconds <= MAX_MP4_SECONDS || seconds > MAX_SEGMENTED_SECONDS || seconds % MAX_MP4_SECONDS != 0 {
         return Err("Choose 2–60 seconds or a whole-minute segmented test up to 5 minutes".into());
     }
     Ok(vec![MAX_MP4_SECONDS; (seconds / MAX_MP4_SECONDS) as usize])
