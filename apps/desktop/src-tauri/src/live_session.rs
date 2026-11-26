@@ -29,6 +29,7 @@ impl<T:Read+Write> Session<T>{
         else{Err("Publishing session is no longer active".into())}
     }
     fn fail(&mut self){self.queue.fail();self.publisher.take();self.phase=Phase::Failed;}
+    pub(crate) fn abort(&mut self){if matches!(self.phase,Phase::Authorized|Phase::Sending){self.fail();}}
     pub(crate) fn submit(&mut self,packet:Packet)->Result<(),String>{
         self.require_active()?;
         if self.queue.push(packet).is_err(){self.fail();return Err("Invalid or overflowing encoded media; new session required".into())}
