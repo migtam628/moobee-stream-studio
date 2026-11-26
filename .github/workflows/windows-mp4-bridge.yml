@@ -31,10 +31,13 @@ jobs:
         working-directory: apps/desktop/src-tauri
         run: |
           cargo test --lib windows_mp4_sink::tests
+          cargo test --lib windows_audio::tests
           cargo test --lib program_mp4_storage::tests
           cargo test --lib program_continuous_avi::tests
           cargo test --lib source_transform::tests
           cargo test --lib mp4_validation::tests
       - name: Encode and finalize synthetic H.264 MP4 with Media Foundation
         working-directory: apps/desktop/src-tauri
-        run: cargo test --lib windows_mp4_sink::tests::synthetic_windows_mp4_finalizes -- --ignored --exact
+        run: |
+          cargo test --lib windows_mp4_sink::tests::synthetic_windows_mp4_finalizes -- --ignored --exact
+          cargo test --lib windows_mp4_sink::tests::synthetic_windows_av_finalizes -- --ignored --exact
