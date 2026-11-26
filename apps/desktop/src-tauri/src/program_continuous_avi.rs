@@ -1040,6 +1040,16 @@ async fn capture_continuous_program(
 #[cfg(test)]
 mod tests {
     use super::{validate_request, validate_frame_geometry, MAX_TOTAL_SOURCE_PIXELS};
+    #[cfg(target_os="macos")]
+    #[test]
+    fn invalid_or_cancelled_live_request_never_connects(){
+        use std::sync::{Arc,atomic::AtomicBool};
+        for (seconds,stop) in [(0,false),(61,false),(2,true)]{
+            let result=capture_authorized_live_program(vec![0],None,seconds,"baseline",None,None,None,vec![],None,
+                Arc::new(AtomicBool::new(stop)),||panic!("Invalid live request opened a destination"));
+            assert!(result.is_err());
+        }
+    }
     #[test]
     fn mp4_duration_and_stop_are_bounded_and_session_scoped() {
         use super::{validate_mp4_request, ProgramStopGuard, stop_continuous_program_mp4};
