@@ -115,8 +115,7 @@ fn recover_ready_files(directory: &Path) -> Result<RecoveryReport, String> {
     Ok(report)
 }
 
-#[tauri::command]
-pub fn recover_finalized_program_recordings(app: tauri::AppHandle) -> Result<RecoveryReport, String> {
+pub(crate) fn recover_finalized(app: tauri::AppHandle) -> Result<RecoveryReport, String> {
     use tauri::Manager;
     use std::sync::atomic::Ordering;
     use crate::clip::{CaptureLock, CAPTURE_BUSY};
