@@ -203,13 +203,13 @@ pub fn continuous_program_stats(session_id: String) -> Option<ProgramRecordingSt
 
 #[tauri::command]
 pub fn recover_finalized_program_recordings(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     {
-        let report = crate::program_mp4_sink::recover_finalized(app)?;
+        let report = crate::program_mp4_storage::recover_finalized(app)?;
         serde_json::to_value(report).map_err(|e| e.to_string())
     }
-    #[cfg(not(target_os = "macos"))]
-    { let _ = app; Err("Finalized Program MP4 recovery is available on macOS only".into()) }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    { let _ = app; Err("Finalized Program MP4 recovery requires Mac or Windows".into()) }
 }
 
 #[derive(Copy, Clone)]
@@ -380,6 +380,8 @@ enum FrameSink {
     Avi(crate::avi::AviWriter<std::fs::File>),
     #[cfg(target_os = "macos")]
     Mp4(crate::program_mp4_sink::ProgramMp4Sink),
+    #[cfg(target_os = "windows")]
+    Mp4(crate::windows_mp4_sink::WindowsMp4Sink),
 }
 
 #[cfg(any(target_os = "windows", target_os = "macos"))]
@@ -394,8 +396,8 @@ impl FrameSink {
             ProgramFormat::Mp4 => {
                 #[cfg(target_os = "macos")]
                 { Ok(Self::Mp4(crate::program_mp4_sink::ProgramMp4Sink::new_with_settings(path, profile.width, profile.height, profile.fps, microphone, profile.bitrate_kbps)?)) }
-                #[cfg(not(target_os = "macos"))]
-                { Err("Native composed H.264 MP4 is currently a macOS-only test".into()) }
+                #[cfg(target_os = "windows")]
+                { if microphone { return Err("Windows MP4 audio capture is not implemented".into()); } Ok(Self::Mp4(crate::windows_mp4_sink::WindowsMp4Sink::new(path,profile.width,profile.height,profile.fps,profile.bitrate_kbps)?)) }
             }
         }
     }
@@ -411,7 +413,7 @@ impl FrameSink {
                     .map_err(|e| format!("Program frame JPEG encoding failed: {e}"))?;
                 writer.write_frame(&jpeg)
             }
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "windows"))]
             Self::Mp4(writer) => writer.append(canvas.as_raw()),
         }
     }
@@ -426,7 +428,7 @@ impl FrameSink {
     fn finish(&mut self) -> Result<(), (String, bool)> {
         match self {
             Self::Avi(writer) => writer.finish().map(|_| ()).map_err(|e| (e, false)),
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "windows"))]
             Self::Mp4(writer) => writer.finish(),
         }
     }
@@ -725,10 +727,7 @@ fn capture_to_dir(
                 Ok((bytes, f64::from(seconds)))
             }
             ProgramFormat::Mp4 => {
-                #[cfg(target_os = "macos")]
-                { crate::program_mp4_sink::validate_finished(&temporary) }
-                #[cfg(not(target_os = "macos"))]
-                { Err("Native composed MP4 unavailable".into()) }
+                crate::program_mp4_storage::validate_finished(&temporary)
             }
         }
     })();
@@ -745,7 +744,6 @@ fn capture_to_dir(
             }
         }
         ProgramFormat::Mp4 => {
-            #[cfg(target_os = "macos")]
             {
                 // The encoder is closed and the container has passed validation.
                 // A distinct ready name permits explicit recovery after a failed
@@ -753,10 +751,9 @@ fn capture_to_dir(
                 let ready = directory.join(format!(".clip-{id}.ready.mp4"));
                 fs::rename(&temporary, &ready)
                     .map_err(|e| format!("Finalized MP4 retained as a private partial file; could not stage recovery: {e}"))?;
-                crate::program_mp4_sink::publish_ready(&ready, &final_path)?;
+                crate::program_mp4_storage::publish_ready(&ready, &final_path)?;
             }
-            #[cfg(not(target_os = "macos"))]
-            return Err("Native composed MP4 unavailable".into());
+
         }
     }
     Ok(ContinuousProgramReport {
@@ -795,10 +792,10 @@ pub async fn capture_continuous_program_mp4(
     app: tauri::AppHandle, display_ids: Vec<usize>, seconds: u32, profile: String, layout: Option<String>, webcam: Option<bool>, microphone: Option<bool>, mic_gain: Option<f32>,
     overlay: Option<crate::program_overlay::OverlayInput>, video_device_id: Option<String>, audio_inputs: Option<Vec<crate::program_audio::AudioInput>>, transforms: Option<Vec<crate::source_transform::SourceTransform>>, session_id: Option<String>, bitrate_kbps: Option<u32>,
 ) -> Result<ContinuousProgramReport, String> {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     { capture_continuous_program(app, display_ids, seconds, profile, ProgramFormat::Mp4, layout, webcam.unwrap_or(false), microphone.unwrap_or(false), mic_gain.unwrap_or(1.0), overlay, video_device_id, audio_inputs, transforms, session_id, bitrate_kbps).await }
-    #[cfg(not(target_os = "macos"))]
-    { let _ = (app, display_ids, seconds, profile, layout, webcam, microphone, mic_gain, overlay, video_device_id, audio_inputs, transforms, session_id, bitrate_kbps); Err("Composed H.264 MP4 is a macOS-only experimental test".into()) }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    { let _ = (app, display_ids, seconds, profile, layout, webcam, microphone, mic_gain, overlay, video_device_id, audio_inputs, transforms, session_id, bitrate_kbps); Err("Composed H.264 MP4 requires Mac or Windows".into()) }
 }
 
 async fn capture_continuous_program(
@@ -806,6 +803,7 @@ async fn capture_continuous_program(
     overlay: Option<crate::program_overlay::OverlayInput>, video_device_id: Option<String>, audio_inputs: Option<Vec<crate::program_audio::AudioInput>>, transforms: Option<Vec<crate::source_transform::SourceTransform>>, session_id: Option<String>, bitrate_kbps: Option<u32>,
 ) -> Result<ContinuousProgramReport, String> {
     if session_id.as_ref().is_some_and(|id| uuid::Uuid::parse_str(id).is_err()) { return Err("Invalid Program recording session ID".into()); }
+    if cfg!(target_os = "windows") && matches!(format, ProgramFormat::Mp4) && (webcam || microphone || video_device_id.is_some() || audio_inputs.is_some() || seconds > MAX_MP4_SECONDS) { return Err("Windows MP4 supports silent display recording up to 60 seconds only".into()); }
     let validate_duration = if matches!(format, ProgramFormat::Mp4) { validate_mp4_request } else { validate_request };
     if let Some(ref inputs) = audio_inputs {
         crate::program_audio::validate(inputs)?;
@@ -821,8 +819,8 @@ async fn capture_continuous_program(
     } else { validate_duration(&display_ids, seconds, &profile)? };
     if bitrate_kbps.is_some() && !matches!(format, ProgramFormat::Mp4) { return Err("Bitrate presets require MP4".into()); }
     selected_profile.bitrate_kbps = validate_bitrate(bitrate_kbps, selected_profile.bitrate_kbps)?;
-    if selected_profile.label == "1080p30" && (!cfg!(target_os = "macos") || !matches!(format, ProgramFormat::Mp4)) {
-        return Err("1080p30 diagnostic requires the Mac H.264 MP4 encoder".into());
+    if selected_profile.label == "1080p30" && (!cfg!(any(target_os = "macos",target_os = "windows")) || !matches!(format, ProgramFormat::Mp4)) {
+        return Err("1080p30 diagnostic requires a native H.264 MP4 encoder".into());
     }
     if webcam && (!cfg!(target_os = "macos") || display_ids.len() > 3) {
         return Err("Webcam PiP requires macOS and at most three displays".into());
