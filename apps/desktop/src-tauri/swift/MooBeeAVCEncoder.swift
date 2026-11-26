@@ -96,7 +96,7 @@ private final class AVCEncoder {
         if rc != noErr {failed=true;return -1}
         // Flush each submitted frame. The diagnostic bridge is intentionally
         // synchronous; native driver stalls still need a separate watchdog.
-        if VTCompressionSessionCompleteFrames(session,untilPresentationTime:.invalid) != noErr {
+        if VTCompressionSessionCompleteFrames(session,untilPresentationTimeStamp:.invalid) != noErr {
             failed=true;return -1
         }
         guard frame.done.wait(timeout: .now() + 2) == .success else {failed=true;return -1}
