@@ -38,6 +38,9 @@ jobs:
           cargo test --lib program_continuous_avi::tests
           cargo test --lib source_transform::tests
           cargo test --lib mp4_validation::tests
+          cargo test --lib stream_mux::tests
+          cargo test --lib rtmp_receive::tests
+          cargo test --lib rtmp_session
       - name: Encode and finalize synthetic H.264 MP4 with Media Foundation
         working-directory: apps/desktop/src-tauri
         run: |

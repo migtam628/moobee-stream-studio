@@ -29,6 +29,7 @@ mod program_audio;
 mod source_transform;
 mod stream_mux;
 mod rtmp_receive;
+mod rtmp_session;
 
 use axum::{
     extract::State,
