@@ -50,6 +50,7 @@ impl<T:Read+Write> Publisher<T>{
         }
         Err("RTMP negotiation exceeded chunk limit".into())
     }
+    pub(crate) fn authorized(&self)->bool{!self.failed&&matches!(self.state.phase(),Phase::Live(_))}
     pub(crate) fn send_media(&mut self,packet:&Packet)->Result<()>{
         let Phase::Live(id)=self.state.phase() else{return Err("RTMP publish is not authorized".into())};
         self.send_raw(&rtmp::media(packet,id,OUT_CHUNK)?)
@@ -208,6 +209,32 @@ mod tests{
         }}
         assert_eq!(commands,vec![0,0,5]);assert!(pong&&media);
         assert!(p.service_inbound().is_err());assert!(p.send_media(&crate::stream_mux::aac_sequence()).is_err());
+    }
+    #[test]fn session_owns_authorization_queue_stats_and_stop(){
+        use crate::live_session::{Session,Phase};
+        let publisher=Publisher::establish(fixture(true),"live","rtmps://example.invalid/live","fixture-key",7,&[9;1528]).unwrap();
+        let mut s=Session::new(publisher).unwrap();
+        assert_eq!(s.stats().phase,Phase::Authorized);
+        s.submit(crate::stream_mux::avc_sequence(&[0x67,0x64,0,0x28],&[0x68,0xee]).unwrap()).unwrap();
+        s.submit(crate::stream_mux::avc_access_unit(&[&[0x65,1]],0,0,true).unwrap()).unwrap();
+        assert_eq!(s.tick(0).unwrap().sent,2);
+        assert_eq!(s.stats().phase,Phase::Sending);
+        assert_eq!(s.stats().sent_packets,2);
+        s.submit(crate::stream_mux::avc_access_unit(&[&[0x41,2]],100,0,false).unwrap()).unwrap();
+        assert_eq!(s.tick(50).unwrap().sent,0);
+        s.stop();s.stop();
+        assert_eq!(s.stats().phase,Phase::Stopped);
+        assert_eq!(s.stats().queued_packets,0);
+        assert!(s.tick(100).is_err());
+    }
+    #[test]fn session_server_stop_is_terminal(){
+        use crate::live_session::{Session,Phase};
+        let publisher=Publisher::establish(fixture(true),"live","rtmps://example.invalid/live","fixture-key",7,&[9;1528]).unwrap();
+        let mut s=Session::new(publisher).unwrap();
+        assert!(s.service_inbound().is_err());
+        assert_eq!(s.stats().phase,Phase::Failed);
+        assert!(s.stats().restart_required);
+        assert!(s.submit(crate::stream_mux::aac_sequence()).is_err());
     }
     #[test]fn rejects_publish_before_media(){
         let result=Publisher::establish(fixture(false),"live","rtmps://example.invalid/live","fixture-key",7,&[9;1528]);
