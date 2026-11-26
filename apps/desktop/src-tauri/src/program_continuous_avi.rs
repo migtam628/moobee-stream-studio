@@ -88,6 +88,17 @@ pub fn continuous_program_stats(session_id: String) -> Option<ProgramRecordingSt
         .filter(|s| s.id == session_id).map(|s| s.stats.clone())
 }
 
+#[tauri::command]
+pub fn recover_finalized_program_recordings(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let report = crate::program_mp4_sink::recover_finalized_program_recordings(app)?;
+        serde_json::to_value(report).map_err(|e| e.to_string())
+    }
+    #[cfg(not(target_os = "macos"))]
+    { let _ = app; Err("Finalized Program MP4 recovery is available on macOS only".into()) }
+}
+
 #[derive(Copy, Clone)]
 struct EncodingProfile {
     label: &'static str,
@@ -568,9 +579,27 @@ fn capture_to_dir(
         Err(error) => { let _ = fs::remove_file(&temporary); return Err(error); }
     };
     let finalization_ms = finalizing.elapsed().as_millis() as u64;
-    if let Err(error) = fs::rename(&temporary, &final_path) {
-        let _ = fs::remove_file(&temporary);
-        return Err(format!("Unable to publish completed Program video: {error}"));
+    match format {
+        ProgramFormat::Avi => {
+            if let Err(error) = fs::rename(&temporary, &final_path) {
+                let _ = fs::remove_file(&temporary);
+                return Err(format!("Unable to publish completed Program video: {error}"));
+            }
+        }
+        ProgramFormat::Mp4 => {
+            #[cfg(target_os = "macos")]
+            {
+                // The encoder is closed and the container has passed validation.
+                // A distinct ready name permits explicit recovery after a failed
+                // or interrupted publication, without treating raw .part as valid.
+                let ready = directory.join(format!(".clip-{id}.ready.mp4"));
+                fs::rename(&temporary, &ready)
+                    .map_err(|e| format!("Finalized MP4 retained as a private partial file; could not stage recovery: {e}"))?;
+                crate::program_mp4_sink::publish_ready(&ready, &final_path)?;
+            }
+            #[cfg(not(target_os = "macos"))]
+            return Err("Native composed MP4 unavailable".into());
+        }
     }
     Ok(ContinuousProgramReport {
         id, path: final_path.to_string_lossy().into_owned(), format: extension,
