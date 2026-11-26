@@ -30,6 +30,7 @@ mod stream_mux;
 mod rtmp_receive;
 mod rtmp_session;
 mod live_media_queue;
+mod live_packet_pacer;
 #[cfg(target_os = "macos")]
 mod macos_avc;
 
