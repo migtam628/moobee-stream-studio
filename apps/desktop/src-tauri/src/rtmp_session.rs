@@ -70,6 +70,85 @@ impl<T:Read+Write> Publisher<T>{
         result
     }
 }
+// The production adapter uses the OS trust store, certificate and hostname
+// validation. It never downgrades to unencrypted RTMP. No UI invokes it yet.
+#[cfg(any(target_os="macos",target_os="windows"))]
+pub(crate) mod tls {
+    use super::*;
+    use std::{net::{TcpStream,ToSocketAddrs},time::{Duration,Instant,SystemTime,UNIX_EPOCH},io};
+    const CONNECT_TIMEOUT:Duration=Duration::from_secs(5);
+    const IO_TIMEOUT:Duration=Duration::from_secs(3);
+    const NEGOTIATION_TIMEOUT:Duration=Duration::from_secs(20);
+    struct Endpoint{host:String,port:u16,app:String,tc_url:String}
+    fn endpoint(value:&str)->Result<Endpoint>{
+        if value.len()>2048||value.chars().any(char::is_control){return Err("Invalid RTMPS endpoint".into())}
+        let u=url::Url::parse(value).map_err(|_|"Invalid RTMPS endpoint")?;
+        if u.scheme()!="rtmps"||!u.username().is_empty()||u.password().is_some()||u.query().is_some()||u.fragment().is_some(){
+            return Err("Use a secure RTMPS server URL without credentials, query or fragment".into())
+        }
+        let host=match u.host(){Some(url::Host::Domain(v)) if !v.is_empty()=>v.to_owned(),_=>return Err("RTMPS requires a certificate-verifiable DNS hostname".into())};
+        let app=u.path().trim_matches('/');
+        if app.is_empty()||app.len()>512||app.split('/').any(|p|p.is_empty()||!p.bytes().all(|c|c.is_ascii_alphanumeric()||b"-_.".contains(&c))){
+            return Err("Invalid RTMPS application path".into())
+        }
+        let port=u.port().unwrap_or(443);
+        if port==0{return Err("Invalid RTMPS port".into())}
+        let tc_url=format!("rtmps://{}:{}/{}",host,port,app);
+        Ok(Endpoint{host,port,app:app.to_owned(),tc_url})
+    }
+    pub(crate) struct DeadlineSocket{socket:TcpStream,deadline:Option<Instant>}
+    impl DeadlineSocket{
+        fn timeout(&self)->io::Result<Duration>{
+            match self.deadline{
+                Some(d)=>{let remaining=d.saturating_duration_since(Instant::now());if remaining.is_zero(){Err(io::Error::new(io::ErrorKind::TimedOut,"RTMPS negotiation deadline"))}else{Ok(remaining.min(IO_TIMEOUT))}},
+                None=>Ok(IO_TIMEOUT)
+            }
+        }
+    }
+    impl Read for DeadlineSocket{
+        fn read(&mut self,out:&mut[u8])->io::Result<usize>{self.socket.set_read_timeout(Some(self.timeout()?))?;self.socket.read(out)}
+    }
+    impl Write for DeadlineSocket{
+        fn write(&mut self,data:&[u8])->io::Result<usize>{self.socket.set_write_timeout(Some(self.timeout()?))?;self.socket.write(data)}
+        fn flush(&mut self)->io::Result<()>{self.timeout()?;self.socket.flush()}
+    }
+    /// Explicit future caller only. DNS resolution is OS-blocking and must
+    /// be isolated from the UI; socket I/O and negotiation are bounded.
+    pub(crate) fn connect_tls(server_url:&str,stream_key:&str)->Result<Publisher<native_tls::TlsStream<DeadlineSocket>>>{
+        let target=endpoint(server_url)?;
+        rtmp::publish(stream_key)?;
+        let addresses=(target.host.as_str(),target.port).to_socket_addrs().map_err(|_|"RTMPS DNS resolution failed")?;
+        let deadline=Instant::now()+CONNECT_TIMEOUT;
+        let mut socket=None;
+        for address in addresses.take(8){
+            let remaining=deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero(){break}
+            if let Ok(s)=TcpStream::connect_timeout(&address,remaining){socket=Some(s);break}
+        }
+        let socket=socket.ok_or("RTMPS TCP connection failed")?;
+        socket.set_nodelay(true).map_err(|_|"RTMPS socket configuration failed")?;
+        let connector=native_tls::TlsConnector::new().map_err(|_|"RTMPS TLS initialization failed")?;
+        let tls=connector.connect(&target.host,DeadlineSocket{socket,deadline:Some(Instant::now()+NEGOTIATION_TIMEOUT)})
+            .map_err(|_|"RTMPS TLS certificate validation or handshake failed")?;
+        let mut random=[0u8;1528];getrandom::fill(&mut random).map_err(|_|"RTMP handshake randomness unavailable")?;
+        let now=SystemTime::now().duration_since(UNIX_EPOCH).map_err(|_|"System clock invalid")?.as_millis() as u32;
+        let mut publisher=Publisher::establish(tls,&target.app,&target.tc_url,stream_key,now,&random)?;
+        publisher.io.get_mut().deadline=None;
+        Ok(publisher)
+    }
+    #[cfg(test)]
+    mod tests{
+        use super::*;
+        #[test]fn validates_secure_endpoint_without_leaking_credentials(){
+            let a=endpoint("rtmps://ingest.example.invalid:443/live").unwrap();
+            assert_eq!((&*a.host,a.port,&*a.app),("ingest.example.invalid",443,"live"));
+            for value in ["rtmp://example.invalid/live","rtmps://user:secret@example.invalid/live","rtmps://example.invalid/live?key=secret","rtmps://example.invalid/live#secret","rtmps://127.0.0.1/live","rtmps://example.invalid/","rtmps://example.invalid/live/%20"]{
+                let Err(e)=endpoint(value) else{panic!("Invalid endpoint accepted")};assert!(!e.contains("secret"));
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests{
     use super::*;
