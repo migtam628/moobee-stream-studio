@@ -16,6 +16,16 @@ const MAX_TOTAL_SOURCE_PIXELS: u64 = 36_000_000;
 const MAX_STALE_MS: u64 = 1_500;
 const MAX_DRAIN_PER_SOURCE_PER_TICK: usize = 64;
 const MAX_MP4_SECONDS: u32 = 60;
+const MAX_SEGMENTED_SECONDS: u32 = 300;
+
+// Longer tests are sequences of separately finalized 60-second clips.
+fn segment_plan(seconds: u32) -> Result<Vec<u32>, String> {
+    if (2..=MAX_MP4_SECONDS).contains(&seconds) { return Ok(vec![seconds]); }
+    if seconds > MAX_SEGMENTED_SECONDS || seconds % MAX_MP4_SECONDS != 0 {
+        return Err("Choose 2–60 seconds or a whole-minute segmented test up to 5 minutes".into());
+    }
+    Ok(vec![MAX_MP4_SECONDS; (seconds / MAX_MP4_SECONDS) as usize])
+}
 
 // Control and telemetry are scoped to the active Program MP4 session.
 #[derive(Clone, Serialize)]
@@ -29,6 +39,9 @@ pub struct ProgramRecordingStats {
     file_bytes: u64,
     late_frames: u32,
     repeated_source_slots: u64,
+    segment_index: u32,
+    segment_count: u32,
+    completed_segments: u32,
 }
 struct ProgramSession {
     id: String,
@@ -44,6 +57,7 @@ impl ProgramStopGuard {
             id, stop: false, pause: false, stats: ProgramRecordingStats {
                 phase: "starting", recorded_frames: 0, fps: 0, elapsed_ms: 0,
                 paused_ms: 0, file_bytes: 0, late_frames: 0, repeated_source_slots: 0,
+                segment_index: 1, segment_count: 1, completed_segments: 0,
             },
         });
         Self
@@ -54,8 +68,23 @@ impl ProgramStopGuard {
     fn paused(&self) -> bool {
         PROGRAM_STOP.lock().unwrap_or_else(|e| e.into_inner()).as_ref().is_some_and(|s| s.pause && !s.stop)
     }
-    fn update(&self, stats: ProgramRecordingStats) {
-        if let Some(s) = PROGRAM_STOP.lock().unwrap_or_else(|e| e.into_inner()).as_mut() { s.stats = stats; }
+    fn update(&self, mut stats: ProgramRecordingStats) {
+        if let Some(s) = PROGRAM_STOP.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+            stats.segment_index = s.stats.segment_index;
+            stats.segment_count = s.stats.segment_count;
+            stats.completed_segments = s.stats.completed_segments;
+            s.stats = stats;
+        }
+    }
+    fn begin_segment(&self, index: u32, count: u32) {
+        if let Some(s) = PROGRAM_STOP.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+            s.pause = false;
+            s.stats = ProgramRecordingStats {
+                phase: "starting", recorded_frames: 0, fps: 0, elapsed_ms: 0,
+                paused_ms: 0, file_bytes: 0, late_frames: 0, repeated_source_slots: 0,
+                segment_index: index, segment_count: count, completed_segments: index - 1,
+            };
+        }
     }
     fn finalizing(&self) {
         if let Some(s) = PROGRAM_STOP.lock().unwrap_or_else(|e| e.into_inner()).as_mut() { s.stats.phase = "finalizing"; }
@@ -68,7 +97,7 @@ impl Drop for ProgramStopGuard {
 pub fn stop_continuous_program_mp4(session_id: String) -> bool {
     let mut state = PROGRAM_STOP.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(s) = state.as_mut() {
-        if s.id == session_id && s.stats.phase != "finalizing" { s.stop = true; return true; }
+        if s.id == session_id && (s.stats.phase != "finalizing" || s.stats.segment_index < s.stats.segment_count) { s.stop = true; return true; }
     }
     false
 }
@@ -126,6 +155,27 @@ fn encoding_profile(value: &str) -> Result<EncodingProfile, String> {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct RecordingSegment {
+    id: String,
+    path: String,
+    bytes: u64,
+    duration_seconds: f64,
+    frame_count: u32,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SegmentedProgramReport {
+    requested_seconds: u32,
+    completed_seconds: f64,
+    total_bytes: u64,
+    stopped_early: bool,
+    warning: Option<String>,
+    segments: Vec<RecordingSegment>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ContinuousProgramReport {
     id: String,
     path: String,
@@ -161,6 +211,8 @@ pub struct ContinuousProgramReport {
     repeated_source_slots: Vec<u32>,
     late_output_frames: u32,
     max_source_arrival_skew_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    segmented_session: Option<SegmentedProgramReport>,
 }
 
 fn validate_request(display_ids: &[usize], seconds: u32, selected_profile: &str) -> Result<EncodingProfile, String> {
@@ -177,9 +229,7 @@ fn validate_request(display_ids: &[usize], seconds: u32, selected_profile: &str)
 
 fn validate_mp4_request(display_ids: &[usize], seconds: u32, selected_profile: &str) -> Result<EncodingProfile, String> {
     crate::scene_compositor::validate_ids(display_ids)?;
-    if !(2..=MAX_MP4_SECONDS).contains(&seconds) {
-        return Err("Program MP4 supports 2–60 second recording tests".into());
-    }
+    segment_plan(seconds)?;
     encoding_profile(selected_profile)
 }
 
@@ -523,6 +573,7 @@ fn capture_to_dir(
                     elapsed_ms: started.elapsed().as_millis() as u64,
                     paused_ms: clock.time(paused_ticks).as_millis() as u64,
                     file_bytes, late_frames,
+                    segment_index: 1, segment_count: 1, completed_segments: 0,
                     repeated_source_slots: repeats.iter().map(|n| u64::from(*n)).sum::<u64>() + u64::from(webcam_repeated_slots),
                 });
             }
@@ -619,6 +670,7 @@ fn capture_to_dir(
         repeated_source_slots: repeats,
         late_output_frames: late_frames,
         max_source_arrival_skew_ms: max_skew_ms,
+        segmented_session: None,
     })
 }
 
@@ -684,7 +736,51 @@ async fn capture_continuous_program(
         tauri::async_runtime::spawn_blocking(move || {
             let _guard = CaptureLock;
             let stop_guard = if matches!(format, ProgramFormat::Mp4) { Some(ProgramStopGuard::begin(session_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()))) } else { None };
-            capture_to_dir(directory, display_ids, seconds, selected_profile, format, layout, webcam, microphone, mic_gain, overlay, video_device_id, audio_inputs, transforms, stop_guard.as_ref())
+            if !matches!(format, ProgramFormat::Mp4) || seconds <= MAX_MP4_SECONDS {
+                return capture_to_dir(directory, display_ids, seconds, selected_profile, format, layout, webcam, microphone, mic_gain, overlay, video_device_id, audio_inputs, transforms, stop_guard.as_ref());
+            }
+            let plan = segment_plan(seconds)?;
+            let mut segments = Vec::with_capacity(plan.len());
+            let mut last = None;
+            let mut warning = None;
+            let mut stopped_early = false;
+            for (index, &length) in plan.iter().enumerate() {
+                if let Some(guard) = stop_guard.as_ref() {
+                    if guard.requested() { stopped_early = true; break; }
+                    guard.begin_segment(index as u32 + 1, plan.len() as u32);
+                    if guard.requested() { stopped_early = true; break; }
+                }
+                // Restart sources at boundaries; this intentionally does not
+                // promise a seamless continuous recording or gapless audio.
+                match capture_to_dir(directory.clone(), display_ids.clone(), length, selected_profile, format,
+                    layout, webcam, microphone, mic_gain, overlay.clone(), video_device_id.clone(),
+                    audio_inputs.clone(), transforms.clone(), stop_guard.as_ref()) {
+                    Ok(report) => {
+                        segments.push(RecordingSegment {
+                            id: report.id.clone(), path: report.path.clone(), bytes: report.bytes,
+                            duration_seconds: report.duration_seconds, frame_count: report.frame_count,
+                        });
+                        stopped_early = report.stopped_early;
+                        last = Some(report);
+                        if stopped_early { break; }
+                    }
+                    Err(error) => {
+                        if last.is_none() { return Err(error); }
+                        warning = Some(format!("Segment {} failed: {error}. Previously finalized clips were retained.", index + 1));
+                        stopped_early = true;
+                        break;
+                    }
+                }
+            }
+            let mut report = last.ok_or_else(|| "Recording stopped before any segment was finalized".to_owned())?;
+            report.segmented_session = Some(SegmentedProgramReport {
+                requested_seconds: seconds,
+                completed_seconds: segments.iter().map(|s| s.duration_seconds).sum(),
+                total_bytes: segments.iter().map(|s| s.bytes).sum(),
+                stopped_early: stopped_early || segments.len() < plan.len(),
+                warning, segments,
+            });
+            Ok(report)
         }).await.map_err(|error| format!("Continuous Program capture worker stopped: {error}"))?
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
@@ -703,6 +799,8 @@ mod tests {
         assert!(validate_mp4_request(&[0], 30, "1080p30").is_ok());
         assert!(validate_mp4_request(&[0], 60, "1080p30").is_ok());
         assert!(validate_mp4_request(&[0], 61, "1080p30").is_err());
+        assert!(validate_mp4_request(&[0], 300, "1080p30").is_ok());
+        assert!(validate_mp4_request(&[0], 360, "1080p30").is_err());
         use super::validate_bitrate;
         assert_eq!(validate_bitrate(None, 6000).unwrap(), 6000);
         assert_eq!(validate_bitrate(Some(1500), 6000).unwrap(), 1500);
@@ -727,8 +825,26 @@ mod tests {
         assert!(!pause_continuous_program_mp4("current".into(), true));
         guard.finalizing();
         assert!(!stop_continuous_program_mp4("current".into()));
+        guard.begin_segment(2, 3);
+        let next = continuous_program_stats("current".into()).unwrap();
+        assert_eq!((next.segment_index, next.segment_count, next.completed_segments), (2,3,1));
+        assert_eq!(next.recorded_frames, 0);
+        assert!(guard.requested()); // rolling over never clears a stop request
+        guard.finalizing();
+        assert!(stop_continuous_program_mp4("current".into()));
         drop(guard);
         assert!(!stop_continuous_program_mp4("current".into()));
+    }
+    #[test]
+    fn segment_plan_is_bounded_and_never_creates_a_short_tail() {
+        use super::segment_plan;
+        assert_eq!(segment_plan(2).unwrap(), vec![2]);
+        assert_eq!(segment_plan(60).unwrap(), vec![60]);
+        assert_eq!(segment_plan(120).unwrap(), vec![60,60]);
+        assert_eq!(segment_plan(300).unwrap(), vec![60;5]);
+        for seconds in [0,1,61,119,301,360,u32::MAX] {
+            assert!(segment_plan(seconds).is_err());
+        }
     }
     #[test]
     fn validates_display_count_uniqueness_and_duration() {
