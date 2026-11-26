@@ -30,6 +30,7 @@ mod source_transform;
 mod stream_mux;
 mod rtmp_receive;
 mod rtmp_session;
+mod live_media_queue;
 
 use axum::{
     extract::State,
