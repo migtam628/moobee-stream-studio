@@ -154,8 +154,10 @@ struct DisplayInfo {
 async fn list_audio_inputs() -> Result<serde_json::Value,String> {
     #[cfg(target_os="macos")]
     { tauri::async_runtime::spawn_blocking(program_audio::list).await.map_err(|e|e.to_string())? }
-    #[cfg(not(target_os="macos"))]
-    { Err("Native audio input discovery requires macOS".into()) }
+    #[cfg(target_os="windows")]
+    { tauri::async_runtime::spawn_blocking(windows_audio::list).await.map_err(|e|e.to_string())? }
+    #[cfg(not(any(target_os="macos",target_os="windows")))]
+    { Err("Native audio input discovery requires macOS or Windows".into()) }
 }
 #[tauri::command]
 async fn program_audio_levels(inputs: Vec<program_audio::AudioInput>) -> Result<Option<program_audio::AudioLevels>,String> {

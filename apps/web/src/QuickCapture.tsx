@@ -89,17 +89,19 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
   const [audioError, setAudioError] = useState('')
   const [scanningAudio, setScanningAudio] = useState(false)
   async function refreshAudio() {
-    if (!mac) return
+    if (!supportedDesktop) return
     setScanningAudio(true); setAudioError('')
     try {
       const result = await request<{devices:AudioDevice[]}>('/capture/audio-inputs')
       setAudioDevices(result.devices)
-      setMicDevice(current => result.devices.some(d=>d.id===current) ? current : result.devices.find(d=>d.isDefault)?.id ?? result.devices[0]?.id ?? '')
-      setCardDevice(current => result.devices.some(d=>d.id===current) ? current : '')
+      if (mac) {
+        setMicDevice(current => result.devices.some(d=>d.id===current) ? current : result.devices.find(d=>d.isDefault)?.id ?? result.devices[0]?.id ?? '')
+        setCardDevice(current => result.devices.some(d=>d.id===current) ? current : '')
+      } // Windows: preserve explicit selections; never silently substitute a disconnected endpoint.
     } catch (cause) { setAudioError(String(cause)) }
     finally { setScanningAudio(false) }
   }
-  useEffect(()=>{if(mac) void refreshAudio()},[mac])
+  useEffect(()=>{if(supportedDesktop) void refreshAudio()},[supportedDesktop])
   const audioRows: { name:string; input:AudioInput }[] = []
   if(programMic) audioRows.push({name:'Mic / Aux',input:{kind:'device',deviceId:micDevice||null,gain:micGain,muted:micGain===0}})
   if(cardAudio && cardDevice) audioRows.push({name:'HDMI / USB Audio',input:{kind:'device',deviceId:cardDevice,gain:cardGain,muted:cardGain===0}})
@@ -108,7 +110,7 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
   const audioConfigRef = useRef(audioConfig)
   audioConfigRef.current = audioConfig
   const audioIdentity = JSON.stringify(audioRows.map(r=>[r.input.kind,r.input.deviceId]))
-  const audioSelectionError = cardAudio && !cardDevice ? 'Select the capture card audio input.' : cardAudio && programMic && (!micDevice || cardDevice===micDevice) ? 'Select different named microphone and HDMI audio devices.' : ''
+  const audioSelectionError = !mac && supportedDesktop && ((programMic && micDevice && !audioDevices.some(d=>d.id===micDevice)) || (cardAudio && cardDevice && !audioDevices.some(d=>d.id===cardDevice))) ? 'Selected audio device unavailable. Refresh or choose another device.' : cardAudio && !cardDevice ? 'Select the capture card audio input.' : cardAudio && programMic && (!micDevice || cardDevice===micDevice) ? 'Select different named microphone and HDMI audio devices.' : ''
 
   const [graphic, setGraphic] = useState<GraphicOverlay | null>(null)
   const [graphicName, setGraphicName] = useState('')
@@ -468,23 +470,23 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
         <div className="panel-head"><div className="panel-title"><AudioLines size={17}/>Audio Mixer</div><span className="subdued">Test inputs</span></div>
         <div className="dock-body">
           <label className="layer-switch"><Volume2 size={16}/><span>Mic / Aux <small>Select native audio device</small></span><input type="checkbox" aria-label="Enable microphone" checked={programMic} disabled={!supportedDesktop || busy} onChange={e => setProgramMic(e.target.checked)}/></label>
-          {mac && <label className="dock-field">Microphone device<select aria-label="Microphone device" value={micDevice} disabled={busy || scanningAudio} onChange={e=>setMicDevice(e.target.value)}><option value="">System default</option>{audioDevices.map(d=><option key={d.id} value={d.id}>{d.name}{d.isDefault?' (default)':''}</option>)}</select></label>}
+          {supportedDesktop && <label className="dock-field">Microphone device<select aria-label="Microphone device" value={micDevice} disabled={busy || scanningAudio} onChange={e=>setMicDevice(e.target.value)}><option value="">System default</option>{micDevice&&!audioDevices.some(d=>d.id===micDevice)&&<option value={micDevice}>Selected device unavailable</option>}{audioDevices.map(d=><option key={d.id} value={d.id}>{d.name}{d.isDefault?' (default)':''}</option>)}</select></label>}
           <div className="meter-caption"><span>Last recorded peak</span><b>{peak === null ? '—' : `${Math.round(peak*100)}%`}</b></div>
           <div className="production-meter" role="meter" aria-label="Last recorded microphone peak" aria-valuemin={0} aria-valuemax={100} aria-valuenow={peak === null ? 0 : Math.round(Math.min(1,peak)*100)} aria-valuetext={peak === null ? 'No recording measured' : `${Math.round(peak*100)} percent`}>
             <span style={{width: `${peak === null ? 0 : Math.min(1,peak)*100}%`}}/>
           </div>
           <label className="gain-label">Gain <b>{Math.round(micGain*100)}%</b><input type="range" aria-label="Microphone gain" min="0" max="2" step="0.1" value={micGain} disabled={!supportedDesktop || !programMic || busy} onChange={e => setMicGain(Number(e.target.value))}/></label>
           <button className="secondary-button mute-button" disabled={!supportedDesktop || !programMic || busy} onClick={() => setMicGain(micGain === 0 ? 1 : 0)}>{micGain === 0 ? 'Unmute mic' : 'Mute mic'}</button>
-          <label className="layer-switch"><Volume2 size={16}/><span>HDMI / USB Audio<small>Choose capture card audio endpoint</small></span><input type="checkbox" aria-label="Enable HDMI audio" checked={cardAudio} disabled={!mac||busy} onChange={e=>setCardAudio(e.target.checked)}/></label>
-          {cardAudio && <><label className="dock-field">Capture card audio<select aria-label="Capture card audio device" value={cardDevice} disabled={busy||scanningAudio} onChange={e=>setCardDevice(e.target.value)}><option value="">Select device</option>{audioDevices.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}</select></label><label className="gain-label">HDMI gain <b>{Math.round(cardGain*100)}%</b><input aria-label="HDMI gain" type="range" min="0" max="2" step="0.1" value={cardGain} disabled={busy} onChange={e=>setCardGain(Number(e.target.value))}/></label><button className="secondary-button" disabled={busy} onClick={()=>setCardGain(cardGain===0?1:0)}>{cardGain===0?'Unmute HDMI':'Mute HDMI'}</button></>}
+          <label className="layer-switch"><Volume2 size={16}/><span>HDMI / USB Audio<small>Choose capture card audio endpoint</small></span><input type="checkbox" aria-label="Enable HDMI audio" checked={cardAudio} disabled={!supportedDesktop||busy} onChange={e=>setCardAudio(e.target.checked)}/></label>
+          {cardAudio && <><label className="dock-field">Capture card audio<select aria-label="Capture card audio device" value={cardDevice} disabled={busy||scanningAudio} onChange={e=>setCardDevice(e.target.value)}><option value="">Select device</option>{cardDevice&&!audioDevices.some(d=>d.id===cardDevice)&&<option value={cardDevice}>Selected device unavailable</option>}{audioDevices.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}</select></label><label className="gain-label">HDMI gain <b>{Math.round(cardGain*100)}%</b><input aria-label="HDMI gain" type="range" min="0" max="2" step="0.1" value={cardGain} disabled={busy} onChange={e=>setCardGain(Number(e.target.value))}/></label><button className="secondary-button" disabled={busy} onClick={()=>setCardGain(cardGain===0?1:0)}>{cardGain===0?'Unmute HDMI':'Mute HDMI'}</button></>}
           <label className="layer-switch"><Volume2 size={16}/><span>Desktop Audio<small>{mac?'ScreenCaptureKit · Mac':'WASAPI · default playback'}</small></span><input aria-label="Enable desktop audio" type="checkbox" checked={desktopAudio} disabled={!supportedDesktop||busy} onChange={e=>setDesktopAudio(e.target.checked)}/></label>
           {desktopAudio && <><label className="gain-label">Desktop gain <b>{Math.round(desktopGain*100)}%</b><input aria-label="Desktop gain" type="range" min="0" max="2" step="0.1" value={desktopGain} disabled={busy} onChange={e=>setDesktopGain(Number(e.target.value))}/></label><button className="secondary-button" disabled={busy} onClick={()=>setDesktopGain(desktopGain===0?1:0)}>{desktopGain===0?'Unmute desktop':'Mute desktop'}</button></>}
-          <button className="secondary-button" disabled={!mac||busy||scanningAudio} onClick={()=>void refreshAudio()}>Refresh audio devices</button>
+          <button className="secondary-button" disabled={!supportedDesktop||busy||scanningAudio} onClick={()=>void refreshAudio()}>Refresh audio devices</button>
           <label className="layer-switch"><AudioLines size={16}/><span>Live audio meters<small>Explicit local capture · stops before recording</small></span><input aria-label="Live audio meters" type="checkbox" checked={liveMeter} disabled={!mac||busy} onChange={e=>setLiveMeter(e.target.checked)}/></label>
           {liveMeter && [...audioRows.map((row,i)=>({name:row.name,peak:audioLevels?.inputPeaks[i]})),{name:'Program mix',peak:audioLevels?.mixedPeak}].map(row=><div key={row.name}><div className="meter-caption"><span>{row.name}</span><b>{row.peak===undefined?'—':Math.round(row.peak*100)+'%'}</b></div><div className="production-meter" role="meter" aria-label={row.name+' live peak'} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round((row.peak??0)*100)} aria-valuetext={row.peak===undefined?'Waiting for samples':Math.round(row.peak*100)+' percent'}><span style={{width:Math.min(100,(row.peak??0)*100)+'%'}}/></div></div>)}
           {audioLevels && <small className="dock-note">Mixed clipping: {audioLevels.clippedSamples} samples / measured block</small>}
           {(audioSelectionError||audioError) && <small className="preview-error" role="alert">{audioSelectionError||audioError}</small>}
-          <p className="dock-note">{mac?'Named inputs mix into Mac MP4 AAC tests. Live meters measure local PCM, not playback.':'Windows uses default microphone/playback endpoints. Pre-recording meters and named inputs are Mac-only.'} Device-clock sync remains unverified.</p>
+          <p className="dock-note">{mac?'Named inputs mix into Mac MP4 AAC tests. Live meters measure local PCM, not playback.':'Windows mixes named capture endpoints and default playback loopback. Pre-recording meters remain Mac-only.'} Device-clock sync remains unverified.</p>
           {otherAudio}
         </div>
       </section>

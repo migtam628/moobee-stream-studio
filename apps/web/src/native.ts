@@ -332,7 +332,7 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
     const micGain = body.micGain ?? 1
     if (typeof micGain !== 'number' || !Number.isFinite(micGain) || micGain < 0 || micGain > 2) throw new Error('Invalid microphone gain')
     if (body.audioInputs !== undefined && (!mp4 || !Array.isArray(body.audioInputs) || body.audioInputs.length > 3)) throw new Error('Audio sources require native MP4')
-    if (windowsHost() && Array.isArray(body.audioInputs) && (body.audioInputs.length > 2 || body.audioInputs.some(i=>!i || !['device','desktop'].includes(i.kind) || i.deviceId != null))) throw new Error('Windows audio supports default endpoints only')
+    if (windowsHost() && Array.isArray(body.audioInputs) && body.audioInputs.some(i=>!i || !['device','desktop'].includes(i.kind) || (i.kind==='desktop' && i.deviceId!=null) || (i.deviceId!=null && (typeof i.deviceId!=='string'||!i.deviceId.length||i.deviceId.length>1024)))) throw new Error('Invalid Windows audio endpoint selection')
     if (body.overlay !== undefined && body.overlay !== null) {
       const o = body.overlay as { width: number; height: number; rgbaBase64: string; placement?: { xPercent: number; yPercent: number; widthPercent: number } }
       if (typeof o !== 'object' || !Number.isInteger(o.width) || !Number.isInteger(o.height) ||
@@ -392,7 +392,7 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
     return await captureWithPreviewReleased('probe_native_capture', { displayId: body.displayId, seconds: body.seconds })
   }
   if (path === '/capture/audio-inputs') {
-    if (!macHost()) return { devices: [], supported: false }
+    if (!macHost() && !windowsHost()) return { devices: [], supported: false }
     return { devices: await invoke('list_audio_inputs'), supported: true }
   }
   if (path === '/capture/audio-levels') {
