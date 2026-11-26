@@ -181,3 +181,8 @@
 .transform-controls{padding:9px;border-top:1px solid var(--studio-border);display:flex;flex-direction:column;gap:7px}
 .transform-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px}
 .transform-fields input{width:100%;min-width:0;background:#17191e;border:1px solid #454953;color:#eee;border-radius:4px;padding:4px;font-size:11px}
+
+/* Monitor-only scene transition: does not change native encoded output. */
+.production-monitor .preview-canvas{position:relative;overflow:hidden}
+.production-monitor .preview-canvas img.monitor-transition-outgoing{position:absolute;inset:0;z-index:1;pointer-events:none;background:#07080a}
+.monitor-transition-label{position:absolute;left:8px;bottom:8px;z-index:2;pointer-events:none;background:#111318dd;color:#e6e6ed;padding:4px 8px;border-radius:4px;font-size:11px}
