@@ -13,6 +13,7 @@
 #include <new>
 #include <cwchar>
 #include <cstdlib>
+#include <cstddef>
 using Microsoft::WRL::ComPtr;
 namespace {
 constexpr UINT32 maxW=1280,maxH=720;
@@ -102,7 +103,7 @@ HRESULT open(Camera& camera,const wchar_t* id){
     hr=MFCreateSourceReaderFromMediaSource(camera.source.Get(),attrs.Get(),&camera.reader);if(FAILED(hr))return hr;
     hr=camera.reader->SetStreamSelection(MF_SOURCE_READER_ALL_STREAMS,FALSE);if(FAILED(hr))return hr;
     hr=camera.reader->SetStreamSelection(stream,TRUE);if(FAILED(hr))return hr;
-    // Prefer the largest bounded native mode, then try other bounded modes.
+    // Select the largest bounded native mode.
     // Never request unbounded 4K raw frames; unsupported devices fail explicitly.
     UINT32 best=UINT32_MAX,bestPixels=0;
     for(DWORD i=0;i<256;++i){
@@ -134,7 +135,7 @@ bool validStride(LONG stride,UINT32 width){
 }
 void bgraToRgba(const BYTE* row,LONG stride,UINT32 w,UINT32 h,uint8_t* out){
     for(UINT32 y=0;y<h;++y){
-        const BYTE* src=row+static_cast<ptrdiff_t>(y)*stride;
+        const BYTE* src=row+static_cast<std::ptrdiff_t>(y)*stride;
         for(UINT32 x=0;x<w;++x){const BYTE* pixel=src+x*4;*out++=pixel[2];*out++=pixel[1];*out++=pixel[0];*out++=255;}
     }
 }
