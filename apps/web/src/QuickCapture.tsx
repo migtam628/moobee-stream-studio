@@ -165,6 +165,8 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
   const [saved, setSaved] = useState<CapturedFile | null>(null)
   const [persistedClips, setPersistedClips] = useState<{ id: string; format: string }[] | null>(null)
   const [inventoryError, setInventoryError] = useState('')
+  const [recoveryBusy, setRecoveryBusy] = useState(false)
+  const [recoveryMessage, setRecoveryMessage] = useState('')
 
   useEffect(() => {
     if (!desktop) return
@@ -389,6 +391,19 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
     }
   }
 
+  async function recoverFinalizedRecordings() {
+    if (!mac || busy || recoveryBusy) return
+    setRecoveryBusy(true)
+    setRecoveryMessage('')
+    try {
+      const result = await request<{recovered:number;skipped:number;failed:number}>('/clips/recover-finalized-program', {})
+      setRecoveryMessage(`Recovered ${result.recovered} finalized recording(s); ${result.skipped} already present; ${result.failed} could not be recovered.`)
+      await refreshSavedClips()
+    } catch (cause) {
+      setRecoveryMessage('Recovery failed: ' + (cause as Error).message)
+    } finally { setRecoveryBusy(false) }
+  }
+
   async function reveal() {
     if (!saved) return
     setError('')
@@ -406,7 +421,7 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
   }
 
   const isMacProgram = mac
-  const canProgram = supportedDesktop && !busy && !loading && !graphicLoading && !audioSelectionError && (displays.length > 0 || mac)
+  const canProgram = supportedDesktop && !recoveryBusy && !busy && !loading && !graphicLoading && !audioSelectionError && (displays.length > 0 || mac)
   const overlayWidth = graphic ? Math.min(placement.widthPercent, 50 * 9 / 16 * graphic.width / graphic.height) : 0
   const overlayHeight = graphic ? overlayWidth * 16 / 9 * graphic.height / graphic.width : 0
   const peak = saved?.microphoneIncluded && typeof saved.audioPeak === 'number' ? saved.audioPeak : null
@@ -565,6 +580,8 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
       <button className="secondary-button" type="button" disabled={busy} onClick={() => void refreshSavedClips()}>
         Refresh saved clips
       </button>
+      {mac && <button className="secondary-button" type="button" disabled={busy || recoveryBusy} onClick={() => void recoverFinalizedRecordings()}>{recoveryBusy ? 'Checking finalized files…' : 'Recover finalized Program recordings'}</button>}
+      {recoveryMessage && <small role="status">{recoveryMessage}</small>}
       {inventoryError && <small role="alert">{inventoryError}</small>}
     </div>}
     {!supportedDesktop && <p className="help-text">Native screen capture requires the Mac/Windows desktop application. Android and browser editions cannot record local desktop screens.</p>}
