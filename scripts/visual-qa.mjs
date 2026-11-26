@@ -415,7 +415,7 @@ try {
   await winPage.getByRole('button',{name:'+ Add source',exact:true}).click();
   await winPage.waitForFunction(()=>JSON.parse(localStorage.getItem('moobee-native-studio.v1')).scenes[0].sources.some(s=>s.deviceId==='win-card'));
   // Use the normal source visibility action to isolate the capture card.
-  await winPage.locator('.source-row').filter({hasText:'Display'}).getByRole('checkbox').uncheck();
+  await winPage.locator('.source-row').filter({hasText:'Display'}).locator('button[title="Hide source"]').click();
   await winPage.getByLabel('Preview refresh',{exact:true}).selectOption('live');
   await winPage.waitForFunction(()=>window.__winPreview?.deviceIds?.[0]==='win-card');
   await winPage.getByRole('button',{name:'Record Program test',exact:true}).click();
