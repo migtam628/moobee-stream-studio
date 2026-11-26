@@ -110,7 +110,18 @@ export function programVideoInput(collection: unknown): string | undefined {
   return video[0].deviceId
 }
 
-export type SourceTransform = { x:number; y:number; width:number; height:number; cropLeft:number; cropTop:number; cropRight:number; cropBottom:number; rotation:number; fit:boolean }
+export type SourceFilters = {brightness:number;contrast:number;saturation:number;opacity:number;greenKey:boolean}
+export const defaultFilters = ():SourceFilters => ({brightness:0,contrast:100,saturation:100,opacity:100,greenKey:false})
+export function validateFilters(value:unknown):SourceFilters {
+  if(!value || typeof value !== 'object' || Array.isArray(value))throw new Error('Invalid source filters')
+  const f=value as SourceFilters
+  if(!Number.isInteger(f.brightness)||f.brightness < -100||f.brightness > 100||
+    !Number.isInteger(f.contrast)||f.contrast<0||f.contrast>200||
+    !Number.isInteger(f.saturation)||f.saturation<0||f.saturation>200||
+    !Number.isInteger(f.opacity)||f.opacity<0||f.opacity>100||typeof f.greenKey!=='boolean')throw new Error('Invalid source filter bounds')
+  return {brightness:f.brightness,contrast:f.contrast,saturation:f.saturation,opacity:f.opacity,greenKey:f.greenKey}
+}
+export type SourceTransform = { x:number; y:number; width:number; height:number; cropLeft:number; cropTop:number; cropRight:number; cropBottom:number; rotation:number; fit:boolean; filters?:SourceFilters }
 export const fullTransform = ():SourceTransform => ({x:0,y:0,width:10000,height:10000,cropLeft:0,cropTop:0,cropRight:0,cropBottom:0,rotation:0,fit:true})
 export function validateTransform(value:unknown):SourceTransform {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid source transform')
@@ -118,7 +129,7 @@ export function validateTransform(value:unknown):SourceTransform {
   const values=[t.x,t.y,t.width,t.height,t.cropLeft,t.cropTop,t.cropRight,t.cropBottom,t.rotation]
   if(values.some(v=>!Number.isInteger(v)||v<0)||t.width<250||t.height<250||t.x+t.width>10000||t.y+t.height>10000||
     t.cropLeft+t.cropRight>9000||t.cropTop+t.cropBottom>9000||![0,90,180,270].includes(t.rotation)||typeof t.fit!=='boolean') throw new Error('Invalid source transform bounds')
-  return {x:t.x,y:t.y,width:t.width,height:t.height,cropLeft:t.cropLeft,cropTop:t.cropTop,cropRight:t.cropRight,cropBottom:t.cropBottom,rotation:t.rotation,fit:t.fit}
+  return {x:t.x,y:t.y,width:t.width,height:t.height,cropLeft:t.cropLeft,cropTop:t.cropTop,cropRight:t.cropRight,cropBottom:t.cropBottom,rotation:t.rotation,fit:t.fit,...(t.filters===undefined?{}:{filters:validateFilters(t.filters)})}
 }
 export function defaultTransform(index:number,count:number,layout:SceneLayout):SourceTransform {
   const t=fullTransform()
