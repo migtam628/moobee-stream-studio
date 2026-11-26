@@ -33,10 +33,13 @@ mod rtmp_session;
 mod live_media_queue;
 mod live_packet_pacer;
 mod live_session;
+mod live_publish_worker;
 #[cfg(target_os = "macos")]
 mod macos_avc;
 #[cfg(target_os = "macos")]
 mod macos_aac;
+#[cfg(target_os = "macos")]
+mod live_program_encoder;
 
 use axum::{
     extract::State,
