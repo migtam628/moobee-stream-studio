@@ -71,12 +71,64 @@ impl Mixer{
     }
     pub(crate) fn discard(&self)->Result<(),String>{for source in &self.sources{source.discard()?;}Ok(())}
     pub(crate) fn read(&self,frames:usize)->Result<(audio_mix::MixResult,u64),String>{
-        if !(1..=4800).contains(&frames){return Err("Invalid Windows audio block".into())}
+        let (mix,missing,_)=self.read_levels(frames,&self.inputs)?;
+        Ok((mix,missing))
+    }
+    fn read_levels(&self,frames:usize,settings:&[AudioInput])->Result<(audio_mix::MixResult,u64,program_audio::AudioLevels),String>{
+        if !(1..=4800).contains(&frames)||settings.len()!=self.sources.len(){return Err("Invalid Windows audio block".into())}
         let pcm=self.sources.iter().map(|s|s.read(frames)).collect::<Result<Vec<_>,_>>()?;
         let missing=pcm.iter().map(|(_,n)|u64::from(*n)).sum();
-        let views=pcm.iter().zip(&self.inputs).map(|((samples,_),i)|audio_mix::Input{samples,gain:i.gain,muted:i.muted}).collect::<Vec<_>>();
-        Ok((audio_mix::mix_stereo(frames,&views)?,missing))
+        let views=pcm.iter().zip(settings).map(|((samples,_),i)|audio_mix::Input{samples,gain:i.gain,muted:i.muted}).collect::<Vec<_>>();
+        let mix=audio_mix::mix_stereo(frames,&views)?;
+        let input_peaks=pcm.iter().zip(settings).map(|((samples,_),i)|if i.muted{0.}else{samples.iter().fold(0f32,|a,b|a.max(b.abs()*i.gain)).min(1.)}).collect();
+        let levels=program_audio::AudioLevels{input_peaks,mixed_peak:mix.peak,clipped_samples:mix.clipped};
+        Ok((mix,missing,levels))
     }
+}
+// The COM endpoints are created, polled and destroyed on the same dedicated MTA thread.
+use std::{sync::{Arc,Mutex,OnceLock,atomic::{AtomicBool,Ordering}},thread::{self,JoinHandle},time::{Duration,Instant}};
+const LEASE:Duration=Duration::from_secs(5);
+const BLOCK:Duration=Duration::from_millis(20);
+struct MeterState{stop:AtomicBool,last_use:Mutex<Instant>,settings:Mutex<Vec<AudioInput>>,result:Mutex<Option<Result<program_audio::AudioLevels,String>>>}
+struct MeterWorker{state:Arc<MeterState>,thread:JoinHandle<()>}
+static METER:OnceLock<Mutex<Option<MeterWorker>>>=OnceLock::new();
+fn meter()->&'static Mutex<Option<MeterWorker>>{METER.get_or_init(||Mutex::new(None))}
+fn same_sources(a:&[AudioInput],b:&[AudioInput])->bool{a.len()==b.len()&&a.iter().zip(b).all(|(a,b)|a.kind==b.kind&&a.device_id==b.device_id)}
+fn stop_worker(slot:&mut Option<MeterWorker>){
+    if let Some(worker)=slot.take(){worker.state.stop.store(true,Ordering::Release);let _=worker.thread.join();}
+}
+pub(crate) fn stop()->Result<(),String>{stop_worker(&mut *meter().lock().map_err(|_|"Windows audio meter unavailable")?);Ok(())}
+pub(crate) fn levels(inputs:Vec<AudioInput>)->Result<Option<program_audio::AudioLevels>,String>{
+    validate(&inputs)?;
+    let mut slot=meter().lock().map_err(|_|"Windows audio meter unavailable")?;
+    if inputs.is_empty(){stop_worker(&mut slot);return Ok(None)}
+    let restart=slot.as_ref().map_or(true,|w|!same_sources(&w.state.settings.lock().unwrap(),&inputs)||w.state.last_use.lock().unwrap().elapsed()>=LEASE);
+    if restart{
+        stop_worker(&mut slot);
+        let state=Arc::new(MeterState{stop:AtomicBool::new(false),last_use:Mutex::new(Instant::now()),settings:Mutex::new(inputs.clone()),result:Mutex::new(None)});
+        let shared=state.clone();
+        let thread=thread::Builder::new().name("moobee-wasapi-meter".into()).spawn(move||{
+            let result=(||->Result<(),String>{
+                let initial=shared.settings.lock().unwrap().clone();
+                let mixer=Mixer::open(initial)?;
+                while !shared.stop.load(Ordering::Acquire)&&shared.last_use.lock().unwrap().elapsed()<LEASE{
+                    let tick=Instant::now();
+                    let settings=shared.settings.lock().unwrap().clone();
+                    let (_,_,levels)=mixer.read_levels(960,&settings)?;
+                    *shared.result.lock().unwrap()=Some(Ok(levels));
+                    thread::sleep(BLOCK.saturating_sub(tick.elapsed()));
+                }
+                Ok(())
+            })();
+            *shared.result.lock().unwrap()=result.err().map(Err);
+        }).map_err(|e|e.to_string())?;
+        *slot=Some(MeterWorker{state,thread});
+    }
+    let w=slot.as_ref().unwrap();
+    *w.state.last_use.lock().unwrap()=Instant::now();
+    *w.state.settings.lock().unwrap()=inputs;
+    let result=w.state.result.lock().unwrap().clone();
+    result.transpose()
 }
 #[cfg(test)]
 mod tests{
@@ -92,6 +144,12 @@ mod tests{
         assert!(validate(&[mic.clone(),card,desktop.clone()]).is_ok());
         assert!(validate(&[mic.clone(),mic]).is_err());
         let mut invalid=desktop;invalid.device_id=Some("render".into());assert!(validate(&[invalid]).is_err());
+    }
+    #[test]fn gain_updates_keep_same_meter_sources(){
+        let a=AudioInput{kind:"device".into(),device_id:Some("card".into()),gain:1.,muted:false};
+        let mut b=a.clone();b.gain=0.25;b.muted=true;
+        assert!(same_sources(&[a.clone()],&[b.clone()]));
+        b.device_id=Some("mic".into());assert!(!same_sources(&[a],&[b]));
     }
     #[test]fn endpoint_ids_are_opaque_utf16(){
         assert_eq!(endpoint_id(None),None);
