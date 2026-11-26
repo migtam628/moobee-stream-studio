@@ -377,6 +377,10 @@ try {
     const ctx=canvas.getContext('2d');ctx.fillStyle='#123456';ctx.fillRect(0,0,960,540);
     window.__TAURI_INTERNALS__={invoke:async(cmd,args)=>{
       if(cmd==='list_displays')return [{id:0,name:'Display',width:1920,height:1080}];
+      if(cmd==='list_video_inputs')return [{id:'win-card',name:'USB HDMI Capture',isDefault:false},{id:'win-camera',name:'USB Webcam',isDefault:false}];
+      if(cmd==='test_video_input'){window.__winSignal=args;return canvas.toDataURL('image/png');}
+      if(cmd==='live_video_preview_frame'){window.__winPreview=args;return {image:canvas.toDataURL('image/png'),frameKey:String(Date.now()),liveVideo:true,waiting:false};}
+      if(cmd==='stop_video_previews'){window.__winPreviewStopped=true;return null;}
       if(cmd==='capture_scene_snapshot')return canvas.toDataURL('image/png');
       if(cmd==='macos_mp4_availability')return {supported:false};
       if(cmd==='list_audio_inputs')return [{id:'win-mic',name:'USB Microphone',isDefault:true},{id:'win-hdmi',name:'USB HDMI Capture Audio',isDefault:false}];
@@ -404,6 +408,20 @@ try {
   const winRequest=await winPage.evaluate(()=>window.__winRequest);
   if(winRequest.profile!=='1080p30'||winRequest.bitrateKbps!==3000||!winRequest.microphone||winRequest.webcam||winRequest.audioInputs?.length!==3||winRequest.audioInputs[0].kind!=='device'||winRequest.audioInputs[0].deviceId!=='win-mic'||winRequest.audioInputs[1].kind!=='device'||winRequest.audioInputs[1].deviceId!=='win-hdmi'||winRequest.audioInputs[2].kind!=='desktop'||winRequest.audioInputs[2].deviceId!==null||!winRequest.sessionId)throw new Error('Windows A/V MP4 routing failed');
   if(!await winPage.evaluate(()=>window.__winMeterStopped))throw new Error('Windows meter was not released before recording');
+  await winPage.getByLabel('Choose capture source',{exact:true}).selectOption('video:win-card');
+  await winPage.getByRole('button',{name:'Test video signal',exact:true}).click();
+  await winPage.waitForFunction(()=>window.__winSignal?.deviceId==='win-card');
+  await winPage.getByText('Video frame received',{exact:false}).waitFor();
+  await winPage.getByRole('button',{name:'+ Add source',exact:true}).click();
+  await winPage.waitForFunction(()=>JSON.parse(localStorage.getItem('moobee-native-studio.v1')).scenes[0].sources.some(s=>s.deviceId==='win-card'));
+  // Use the normal source visibility action to isolate the capture card.
+  await winPage.locator('.source-row').filter({hasText:'Display'}).getByRole('checkbox').uncheck();
+  await winPage.getByLabel('Preview refresh',{exact:true}).selectOption('live');
+  await winPage.waitForFunction(()=>window.__winPreview?.deviceIds?.[0]==='win-card');
+  await winPage.getByRole('button',{name:'Record Program test',exact:true}).click();
+  await winPage.waitForFunction(()=>window.__winRequest?.videoDeviceId==='win-card');
+  await winPage.getByRole('button',{name:'Saved MP4 · View result',exact:true}).waitFor();
+  if(!await winPage.evaluate(()=>window.__winPreviewStopped&&window.__winRequest.displayIds.length===0))throw new Error('Windows video preview handoff failed');
   await winPage.close();
   const mobile = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
   await mobile.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'domcontentloaded' });
