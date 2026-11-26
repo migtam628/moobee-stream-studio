@@ -105,7 +105,7 @@ export function programVideoInput(collection: unknown): string | undefined {
   const video = enabled.filter(source => source.kind === 'video')
   if (!video.length) return undefined
   if (enabled.length !== 1 || video.length !== 1 || !validVideoInputId(video[0].deviceId)) {
-    throw new Error('For this Mac video-input test, enable only one capture card or camera in Program; hide other sources.')
+    throw new Error('For this native video-input test, enable only one capture card or camera in Program; hide other sources.')
   }
   return video[0].deviceId
 }
