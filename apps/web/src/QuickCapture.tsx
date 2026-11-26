@@ -11,7 +11,7 @@ type Display = { id: number; name: string; width: number; height: number }
 type Availability = { supported: boolean; requiredMacos: string; osVersion?: string | null; reason?: string; microphoneSupported?: boolean; engine?: string }
 type OverlayPlacement = { xPercent: number; yPercent: number; widthPercent: number }
 type GraphicOverlay = { width: number; height: number; rgbaBase64: string }
-type ProgramStats = { phase:'starting'|'recording'|'paused'|'finalizing'; recordedFrames:number; fps:number; elapsedMs:number; pausedMs:number; fileBytes:number; lateFrames:number; repeatedSourceSlots:number; transitionBusy?:boolean; transitionsCompleted?:number; segmentIndex?:number; segmentCount?:number; completedSegments?:number }
+type ProgramStats = { phase:'starting'|'recording'|'paused'|'finalizing'; recordedFrames:number; fps:number; elapsedMs:number; pausedMs:number; fileBytes:number; lateFrames:number; repeatedSourceSlots:number; transitionBusy?:boolean; transitionsCompleted?:number; audioPeak?:number; audioMissingSourceFrames?:number; segmentIndex?:number; segmentCount?:number; completedSegments?:number }
 type CapturedFile = {
   id: string
   path: string
@@ -516,6 +516,7 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
                 <b>{programStats.phase} · {programStats.fps > 0 ? (programStats.recordedFrames/programStats.fps).toFixed(1) : '0.0'}s media</b>
                 {(programStats.segmentCount??1)>1 && <div>Segment {programStats.segmentIndex} / {programStats.segmentCount} · {programStats.completedSegments} previously finalized</div>}
                 {typeof programStats.transitionsCompleted==='number' && <div>{programStats.transitionBusy?'Native Take pending / encoding':'Native Takes completed: '+programStats.transitionsCompleted}</div>}
+                {audioRows.length>0&&typeof programStats.audioPeak==='number'&&<><div className="meter-caption"><span>Recorded mix peak</span><b>{Math.round(programStats.audioPeak*100)}%</b></div><div className="production-meter" role="meter" aria-label="Recording mix peak" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(programStats.audioPeak*100)}><span style={{width:Math.min(100,programStats.audioPeak*100)+'%'}}/></div>{!mac&&<div>{programStats.audioMissingSourceFrames??0} source frames padded with silence</div>}</>}
                 <div>{programStats.recordedFrames} submitted frames · {(programStats.elapsedMs/1000).toFixed(1)}s wall time</div>
                 <div>{(programStats.fileBytes/1048576).toFixed(2)} MiB written · {programStats.recordedFrames > 0 ? (programStats.fileBytes*8*programStats.fps/programStats.recordedFrames/1000).toFixed(0) : '—'} kbps file average (buffered)</div>
                 <div>{programStats.lateFrames} late slots · {programStats.repeatedSourceSlots} repeated source slots</div>
