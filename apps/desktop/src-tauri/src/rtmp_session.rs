@@ -236,6 +236,36 @@ mod tests{
         assert!(s.stats().restart_required);
         assert!(s.submit(crate::stream_mux::aac_sequence()).is_err());
     }
+    #[test]fn worker_delivers_and_stops_without_producer_socket_io(){
+        use crate::{live_session::{Session,Phase},live_publish_worker::Worker};
+        use std::time::{Instant,Duration};
+        let p=Publisher::establish(fixture(true),"live","rtmps://example.invalid/live","fixture-key",7,&[9;1528]).unwrap();
+        let mut worker=Worker::start(Session::new(p).unwrap()).unwrap();
+        worker.submit(crate::stream_mux::avc_sequence(&[0x67,0x64,0,0x28],&[0x68,0xee]).unwrap()).unwrap();
+        worker.submit(crate::stream_mux::avc_access_unit(&[&[0x65,1]],0,0,true).unwrap()).unwrap();
+        let deadline=Instant::now()+Duration::from_secs(2);
+        while worker.stats().unwrap().session.sent_packets<2{
+            assert!(Instant::now()<deadline);std::thread::sleep(Duration::from_millis(5));
+        }
+        worker.request_stop();
+        while !worker.reap().unwrap(){assert!(Instant::now()<deadline);std::thread::sleep(Duration::from_millis(5));}
+        assert_eq!(worker.stats().unwrap().session.phase,Phase::Stopped);
+        assert!(worker.submit(crate::stream_mux::aac_sequence()).is_err());
+    }
+    #[test]fn worker_server_stop_and_invalid_mailbox_fail_closed(){
+        use crate::{live_session::{Session,Phase},live_publish_worker::Worker};
+        use std::time::{Instant,Duration};
+        for inbound in [true,false]{
+            let p=Publisher::establish(fixture(true),"live","rtmps://example.invalid/live","fixture-key",7,&[9;1528]).unwrap();
+            let mut worker=Worker::start(Session::new(p).unwrap()).unwrap();
+            if inbound{worker.signal_inbound().unwrap();}
+            else{let mut packet=crate::stream_mux::aac_sequence();packet.payload.clear();assert!(worker.submit(packet).is_err());}
+            let deadline=Instant::now()+Duration::from_secs(2);
+            while !worker.reap().unwrap(){assert!(Instant::now()<deadline);std::thread::sleep(Duration::from_millis(5));}
+            let s=worker.stats().unwrap();
+            assert_eq!(s.session.phase,Phase::Failed);assert_eq!(s.pending_bytes,0);assert!(s.session.restart_required);
+        }
+    }
     #[test]fn rejects_publish_before_media(){
         let result=Publisher::establish(fixture(false),"live","rtmps://example.invalid/live","fixture-key",7,&[9;1528]);
         let Err(error)=result else{panic!("Rejected publish was accepted")};
