@@ -321,6 +321,32 @@ mod tests{
         let stop=reply("onStatus",0.,status("NetStream.Publish.Stop"),5);
         assert!(p.ingest_inbound(&stop).is_err());assert!(!p.authorized());
     }
+    #[test]fn worker_automatically_polls_and_drains_admitted_media(){
+        use crate::{live_session::{Session,Phase},live_publish_worker::Worker};
+        use std::{sync::{Arc,atomic::{AtomicUsize,Ordering}},time::{Duration,Instant}};
+        let polls=Arc::new(AtomicUsize::new(0));let observed=Arc::clone(&polls);
+        let p=Publisher::establish(fixture(true),"live","rtmps://example.invalid/live","fixture-key",7,&[9;1528]).unwrap();
+        let mut worker=Worker::start_with_poll(Session::new(p).unwrap(),move |_|{
+            observed.fetch_add(1,Ordering::Relaxed);Ok(())
+        }).unwrap();
+        worker.submit_batch(vec![crate::stream_mux::avc_sequence(&[0x67,0x64,0,0x28],&[0x68,0xee]).unwrap(),crate::stream_mux::avc_access_unit(&[&[0x65,1]],0,0,true).unwrap(),crate::stream_mux::avc_access_unit(&[&[0x41,2]],100,0,false).unwrap()]).unwrap();
+        worker.request_drain();
+        assert!(worker.submit(crate::stream_mux::aac_sequence()).is_err());
+        let deadline=Instant::now()+Duration::from_secs(3);
+        while !worker.reap().unwrap(){assert!(Instant::now()<deadline);std::thread::sleep(Duration::from_millis(5));}
+        let stats=worker.stats().unwrap();
+        assert_eq!(stats.session.phase,Phase::Stopped);assert_eq!(stats.session.sent_packets,3);
+        assert_eq!(stats.pending_bytes,0);assert!(polls.load(Ordering::Relaxed)>0);
+    }
+    #[test]fn automatic_poll_failure_terminates_worker(){
+        use crate::{live_session::{Session,Phase},live_publish_worker::Worker};
+        use std::time::{Instant,Duration};
+        let p=Publisher::establish(fixture(true),"live","rtmps://example.invalid/live","fixture-key",7,&[9;1528]).unwrap();
+        let mut w=Worker::start_with_poll(Session::new(p).unwrap(),|_|Err("fixture disconnect".into())).unwrap();
+        let deadline=Instant::now()+Duration::from_secs(2);
+        while !w.reap().unwrap(){assert!(Instant::now()<deadline);std::thread::sleep(Duration::from_millis(5));}
+        assert_eq!(w.stats().unwrap().session.phase,Phase::Failed);
+    }
     #[test]fn rejects_publish_before_media(){
         let result=Publisher::establish(fixture(false),"live","rtmps://example.invalid/live","fixture-key",7,&[9;1528]);
         let Err(error)=result else{panic!("Rejected publish was accepted")};
