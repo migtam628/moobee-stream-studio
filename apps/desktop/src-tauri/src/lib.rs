@@ -7,6 +7,10 @@ mod mp4_validation;
 mod scene_compositor;
 mod program_test_avi;
 mod program_continuous_avi;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+mod program_mp4_storage;
+#[cfg(target_os = "windows")]
+mod windows_mp4_sink;
 #[cfg(target_os = "macos")]
 mod program_mp4_sink;
 #[cfg(target_os = "macos")]
