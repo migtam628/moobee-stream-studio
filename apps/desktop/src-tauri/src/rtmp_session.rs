@@ -50,6 +50,7 @@ impl<T:Read+Write> Publisher<T>{
         }
         Err("RTMP negotiation exceeded chunk limit".into())
     }
+    pub(crate) fn authorized(&self)->bool{!self.failed&&matches!(self.state.phase(),Phase::Live(_))}
     pub(crate) fn send_media(&mut self,packet:&Packet)->Result<()>{
         let Phase::Live(id)=self.state.phase() else{return Err("RTMP publish is not authorized".into())};
         self.send_raw(&rtmp::media(packet,id,OUT_CHUNK)?)
