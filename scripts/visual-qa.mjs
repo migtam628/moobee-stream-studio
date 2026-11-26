@@ -173,6 +173,7 @@ try {
       if (cmd === 'macos_mp4_availability') return {supported:true,requiredMacos:'14.0',microphoneSupported:true};
       if (cmd === 'capture_scene_snapshot') { window.__snapshotCount++; return image; }
       if (cmd === 'list_test_clips') return window.__programRequests.length ? [clip] : [];
+      if (cmd === 'capture_program_live_packet_test') {window.__flvRequest=args;return {...clip,format:'flv',path:'/test/clip.flv',webcamIncluded:false};}
       if (cmd === 'capture_continuous_program_mp4') {
         window.__captureOrder.push('record'); window.__programRequests.push(args);
         if (args.seconds === 120) return {...clip, durationSeconds:60, requestedMaxSeconds:60, segmentedSession:{requestedSeconds:120,completedSeconds:60,totalBytes:clip.bytes,stoppedEarly:true,warning:'Segment 2 failed: simulated device disconnect. Previously finalized clips were retained.',segments:[{id:clip.id,path:clip.path,bytes:clip.bytes,durationSeconds:60,frameCount:1800}]}};
@@ -366,6 +367,14 @@ try {
   if(take.kind!=='fade'||take.durationMs!==1000||take.displayIds.join()!=='1'||take.layout!=='pip')throw new Error('Native Take did not route correct target');
   await macPage.getByRole('button',{name:'Stop and save Program MP4',exact:true}).click();
   await macPage.getByRole('button',{name:'Saved MP4 · View result',exact:true}).waitFor();
+  await macPage.getByLabel('Composed Program video test duration',{exact:true}).selectOption('4');
+  await macPage.getByRole('button',{name:'Capture diagnostics',exact:true}).click();
+  await macPage.getByRole('button',{name:'Offline streaming packet FLV test',exact:true}).click();
+  await macPage.waitForFunction(()=>!!window.__flvRequest);
+  const flv=await macPage.evaluate(()=>window.__flvRequest);
+  if(flv.seconds!==4||flv.displayIds.join()!=='1'||flv.sessionId!==undefined||!Array.isArray(flv.audioInputs))throw new Error('Offline FLV capture routing failed');
+  await macPage.getByRole('button',{name:'Close capture diagnostics',exact:true}).click();
+  await macPage.getByRole('button',{name:'Saved FLV · View result',exact:true}).waitFor();
   await macPage.close();
   const winPage = await browser.newPage({viewport:{width:1440,height:900},userAgent:'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36'});
   winPage.on('pageerror',error=>errors.push(error.message));
