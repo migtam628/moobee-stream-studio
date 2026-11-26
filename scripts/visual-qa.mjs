@@ -336,6 +336,16 @@ try {
   await macPage.getByText('Segmented session: 1 saved clip(s)',{exact:true}).waitFor();
   await macPage.getByRole('button',{name:'Recover finalized Program recordings',exact:true}).click();
   await macPage.getByText('Recovered 1 finalized recording(s); 0 already present; 0 could not be recovered.',{exact:true}).waitFor();
+  await macPage.getByRole('button',{name:'Close capture diagnostics',exact:true}).click();
+  await macPage.locator('.program-monitor img[alt="MooBee scene: Gameplay"]').waitFor();
+  await macPage.getByRole('button',{name:'Studio Mode',exact:true}).click();
+  await macPage.getByLabel('Monitor transition',{exact:true}).selectOption('fade');
+  await macPage.getByLabel('Monitor transition duration',{exact:true}).selectOption('1000');
+  await macPage.locator('.scene-row').filter({hasText:'Preview'}).click();
+  await macPage.getByRole('button',{name:'Take',exact:true}).click();
+  await macPage.locator('.program-monitor .monitor-transition-outgoing').waitFor({state:'attached'});
+  await macPage.locator('.program-monitor img[alt="MooBee scene: Preview"]').waitFor();
+  await macPage.locator('.program-monitor .monitor-transition-outgoing').waitFor({state:'detached'});
   await macPage.close();
   const mobile = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
   await mobile.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'domcontentloaded' });
