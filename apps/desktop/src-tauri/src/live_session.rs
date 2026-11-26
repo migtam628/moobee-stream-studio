@@ -61,4 +61,14 @@ impl<T:Read+Write> Session<T>{
         self.phase=Phase::Stopped;
     }
 }
+#[cfg(any(target_os="macos",target_os="windows"))]
+impl Session<native_tls::TlsStream<crate::rtmp_session::tls::DeadlineSocket>>{
+    pub(crate) fn poll_tls_inbound(&mut self)->Result<(),String>{
+        self.require_active()?;
+        if self.publisher.as_mut().unwrap().poll_tls_inbound().is_err(){
+            self.fail();return Err("RTMPS inbound service failed; new session required".into())
+        }
+        Ok(())
+    }
+}
 impl<T:Read+Write> Drop for Session<T>{fn drop(&mut self){self.stop()}}

@@ -15,6 +15,32 @@ pub(crate) struct Reader{size:usize,headers:HashMap<u32,Header>,pending:HashMap<
 impl Default for Reader{fn default()->Self{Self{size:128,headers:HashMap::new(),pending:HashMap::new(),bytes:0}}}
 impl Reader{
     pub(crate) fn bytes(&self)->u64{self.bytes}
+    /// Inspect the bounded wire header without consuming bytes or changing
+    /// chunk history. A partial TCP/TLS read must never mutate the parser.
+    pub(crate) fn complete_chunk_len(&self,buf:&[u8])->Result<Option<usize>>{
+        let Some(&first)=buf.first()else{return Ok(None)};
+        let fmt=first>>6;
+        let (csid,basic)=match first&63{
+            0=>{let Some(&id)=buf.get(1)else{return Ok(None)};(64+u32::from(id),2usize)},
+            1=>{let Some(id)=buf.get(1..3)else{return Ok(None)};(64+u32::from(u16::from_le_bytes(id.try_into().unwrap())),3)},
+            id=>(u32::from(id),1),
+        };
+        let continuing=self.pending.contains_key(&csid);
+        if continuing&&fmt!=3{return Err("RTMP message interrupted without abort".into())}
+        let old=self.headers.get(&csid);
+        if fmt!=0&&old.is_none(){return Err("RTMP compressed header without history".into())}
+        let header_len=match fmt{0=>11,1=>7,2=>3,_=>0};
+        let Some(header)=buf.get(basic..basic+header_len)else{return Ok(None)};
+        let extended=if fmt==3{old.unwrap().extended}else{header[..3]==[255,255,255]};
+        let offset=basic+header_len+if extended{4}else{0};
+        let len=if fmt<=1{u32::from_be_bytes([0,header[3],header[4],header[5]]) as usize}else{old.unwrap().len};
+        if len>MAX_MESSAGE{return Err("RTMP inbound message exceeds limit".into())}
+        let consumed=if continuing{self.pending.get(&csid).unwrap().data.len()}else{0};
+        let remaining=len.checked_sub(consumed).ok_or("Invalid RTMP continuation")?;
+        let total=offset+remaining.min(self.size);
+        Ok((buf.len()>=total).then_some(total))
+    }
+
     fn read<const N:usize>(&mut self,r:&mut impl Read)->Result<[u8;N]>{
         let mut b=[0;N];r.read_exact(&mut b).map_err(|_|"RTMP input ended or timed out")?;self.bytes=self.bytes.saturating_add(N as u64);Ok(b)
     }
@@ -233,5 +259,29 @@ mod tests{
         assert_eq!(n.receive(&Message{kind:4,stream:0,timestamp:0,body:vec![0,6,1,2,3,4]}).unwrap(),Some(Action::Pong([1,2,3,4])));
         let e=n.receive(&cmd("_error",1.,status("private-fixture"),0)).unwrap_err();
         assert!(!e.contains("private-fixture"));assert_eq!(n.phase(),Phase::Failed);
+    }
+}
+
+#[cfg(test)]
+mod partial_input_tests{
+    use super::*;
+    use crate::stream_mux::rtmp;
+    #[test]fn every_fragment_is_safe_and_parser_state_changes_only_on_complete_chunk(){
+        let wire=rtmp::chunks(3,7,20,0x1000000,&vec![42;300],128).unwrap();
+        let mut r=Reader::default();let mut offset=0;let mut message=None;
+        while offset<wire.len(){
+            let n=r.complete_chunk_len(&wire[offset..]).unwrap().unwrap();
+            for i in 0..n{assert_eq!(r.complete_chunk_len(&wire[offset..offset+i]).unwrap(),None);}
+            let before=r.bytes();
+            let mut input=&wire[offset..offset+n];
+            message=r.next_chunk(&mut input).unwrap().or(message);
+            assert!(input.is_empty());assert_eq!(r.bytes()-before,n as u64);
+            offset+=n;
+        }
+        let m=message.unwrap();assert_eq!(m.timestamp,0x1000000);assert_eq!(m.stream,7);assert_eq!(m.body,vec![42;300]);
+    }
+    #[test]fn compressed_header_without_history_fails(){
+        let r=Reader::default();assert!(r.complete_chunk_len(&[0xc3]).is_err());
+        assert_eq!(r.complete_chunk_len(&[0]).unwrap(),None);
     }
 }
