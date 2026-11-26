@@ -4,6 +4,7 @@ fn main() {
     println!("cargo:rerun-if-changed=swift/MooBeeScreenRecording.swift");
     println!("cargo:rerun-if-changed=swift/MooBeeSonomaRecording.swift");
     println!("cargo:rerun-if-changed=swift/MooBeeProgramVideoWriter.swift");
+    println!("cargo:rerun-if-changed=swift/MooBeeAVCEncoder.swift");
     println!("cargo:rerun-if-changed=swift/MooBeeProgramCamera.swift");
     println!("cargo:rerun-if-changed=swift/MooBeeProgramMicrophone.swift");
 
@@ -37,6 +38,7 @@ fn main() {
             .arg("swift/MooBeeScreenRecording.swift")
             .arg("swift/MooBeeSonomaRecording.swift")
             .arg("swift/MooBeeProgramVideoWriter.swift")
+            .arg("swift/MooBeeAVCEncoder.swift")
             .arg("swift/MooBeeProgramCamera.swift")
             .arg("swift/MooBeeProgramMicrophone.swift")
             .status()
@@ -55,6 +57,7 @@ fn main() {
         println!("cargo:rustc-link-lib=framework=AudioToolbox");
         println!("cargo:rustc-link-lib=framework=CoreMedia");
         println!("cargo:rustc-link-lib=framework=CoreVideo");
+        println!("cargo:rustc-link-lib=framework=VideoToolbox");
         println!("cargo:rustc-link-lib=framework=ScreenCaptureKit");
     }
     println!("cargo:rerun-if-changed=windows/MooBeeProgramWriter.cpp");
