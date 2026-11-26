@@ -87,6 +87,11 @@ pub(crate) mod tls {
             return Err("Use a secure RTMPS server URL without credentials, query or fragment".into())
         }
         let host=match u.host(){Some(url::Host::Domain(v)) if !v.is_empty()=>v.to_owned(),_=>return Err("RTMPS requires a certificate-verifiable DNS hostname".into())};
+        // RTMPS is a non-special URL scheme: URL may expose IP-looking
+        // literals as opaque Domain values. Validate DNS labels ourselves.
+        if host.len()>253||host.parse::<std::net::IpAddr>().is_ok()||host.split('.').any(|label|label.is_empty()||label.len()>63||label.starts_with('-')||label.ends_with('-')||!label.bytes().all(|c|c.is_ascii_alphanumeric()||c==b'-'))||!host.split('.').last().is_some_and(|label|label.bytes().any(|c|c.is_ascii_alphabetic())){
+            return Err("RTMPS requires a certificate-verifiable DNS hostname".into())
+        }
         let app=u.path().trim_matches('/');
         if app.is_empty()||app.len()>512||app.split('/').any(|p|p.is_empty()||!p.bytes().all(|c|c.is_ascii_alphanumeric()||b"-_.".contains(&c))){
             return Err("Invalid RTMPS application path".into())
@@ -142,7 +147,7 @@ pub(crate) mod tls {
         #[test]fn validates_secure_endpoint_without_leaking_credentials(){
             let a=endpoint("rtmps://ingest.example.invalid:443/live").unwrap();
             assert_eq!((&*a.host,a.port,&*a.app),("ingest.example.invalid",443,"live"));
-            for value in ["rtmp://example.invalid/live","rtmps://user:secret@example.invalid/live","rtmps://example.invalid/live?key=secret","rtmps://example.invalid/live#secret","rtmps://127.0.0.1/live","rtmps://example.invalid/","rtmps://example.invalid/live/%20"]{
+            for value in ["rtmp://example.invalid/live","rtmps://user:secret@example.invalid/live","rtmps://example.invalid/live?key=secret","rtmps://example.invalid/live#secret","rtmps://127.0.0.1/live","rtmps://2130706433/live","rtmps://bad%20host/live","rtmps://example.invalid/","rtmps://example.invalid/live/%20"]{
                 let Err(e)=endpoint(value) else{panic!("Invalid endpoint accepted")};assert!(!e.contains("secret"));
             }
         }
