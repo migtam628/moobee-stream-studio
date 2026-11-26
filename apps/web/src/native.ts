@@ -200,7 +200,7 @@ async function perform(body: Body) {
   } else if (action === 'addSource') {
     if (!active || !validName(body.name) || typeof body.deviceId !== 'string' ||
         !((body.kind === 'display' && displays.some(d => String(d.id) === body.deviceId)) ||
-          (body.kind === 'video' && macHost() && validVideoInputId(body.deviceId) && videoInputs.some(d => d.id === body.deviceId)))) throw new Error('Select a valid available capture source')
+          (body.kind === 'video' && (macHost() || windowsHost()) && validVideoInputId(body.deviceId) && videoInputs.some(d => d.id === body.deviceId)))) throw new Error('Select a valid available capture source')
     if (body.kind === 'video' && active.sources.some(source => source.kind === 'video' && source.deviceId === body.deviceId)) throw new Error('This video input is already in the scene')
     if (active.sources.length >= 30) throw new Error('Source limit reached')
     const id = Math.max(0, ...draft.scenes.flatMap(s => s.sources.map(item => item.id))) + 1
@@ -311,7 +311,7 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
     const videoDeviceId = body.videoDeviceId
     const mp4 = path.endsWith('-mp4')
     const hasVideo = videoDeviceId !== undefined && videoDeviceId !== null
-    if (hasVideo && (!mp4 || !macHost() || !validVideoInputId(videoDeviceId) || body.webcam)) throw new Error('Select one Mac video input with webcam inset off')
+    if (hasVideo && (!mp4 || (!macHost() && !windowsHost()) || !validVideoInputId(videoDeviceId) || body.webcam)) throw new Error('Select one native video input with webcam inset off')
     if (!Array.isArray(ids) || (hasVideo ? ids.length !== 0 : ids.length < 1) || ids.length > 4 ||
         !ids.every(id => typeof id === 'number' && Number.isSafeInteger(id) && id >= 0 && id <= 24) ||
         new Set(ids).size !== ids.length ||
@@ -321,7 +321,7 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
       throw new Error('Choose 1–4 unique Program displays, a supported duration (MP4 up to 60 seconds or whole-minute segments up to 5 minutes, AVI up to 8) and capture profile')
     }
     if (mp4 && !macHost() && !windowsHost()) throw new Error('Native MP4 requires Mac or Windows')
-    if (mp4 && windowsHost() && (body.seconds > 60 || body.webcam || hasVideo)) throw new Error('Windows MP4 supports display capture up to 60 seconds only')
+    if (mp4 && windowsHost() && (body.seconds > 60 || body.webcam)) throw new Error('Windows MP4 supports one video device or displays up to 60 seconds')
     if (body.bitrateKbps !== undefined && (!mp4 || typeof body.bitrateKbps !== 'number' || ![1500,3000,6000].includes(body.bitrateKbps))) throw new Error('Invalid MP4 bitrate preset')
     if (body.profile === '1080p30' && !mp4) throw new Error('1080p30 requires native MP4')
     if (body.sessionId !== undefined && (!mp4 || typeof body.sessionId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(body.sessionId))) throw new Error('Invalid Program session')
@@ -406,7 +406,7 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
   if (path === '/capture/stop-audio-levels') { await releaseAudioMeter(); return { stopped: true } }
   if (path === '/capture/stop-video-previews') { await releaseVideoPreviews(); return { stopped: true } }
   if (path === '/capture/video-inputs') {
-    if (!macHost()) return { devices: [], supported: false }
+    if (!macHost() && !windowsHost()) return { devices: [], supported: false }
     videoInputs = await invoke<VideoInput[]>('list_video_inputs')
     if (testedVideo && !videoInputs.some(d => d.id === testedVideo?.id)) testedVideo = null
     status = snapshot()
@@ -414,7 +414,7 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
     return { devices: videoInputs, supported: true }
   }
   if (path === '/capture/test-video-input') {
-    if (!macHost() || !validVideoInputId(body.deviceId)) throw new Error('Select an available Mac video input')
+    if ((!macHost() && !windowsHost()) || !validVideoInputId(body.deviceId)) throw new Error('Select an available native video input')
     testedVideo = null
     const image = await captureWithPreviewReleased<string>('test_video_input', { deviceId: body.deviceId })
     testedVideo = { id: body.deviceId, image }
@@ -435,8 +435,8 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
     if (video) {
       if (params.get('mode') === 'live') {
         const ids = enabled.map(source => source.deviceId)
-        if (!macHost() || enabled.length > 2 || enabled.some(source => source.kind !== 'video') || !ids.every(validVideoInputId) || new Set(ids).size !== ids.length) {
-          throw new Error('Live video preview supports one or two distinct Mac video inputs; hide other sources.')
+        if ((!macHost() && !windowsHost()) || enabled.length > 2 || enabled.some(source => source.kind !== 'video') || !ids.every(validVideoInputId) || new Set(ids).size !== ids.length) {
+          throw new Error('Live video preview supports one or two distinct native video inputs; hide other sources.')
         }
         const key = params.get('key')
         return await movingPreview(ids,validateSceneLayout(scene.layout),key && key.length <= 2048 ? key : null,transforms)
