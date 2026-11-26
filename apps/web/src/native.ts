@@ -396,7 +396,7 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
     return { devices: await invoke('list_audio_inputs'), supported: true }
   }
   if (path === '/capture/audio-levels') {
-    if (!macHost() || captureActive || meterStopping) return { levels: null }
+    if ((!macHost() && !windowsHost()) || captureActive || meterStopping) return { levels: null }
     if (pendingMeter) return { levels: null }
     meterUsed = true
     const task = invoke('program_audio_levels',{inputs:body.inputs})
