@@ -164,14 +164,18 @@ async fn list_audio_inputs() -> Result<serde_json::Value,String> {
 async fn program_audio_levels(inputs: Vec<program_audio::AudioInput>) -> Result<Option<program_audio::AudioLevels>,String> {
     #[cfg(target_os="macos")]
     { tauri::async_runtime::spawn_blocking(move||program_audio::levels(inputs)).await.map_err(|e|e.to_string())? }
-    #[cfg(not(target_os="macos"))]
-    { let _=inputs; Err("Native audio meters require macOS".into()) }
+    #[cfg(target_os="windows")]
+    { tauri::async_runtime::spawn_blocking(move||windows_audio::levels(inputs)).await.map_err(|e|e.to_string())? }
+    #[cfg(not(any(target_os="macos",target_os="windows")))]
+    { let _=inputs; Err("Native audio meters require macOS or Windows".into()) }
 }
 #[tauri::command]
 async fn stop_program_audio_levels() -> Result<(),String> {
     #[cfg(target_os="macos")]
     { tauri::async_runtime::spawn_blocking(program_audio::stop).await.map_err(|e|e.to_string())? }
-    #[cfg(not(target_os="macos"))]
+    #[cfg(target_os="windows")]
+    { tauri::async_runtime::spawn_blocking(windows_audio::stop).await.map_err(|e|e.to_string())? }
+    #[cfg(not(any(target_os="macos",target_os="windows")))]
     { Ok(()) }
 }
 #[tauri::command]
