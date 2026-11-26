@@ -176,13 +176,20 @@ try {
       if (cmd === 'capture_continuous_program_mp4') {
         window.__captureOrder.push('record'); window.__programRequests.push(args);
         if (args.seconds === 120) return {...clip, durationSeconds:60, requestedMaxSeconds:60, segmentedSession:{requestedSeconds:120,completedSeconds:60,totalBytes:clip.bytes,stoppedEarly:true,warning:'Segment 2 failed: simulated device disconnect. Previously finalized clips were retained.',segments:[{id:clip.id,path:clip.path,bytes:clip.bytes,durationSeconds:60,frameCount:1800}]}};
-        if (args.seconds === 60) return await new Promise(resolve => { window.__pendingProgram = {id:args.sessionId, resolve, paused:false}; });
+        if (args.seconds === 60) return await new Promise(resolve => { window.__pendingProgram = {id:args.sessionId, resolve, paused:false,takes:0}; });
         return clip;
       }
       if (cmd === 'continuous_program_stats') {
         const pending = window.__pendingProgram;
         if (!pending || pending.id !== args.sessionId) return null;
-        return {phase:pending.paused?'paused':'recording',recordedFrames:60,fps:30,elapsedMs:2500,pausedMs:pending.paused?500:0,fileBytes:262144,lateFrames:1,repeatedSourceSlots:2};
+        return {phase:pending.paused?'paused':'recording',recordedFrames:60,fps:30,elapsedMs:2500,pausedMs:pending.paused?500:0,fileBytes:262144,lateFrames:1,repeatedSourceSlots:2,transitionBusy:false,transitionsCompleted:pending.takes};
+      }
+      if (cmd === 'queue_program_scene_take') {
+        const pending=window.__pendingProgram;
+        if (!pending || pending.id!==args.sessionId || pending.paused) throw new Error('No matching recording session');
+        window.__lastTake=args;
+        pending.takes++;
+        return null;
       }
       if (cmd === 'pause_continuous_program_mp4') {
         if (window.__pendingProgram?.id !== args.sessionId) return false;
@@ -194,7 +201,7 @@ try {
         if (window.__pendingProgram?.id !== args.sessionId) return false;
         const pending = window.__pendingProgram;
         window.__pendingProgram = null;
-        pending.resolve({...clip, requestedMaxSeconds:60, targetBitrateKbps:3000, stoppedEarly:true});
+        pending.resolve({...clip, requestedMaxSeconds:60, targetBitrateKbps:3000, stoppedEarly:true, transitionsCompleted:pending.takes});
         return true;
       }
       throw new Error('Unexpected simulated command: '+cmd);
@@ -346,6 +353,19 @@ try {
   await macPage.locator('.program-monitor .monitor-transition-outgoing').waitFor({state:'attached'});
   await macPage.locator('.program-monitor img[alt="MooBee scene: Preview"]').waitFor();
   await macPage.locator('.program-monitor .monitor-transition-outgoing').waitFor({state:'detached'});
+  await macPage.getByRole('button',{name:'Duplicate Preview',exact:true}).click();
+  await macPage.locator('.scene-row').filter({hasText:'Preview Copy'}).click();
+  await macPage.getByLabel('Scene layout',{exact:true}).selectOption('pip');
+  await macPage.getByLabel('Composed Program video test duration',{exact:true}).selectOption('60');
+  await macPage.getByRole('button',{name:'Record Program test',exact:true}).click();
+  await macPage.waitForFunction(()=>!!window.__pendingProgram);
+  await macPage.getByText('Native Takes completed: 0',{exact:true}).waitFor();
+  await macPage.getByRole('button',{name:'Take',exact:true}).click();
+  await macPage.getByText('Native Takes completed: 1',{exact:true}).waitFor();
+  const take=await macPage.evaluate(()=>window.__lastTake);
+  if(take.kind!=='fade'||take.durationMs!==1000||take.displayIds.join()!=='1'||take.layout!=='pip')throw new Error('Native Take did not route correct target');
+  await macPage.getByRole('button',{name:'Stop and save Program MP4',exact:true}).click();
+  await macPage.getByRole('button',{name:'Saved MP4 · View result',exact:true}).waitFor();
   await macPage.close();
   const mobile = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
   await mobile.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'domcontentloaded' });

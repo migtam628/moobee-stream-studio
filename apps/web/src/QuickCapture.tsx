@@ -11,7 +11,7 @@ type Display = { id: number; name: string; width: number; height: number }
 type Availability = { supported: boolean; requiredMacos: string; osVersion?: string | null; reason?: string; microphoneSupported?: boolean; engine?: string }
 type OverlayPlacement = { xPercent: number; yPercent: number; widthPercent: number }
 type GraphicOverlay = { width: number; height: number; rgbaBase64: string }
-type ProgramStats = { phase:'starting'|'recording'|'paused'|'finalizing'; recordedFrames:number; fps:number; elapsedMs:number; pausedMs:number; fileBytes:number; lateFrames:number; repeatedSourceSlots:number; segmentIndex?:number; segmentCount?:number; completedSegments?:number }
+type ProgramStats = { phase:'starting'|'recording'|'paused'|'finalizing'; recordedFrames:number; fps:number; elapsedMs:number; pausedMs:number; fileBytes:number; lateFrames:number; repeatedSourceSlots:number; transitionBusy?:boolean; transitionsCompleted?:number; segmentIndex?:number; segmentCount?:number; completedSegments?:number }
 type CapturedFile = {
   id: string
   path: string
@@ -22,6 +22,7 @@ type CapturedFile = {
   stoppedEarly?: boolean
   pausedMs?: number
   targetBitrateKbps?: number
+  transitionsCompleted?: number
   segmentedSession?: {requestedSeconds:number; completedSeconds:number; totalBytes:number; stoppedEarly:boolean; warning?:string|null; segments:{id:string;path:string;bytes:number;durationSeconds:number;frameCount:number}[]}
   audioTrackVerified?: boolean
   displayCount?: number
@@ -513,6 +514,7 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
               {programStats ? <>
                 <b>{programStats.phase} · {programStats.fps > 0 ? (programStats.recordedFrames/programStats.fps).toFixed(1) : '0.0'}s media</b>
                 {(programStats.segmentCount??1)>1 && <div>Segment {programStats.segmentIndex} / {programStats.segmentCount} · {programStats.completedSegments} previously finalized</div>}
+                {typeof programStats.transitionsCompleted==='number' && <div>{programStats.transitionBusy?'Native Take pending / encoding':'Native Takes completed: '+programStats.transitionsCompleted}</div>}
                 <div>{programStats.recordedFrames} submitted frames · {(programStats.elapsedMs/1000).toFixed(1)}s wall time</div>
                 <div>{(programStats.fileBytes/1048576).toFixed(2)} MiB written · {programStats.recordedFrames > 0 ? (programStats.fileBytes*8*programStats.fps/programStats.recordedFrames/1000).toFixed(0) : '—'} kbps file average (buffered)</div>
                 <div>{programStats.lateFrames} late slots · {programStats.repeatedSourceSlots} repeated source slots</div>
@@ -630,6 +632,7 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
           {saved.elapsedMs !== undefined ? ` ${(saved.elapsedMs / 1000).toFixed(2)}s wall-clock capture` : ' elapsed time unknown'}.
           The nominal output clock can differ from wall-clock capture when frames arrive late.
         </p>}
+        {typeof saved.transitionsCompleted==='number' && <p className="help-text">Native scene transitions completed: {saved.transitionsCompleted}. Independent playback verification pending.</p>}
         {typeof saved.targetBitrateKbps === 'number' && <p className="help-text">Requested video bitrate: {saved.targetBitrateKbps} kbps (encoder target, not guaranteed actual bitrate).</p>}
         {typeof saved.pausedMs === 'number' && saved.pausedMs > 0 && <p className="help-text">{(saved.pausedMs/1000).toFixed(2)}s paused input omitted from the nominal recording timeline.</p>}
         {saved.stoppedEarly && <p className="help-text" role="status">Program recording stopped early and finalized.</p>}

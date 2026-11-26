@@ -27,6 +27,50 @@ fn segment_plan(seconds: u32) -> Result<Vec<u32>, String> {
     Ok(vec![MAX_MP4_SECONDS; (seconds / MAX_MP4_SECONDS) as usize])
 }
 
+// Only scene geometry on the already-open ordered source set may change.
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+enum TransitionKind { Cut, Fade, Slide, Wipe }
+impl TransitionKind {
+    fn parse(kind:&str,duration_ms:u32)->Result<Self,String>{
+        if !(150..=1000).contains(&duration_ms) { return Err("Transition duration must be 150–1000 ms".into()); }
+        match kind {"cut"=>Ok(Self::Cut),"fade"=>Ok(Self::Fade),"slide"=>Ok(Self::Slide),"wipe"=>Ok(Self::Wipe),_=>Err("Unsupported Program transition".into())}
+    }
+    fn frames(self,fps:u32,duration_ms:u32)->u32 {
+        if self==Self::Cut {1} else {(fps*duration_ms).div_ceil(1000).max(1)}
+    }
+}
+#[derive(Clone)]
+struct SceneGeometry {
+    layout:crate::scene_compositor::SceneLayout,
+    transforms:Option<Vec<crate::source_transform::SourceTransform>>,
+}
+struct SceneTake { target:SceneGeometry, kind:TransitionKind, duration_ms:u32 }
+
+#[cfg(any(target_os="macos",target_os="windows"))]
+fn compose_geometry(frames:&[image::RgbaImage],width:u32,height:u32,geometry:&SceneGeometry)->Result<image::RgbaImage,String>{
+    if let Some(items)=geometry.transforms.as_deref(){crate::source_transform::composite(frames,width,height,items)}
+    else{crate::scene_compositor::composite_layout(frames,width,height,geometry.layout)}
+}
+
+#[cfg(any(target_os="macos",target_os="windows"))]
+fn transition_pixels(outgoing:&image::RgbaImage,incoming:&mut image::RgbaImage,kind:TransitionKind,step:u32,total:u32){
+    if kind==TransitionKind::Cut||step>=total{return}
+    let (width,height)=incoming.dimensions();
+    let edge=width*step/total;
+    for y in 0..height { for x in 0..width {
+        match kind {
+            TransitionKind::Fade=>{
+                let a=outgoing.get_pixel(x,y).0;
+                let b=incoming.get_pixel_mut(x,y);
+                for channel in 0..4 { b.0[channel]=((u32::from(a[channel])*(total-step)+u32::from(b.0[channel])*step+total/2)/total) as u8; }
+            }
+            TransitionKind::Wipe if x>=edge=>incoming.put_pixel(x,y,*outgoing.get_pixel(x,y)),
+            TransitionKind::Slide if x<width-edge=>incoming.put_pixel(x,y,*outgoing.get_pixel(x+edge,y)),
+            _=>{}
+        }
+    }}
+}
+
 // Control and telemetry are scoped to the active Program MP4 session.
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -42,22 +86,27 @@ pub struct ProgramRecordingStats {
     segment_index: u32,
     segment_count: u32,
     completed_segments: u32,
+    transition_busy: bool,
+    transitions_completed: u32,
 }
 struct ProgramSession {
     id: String,
     stop: bool,
     pause: bool,
     stats: ProgramRecordingStats,
+    switchable_sources: Option<(Vec<usize>,Option<String>)>,
+    pending_take: Option<SceneTake>,
 }
 static PROGRAM_STOP: std::sync::Mutex<Option<ProgramSession>> = std::sync::Mutex::new(None);
 struct ProgramStopGuard;
 impl ProgramStopGuard {
     fn begin(id: String) -> Self {
         *PROGRAM_STOP.lock().unwrap_or_else(|e| e.into_inner()) = Some(ProgramSession {
-            id, stop: false, pause: false, stats: ProgramRecordingStats {
+            id, stop: false, pause: false, switchable_sources:None, pending_take:None, stats: ProgramRecordingStats {
                 phase: "starting", recorded_frames: 0, fps: 0, elapsed_ms: 0,
                 paused_ms: 0, file_bytes: 0, late_frames: 0, repeated_source_slots: 0,
                 segment_index: 1, segment_count: 1, completed_segments: 0,
+                transition_busy:false, transitions_completed:0,
             },
         });
         Self
@@ -73,7 +122,21 @@ impl ProgramStopGuard {
             stats.segment_index = s.stats.segment_index;
             stats.segment_count = s.stats.segment_count;
             stats.completed_segments = s.stats.completed_segments;
+            stats.transition_busy = s.stats.transition_busy;
+            stats.transitions_completed = s.stats.transitions_completed;
             s.stats = stats;
+        }
+    }
+    fn allow_takes(&self,ids:Vec<usize>,video:Option<String>){
+        if let Some(s)=PROGRAM_STOP.lock().unwrap_or_else(|e|e.into_inner()).as_mut(){s.switchable_sources=Some((ids,video));}
+    }
+    fn next_take(&self)->Option<SceneTake>{
+        PROGRAM_STOP.lock().unwrap_or_else(|e|e.into_inner()).as_mut().and_then(|s|s.pending_take.take())
+    }
+    fn complete_take(&self){
+        if let Some(s)=PROGRAM_STOP.lock().unwrap_or_else(|e|e.into_inner()).as_mut(){
+            s.stats.transition_busy=false;
+            s.stats.transitions_completed=s.stats.transitions_completed.saturating_add(1);
         }
     }
     fn begin_segment(&self, index: u32, count: u32) {
@@ -83,6 +146,7 @@ impl ProgramStopGuard {
                 phase: "starting", recorded_frames: 0, fps: 0, elapsed_ms: 0,
                 paused_ms: 0, file_bytes: 0, late_frames: 0, repeated_source_slots: 0,
                 segment_index: index, segment_count: count, completed_segments: index - 1,
+                transition_busy:false, transitions_completed:0,
             };
         }
     }
@@ -111,6 +175,26 @@ pub fn pause_continuous_program_mp4(session_id: String, paused: bool) -> bool {
     }
     false
 }
+#[tauri::command]
+pub fn queue_program_scene_take(session_id:String,display_ids:Vec<usize>,video_device_id:Option<String>,
+    layout:Option<String>,transforms:Option<Vec<crate::source_transform::SourceTransform>>,
+    kind:String,duration_ms:u32)->Result<(),String>{
+    let kind=TransitionKind::parse(&kind,duration_ms)?;
+    let layout=crate::scene_compositor::SceneLayout::parse(layout.as_deref())?;
+    crate::source_transform::validate_list(transforms.as_deref(),display_ids.len()+usize::from(video_device_id.is_some()))?;
+    let mut state=PROGRAM_STOP.lock().unwrap_or_else(|e|e.into_inner());
+    let s=state.as_mut().filter(|s|s.id==session_id).ok_or("No matching Program session")?;
+    if s.stop||s.pause||s.stats.phase!="recording"||s.stats.transition_busy {
+        return Err("Program recorder is not ready for another Take".into());
+    }
+    if s.switchable_sources.as_ref()!=Some(&(display_ids,video_device_id)){
+        return Err("Take requires the same ordered capture inputs and a single MP4 segment without webcam inset".into());
+    }
+    s.pending_take=Some(SceneTake{target:SceneGeometry{layout,transforms},kind,duration_ms});
+    s.stats.transition_busy=true;
+    Ok(())
+}
+
 #[tauri::command]
 pub fn continuous_program_stats(session_id: String) -> Option<ProgramRecordingStats> {
     PROGRAM_STOP.lock().unwrap_or_else(|e| e.into_inner()).as_ref()
@@ -211,6 +295,7 @@ pub struct ContinuousProgramReport {
     repeated_source_slots: Vec<u32>,
     late_output_frames: u32,
     max_source_arrival_skew_ms: u64,
+    transitions_completed: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     segmented_session: Option<SegmentedProgramReport>,
 }
@@ -448,6 +533,9 @@ fn capture_to_dir(
     let mut repeats = vec![0u32; source_count];
     let mut late_frames = 0u32;
     let mut max_skew_ms = 0u64;
+    let mut geometry=SceneGeometry{layout,transforms};
+    let mut transition:Option<(SceneGeometry,TransitionKind,u32,u32)>=None;
+    let mut transitions_completed=0u32;
     let recording = (|| -> Result<(), String> {
         while written_frames < total_frames {
             // Finish at a complete A/V tick. Limit pauses to 30 nominal seconds
@@ -528,15 +616,28 @@ fn capture_to_dir(
                 }
                 paused_ticks += 1;
             } else {
+            if let Some(take)=stop_guard.and_then(|g|g.next_take()){
+                let old=std::mem::replace(&mut geometry,take.target);
+                transition=Some((old,take.kind,take.kind.frames(profile.fps,take.duration_ms),0));
+            }
             #[cfg(target_os = "macos")]
             let mut composed = if let Some((_, frame, _)) = camera.as_ref() {
                 // Borrow all display/camera images; no full-resolution source clone.
                 crate::scene_compositor::composite_with_camera(&latest, frame, profile.width, profile.height)?
             } else {
-                if let Some(ref items)=transforms { crate::source_transform::composite(&latest,profile.width,profile.height,items)? } else { crate::scene_compositor::composite_layout(&latest, profile.width, profile.height, layout)? }
+                compose_geometry(&latest,profile.width,profile.height,&geometry)?
             };
             #[cfg(not(target_os = "macos"))]
-            let mut composed = if let Some(ref items)=transforms { crate::source_transform::composite(&latest,profile.width,profile.height,items)? } else { crate::scene_compositor::composite_layout(&latest, profile.width, profile.height, layout)? };
+            let mut composed = compose_geometry(&latest,profile.width,profile.height,&geometry)?;
+            let mut finished_take=false;
+            if let Some((old,kind,total,step))=transition.as_mut(){
+                *step+=1;
+                if *step<*total {
+                    let outgoing=compose_geometry(&latest,profile.width,profile.height,old)?;
+                    transition_pixels(&outgoing,&mut composed,*kind,*step,*total);
+                }
+                finished_take=*step>=*total;
+            }
             if let Some(ref overlay) = graphic { crate::program_overlay::apply(&mut composed, overlay); }
             writer.append(composed)?;
             #[cfg(target_os = "macos")]
@@ -558,6 +659,11 @@ fn capture_to_dir(
                 audio_clipped_samples = audio_clipped_samples.saturating_add(mixed.clipped);
             }
             written_frames += 1;
+            if finished_take {
+                transition=None;
+                transitions_completed+=1;
+                if let Some(g)=stop_guard {g.complete_take();}
+            }
             if Instant::now() > started + clock.time(wall_tick) {
                 late_frames = late_frames.saturating_add(1);
             }
@@ -574,6 +680,7 @@ fn capture_to_dir(
                     paused_ms: clock.time(paused_ticks).as_millis() as u64,
                     file_bytes, late_frames,
                     segment_index: 1, segment_count: 1, completed_segments: 0,
+                    transition_busy:false, transitions_completed:0,
                     repeated_source_slots: repeats.iter().map(|n| u64::from(*n)).sum::<u64>() + u64::from(webcam_repeated_slots),
                 });
             }
@@ -670,6 +777,7 @@ fn capture_to_dir(
         repeated_source_slots: repeats,
         late_output_frames: late_frames,
         max_source_arrival_skew_ms: max_skew_ms,
+        transitions_completed,
         segmented_session: None,
     })
 }
@@ -736,6 +844,9 @@ async fn capture_continuous_program(
         tauri::async_runtime::spawn_blocking(move || {
             let _guard = CaptureLock;
             let stop_guard = if matches!(format, ProgramFormat::Mp4) { Some(ProgramStopGuard::begin(session_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()))) } else { None };
+            if seconds<=MAX_MP4_SECONDS && !webcam {
+                if let Some(g)=stop_guard.as_ref(){g.allow_takes(display_ids.clone(),video_device_id.clone());}
+            }
             if !matches!(format, ProgramFormat::Mp4) || seconds <= MAX_MP4_SECONDS {
                 return capture_to_dir(directory, display_ids, seconds, selected_profile, format, layout, webcam, microphone, mic_gain, overlay, video_device_id, audio_inputs, transforms, stop_guard.as_ref());
             }
@@ -820,6 +931,23 @@ mod tests {
         assert!(guard.paused());
         assert!(pause_continuous_program_mp4("current".into(), false));
         assert!(!guard.paused());
+        use super::queue_program_scene_take;
+        guard.allow_takes(vec![0,1],None);
+        let take=|id:&str,ids:Vec<usize>|queue_program_scene_take(id.into(),ids,None,Some("pip".into()),None,"fade".into(),300);
+        assert!(take("old",vec![0,1]).is_err());
+        assert!(take("current",vec![1,0]).is_err());
+        assert!(take("current",vec![0,2]).is_err());
+        assert!(take("current",vec![0,1]).is_ok());
+        assert!(take("current",vec![0,1]).is_err());
+        let queued=guard.next_take().unwrap();
+        assert_eq!(queued.kind,super::TransitionKind::Fade);
+        assert_eq!(queued.target.layout,crate::scene_compositor::SceneLayout::PictureInPicture);
+        assert!(continuous_program_stats("current".into()).unwrap().transition_busy);
+        guard.complete_take();
+        let stats=continuous_program_stats("current".into()).unwrap();
+        assert!(!stats.transition_busy);
+        assert_eq!(stats.transitions_completed,1);
+        assert!(guard.next_take().is_none());
         assert!(stop_continuous_program_mp4("current".into()));
         assert!(guard.requested());
         assert!(!pause_continuous_program_mp4("current".into(), true));
@@ -834,6 +962,32 @@ mod tests {
         assert!(stop_continuous_program_mp4("current".into()));
         drop(guard);
         assert!(!stop_continuous_program_mp4("current".into()));
+    }
+    #[test]
+    fn transition_timing_is_bounded(){
+        assert_eq!(super::TransitionKind::parse("fade",300).unwrap().frames(30,300),9);
+        assert_eq!(super::TransitionKind::Cut.frames(30,300),1);
+        assert!(super::TransitionKind::parse("unknown",300).is_err());
+        assert!(super::TransitionKind::parse("wipe",2000).is_err());
+    }
+    #[cfg(any(target_os="macos",target_os="windows"))]
+    #[test]
+    fn transition_pixels_are_encoded_canvas_pixels(){
+        use image::{Rgba,RgbaImage};
+        use super::{TransitionKind,transition_pixels};
+        let old=RgbaImage::from_pixel(16,16,Rgba([200,0,0,255]));
+        let target=RgbaImage::from_pixel(16,16,Rgba([0,0,200,255]));
+        let mut next=target.clone();
+        transition_pixels(&old,&mut next,TransitionKind::Fade,1,2);
+        assert_eq!(next.get_pixel(0,0).0,[100,0,100,255]);
+        for kind in [TransitionKind::Slide,TransitionKind::Wipe]{
+            let mut next=target.clone();transition_pixels(&old,&mut next,kind,1,2);
+            assert_ne!(next.get_pixel(0,0),next.get_pixel(15,0));
+            transition_pixels(&old,&mut next,kind,2,2);
+            // At the endpoint the caller supplies a fresh incoming canvas.
+            let mut end=target.clone();transition_pixels(&old,&mut end,kind,2,2);
+            assert_eq!(end,target);
+        }
     }
     #[test]
     fn segment_plan_is_bounded_and_never_creates_a_short_tail() {
