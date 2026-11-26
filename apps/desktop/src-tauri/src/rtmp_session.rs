@@ -6,7 +6,9 @@ type Result<T>=std::result::Result<T,String>;
 const MAX_NEGOTIATION_CHUNKS:usize=8192;
 const MAX_NEGOTIATION_BYTES:u64=8*1024*1024;
 const OUT_CHUNK:usize=128;
-pub(crate) struct Publisher<T>{io:T,reader:Reader,state:Negotiation,failed:bool}
+const MAX_INBOUND_BUFFER:usize=2*65_536+64;
+const INBOUND_BATCH:usize=16;
+pub(crate) struct Publisher<T>{io:T,reader:Reader,state:Negotiation,failed:bool,inbound:Vec<u8>}
 impl<T:Read+Write> Publisher<T>{
     fn send_raw(&mut self,bytes:&[u8])->Result<()>{
         if self.failed{return Err("RTMP session is closed".into())}
@@ -29,7 +31,7 @@ impl<T:Read+Write> Publisher<T>{
         let connect=rtmp::connect(app,tc_url,1)?;
         let publish=rtmp::publish(stream_name)?;
         let hello=rtmp::client_hello(time,random)?;
-        let mut s=Self{io,reader:Reader::default(),state:Negotiation::default(),failed:false};
+        let mut s=Self{io,reader:Reader::default(),state:Negotiation::default(),failed:false,inbound:Vec::new()};
         s.send_raw(&hello)?;
         let mut response=[0u8;3073];
         s.io.read_exact(&mut response).map_err(|_|"RTMP handshake read failed")?;
@@ -68,11 +70,34 @@ impl<T:Read+Write> Publisher<T>{
     pub(crate) fn pump(&mut self,pacer:&mut crate::live_packet_pacer::Pacer,queue:&mut crate::live_media_queue::MediaQueue,elapsed_ms:u64)->Result<crate::live_packet_pacer::Tick>{
         pacer.tick(queue,elapsed_ms,|packet|self.send_media(packet))
     }
+    /// Feed decrypted bytes obtained by a nonblocking transport poll. No
+    /// parser state is consumed until an entire chunk is buffered.
+    pub(crate) fn ingest_inbound(&mut self,bytes:&[u8])->Result<usize>{
+        if !self.authorized(){return Err("RTMP session is closed".into())}
+        let result=(||{
+            if bytes.len()>MAX_INBOUND_BUFFER-self.inbound.len(){return Err("RTMP inbound buffer exceeds limit".into())}
+            self.inbound.extend_from_slice(bytes);
+            let mut count=0;
+            while count<INBOUND_BATCH{
+                let Some(n)=self.reader.complete_chunk_len(&self.inbound)?else{break};
+                let mut input=&self.inbound[..n];
+                let msg=self.reader.next_chunk(&mut input)?;
+                if !input.is_empty(){return Err("RTMP chunk framing mismatch".into())}
+                self.inbound.drain(..n);
+                if let Some(msg)=msg{if let Some(action)=self.state.receive(&msg)?{self.respond(action)?;}}
+                if let Some(ack)=self.state.acknowledge(self.reader.bytes()){self.respond(ack)?;}
+                count+=1;
+            }
+            Ok(count)
+        })();
+        if result.is_err(){self.failed=true;self.inbound.clear();}
+        result
+    }
     /// Read one inbound chunk while publishing. The owner must continuously
     /// service inbound traffic independently of media pacing; this synchronous
     /// method is intentionally not exposed as a UI command.
     pub(crate) fn service_inbound(&mut self)->Result<()>{
-        if self.failed{return Err("RTMP session is closed".into())}
+        if self.failed||!self.inbound.is_empty(){return Err("RTMP session cannot mix buffered and direct reads".into())}
         let result=(||{
             if let Some(msg)=self.reader.next_chunk(&mut self.io)?{
                 if let Some(action)=self.state.receive(&msg)?{self.respond(action)?;}
@@ -154,6 +179,25 @@ pub(crate) mod tls {
         let mut publisher=Publisher::establish(tls,&target.app,&target.tc_url,stream_key,now,&random)?;
         publisher.io.get_mut().deadline=None;
         Ok(publisher)
+    }
+    impl Publisher<native_tls::TlsStream<DeadlineSocket>>{
+        /// Service buffered controls and one small nonblocking TLS read.
+        /// A WouldBlock is normal; EOF and other errors terminate the epoch.
+        pub(crate) fn poll_tls_inbound(&mut self)->Result<()>{
+            if self.ingest_inbound(&[])?==INBOUND_BATCH{return Ok(())}
+            let mut bytes=[0u8;8192];
+            let room=(MAX_INBOUND_BUFFER-self.inbound.len()).min(bytes.len());
+            if room==0{return Err("RTMP inbound buffer exhausted".into())}
+            self.io.get_ref().socket.set_nonblocking(true).map_err(|_|"RTMPS poll setup failed")?;
+            let read=self.io.read(&mut bytes[..room]);
+            self.io.get_ref().socket.set_nonblocking(false).map_err(|_|"RTMPS poll restore failed")?;
+            match read{
+                Ok(0)=>Err("RTMPS server closed connection".into()),
+                Ok(n)=>{self.ingest_inbound(&bytes[..n])?;Ok(())},
+                Err(e) if matches!(e.kind(),io::ErrorKind::WouldBlock|io::ErrorKind::TimedOut|io::ErrorKind::Interrupted)=>Ok(()),
+                Err(_)=>Err("RTMPS inbound transport failed".into()),
+            }
+        }
     }
     #[cfg(test)]
     mod tests{
@@ -265,6 +309,17 @@ mod tests{
             let s=worker.stats().unwrap();
             assert_eq!(s.session.phase,Phase::Failed);assert_eq!(s.pending_bytes,0);assert!(s.session.restart_required);
         }
+    }
+    #[test]fn buffered_inbound_survives_fragmentation_and_services_ping(){
+        let mut p=Publisher::establish(fixture(true),"live","rtmps://example.invalid/live","fixture-key",7,&[9;1528]).unwrap();
+        let ping=rtmp::chunks(2,0,4,0,&[0,6,9,8,7,6],128).unwrap();
+        let initial=p.io.output.len();
+        for b in &ping[..ping.len()-1]{assert_eq!(p.ingest_inbound(&[*b]).unwrap(),0);}
+        assert_eq!(p.io.output.len(),initial);
+        assert_eq!(p.ingest_inbound(&ping[ping.len()-1..]).unwrap(),1);
+        assert!(p.io.output.len()>initial);
+        let stop=reply("onStatus",0.,status("NetStream.Publish.Stop"),5);
+        assert!(p.ingest_inbound(&stop).is_err());assert!(!p.authorized());
     }
     #[test]fn rejects_publish_before_media(){
         let result=Publisher::establish(fixture(false),"live","rtmps://example.invalid/live","fixture-key",7,&[9;1528]);
