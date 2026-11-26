@@ -868,6 +868,28 @@ fn capture_to_dir(
     })
 }
 
+// This entry point is intentionally not registered as a Tauri command.
+#[cfg(target_os="macos")]
+pub(crate) fn capture_rtmps_program_test(
+    display_ids:Vec<usize>,video_device_id:Option<String>,seconds:u32,profile:&str,
+    bitrate_kbps:Option<u32>,layout:Option<&str>,
+    overlay:Option<crate::program_overlay::OverlayInput>,audio_inputs:Vec<crate::program_audio::AudioInput>,
+    transforms:Option<Vec<crate::source_transform::SourceTransform>>,
+    stop:std::sync::Arc<std::sync::atomic::AtomicBool>,
+    server_url:String,stream_key:String,explicitly_authorized:bool,
+)->Result<ContinuousProgramReport,String>{
+    if !explicitly_authorized{return Err("Explicit destination authorization is required".into())}
+    crate::rtmp_session::tls::validate_destination(&server_url,&stream_key)?;
+    let cancel=stop.clone();
+    capture_authorized_live_program(display_ids,video_device_id,seconds,profile,bitrate_kbps,layout,overlay,
+        audio_inputs,transforms,stop,move||{
+            if cancel.load(Ordering::Acquire){return Err("Live Program cancelled before connection".into())}
+            let worker=crate::live_publish_worker::Worker::connect_tls(&server_url,&stream_key)?;
+            if cancel.load(Ordering::Acquire){worker.request_stop();return Err("Live Program cancelled during connection".into())}
+            Ok(worker)
+        })
+}
+
 // The connector is injected by an explicitly authorized native caller.
 // Neither the browser nor Tauri command dispatcher can invoke this path yet.
 #[cfg(any(target_os="macos",target_os="windows"))]
