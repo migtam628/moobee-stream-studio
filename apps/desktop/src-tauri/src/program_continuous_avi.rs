@@ -370,11 +370,11 @@ fn receive_first_frame(receiver: &Receiver<xcap::Frame>) -> Result<image::RgbaIm
 }
 
 #[derive(Clone, Copy)]
-enum ProgramFormat { Avi, Mp4 }
+enum ProgramFormat { Avi, Mp4, Flv }
 
 impl ProgramFormat {
     fn extension(self) -> &'static str {
-        match self { Self::Avi => "avi", Self::Mp4 => "mp4" }
+        match self { Self::Avi => "avi", Self::Mp4 => "mp4", Self::Flv => "flv" }
     }
 }
 
@@ -387,12 +387,20 @@ enum FrameSink {
     Mp4(crate::program_mp4_sink::ProgramMp4Sink),
     #[cfg(target_os = "windows")]
     Mp4(crate::windows_mp4_sink::WindowsMp4Sink),
+    #[cfg(target_os = "macos")]
+    Flv(crate::live_flv::NativeSink),
 }
 
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 impl FrameSink {
     fn open(path: &std::path::Path, format: ProgramFormat, profile: EncodingProfile, microphone: bool) -> Result<Self, String> {
         match format {
+            ProgramFormat::Flv => {
+                #[cfg(target_os = "macos")]
+                { Ok(Self::Flv(crate::live_flv::NativeSink::open(path,profile.width,profile.height,profile.fps,profile.bitrate_kbps,microphone)?)) }
+                #[cfg(target_os = "windows")]
+                { Err("Native streaming packet diagnostics require macOS".into()) }
+            }
             ProgramFormat::Avi => {
                 let file = OpenOptions::new().write(true).create_new(true).open(path)
                     .map_err(|e| format!("Unable to create private AVI: {e}"))?;
@@ -420,12 +428,16 @@ impl FrameSink {
             }
             #[cfg(any(target_os = "macos", target_os = "windows"))]
             Self::Mp4(writer) => writer.append(canvas.as_raw()),
+            #[cfg(target_os = "macos")]
+            Self::Flv(writer) => writer.append(canvas),
         }
     }
 
     fn append_audio(&mut self, pcm: &[f32]) -> Result<(),String> {
         match self {
             Self::Mp4(writer) => writer.append_audio(pcm),
+            #[cfg(target_os = "macos")]
+            Self::Flv(writer) => writer.append_audio(pcm),
             Self::Avi(_) => Err("AVI does not support the composed AAC diagnostic".into()),
         }
     }
@@ -434,6 +446,8 @@ impl FrameSink {
             Self::Avi(writer) => writer.finish().map(|_| ()).map_err(|e| (e, false)),
             #[cfg(any(target_os = "macos", target_os = "windows"))]
             Self::Mp4(writer) => writer.finish(),
+            #[cfg(target_os = "macos")]
+            Self::Flv(writer) => writer.finish().map_err(|e|(e,false)),
         }
     }
 }
@@ -764,6 +778,11 @@ fn capture_to_dir(
             ProgramFormat::Mp4 => {
                 crate::program_mp4_storage::validate_finished(&temporary)
             }
+            ProgramFormat::Flv => {
+                let bytes=fs::metadata(&temporary).map_err(|e|e.to_string())?.len();
+                if !(14..=64*1024*1024).contains(&bytes){return Err("FLV outside file budget".into())}
+                Ok((bytes,f64::from(written_frames)/f64::from(profile.fps)))
+            }
         }
     })();
     let (bytes, actual_duration) = match inspected {
@@ -772,6 +791,9 @@ fn capture_to_dir(
     };
     let finalization_ms = finalizing.elapsed().as_millis() as u64;
     match format {
+        ProgramFormat::Flv => {
+            if let Err(e)=crate::program_mp4_storage::publish_ready(&temporary,&final_path){let _=fs::remove_file(&temporary);return Err(e);}
+        }
         ProgramFormat::Avi => {
             if let Err(error) = fs::rename(&temporary, &final_path) {
                 let _ = fs::remove_file(&temporary);
@@ -795,7 +817,7 @@ fn capture_to_dir(
         id, path: final_path.to_string_lossy().into_owned(), format: extension,
         bytes, duration_seconds: actual_duration, requested_max_seconds: seconds,
         stopped_early: written_frames < total_frames, paused_ms,
-        target_bitrate_kbps: matches!(format, ProgramFormat::Mp4).then_some(profile.bitrate_kbps),
+        target_bitrate_kbps: matches!(format, ProgramFormat::Mp4|ProgramFormat::Flv).then_some(profile.bitrate_kbps),
         frame_count: written_frames, width: profile.width, height: profile.height, fps: profile.fps,
         profile: profile.label,
         display_count: ids.len(), video_input_count: usize::from(video_device_id.is_some()), elapsed_ms, finalization_ms, audio_track_verified: false,
@@ -833,30 +855,40 @@ pub async fn capture_continuous_program_mp4(
     { let _ = (app, display_ids, seconds, profile, layout, webcam, microphone, mic_gain, overlay, video_device_id, audio_inputs, transforms, session_id, bitrate_kbps); Err("Composed H.264 MP4 requires Mac or Windows".into()) }
 }
 
+#[tauri::command]
+pub async fn capture_program_live_packet_test(
+    app:tauri::AppHandle,display_ids:Vec<usize>,seconds:u32,profile:String,layout:Option<String>,
+    overlay:Option<crate::program_overlay::OverlayInput>,video_device_id:Option<String>,
+    audio_inputs:Option<Vec<crate::program_audio::AudioInput>>,transforms:Option<Vec<crate::source_transform::SourceTransform>>,bitrate_kbps:Option<u32>,
+)->Result<ContinuousProgramReport,String>{
+    if !cfg!(target_os="macos")||!(2..=8).contains(&seconds){return Err("Offline streaming packet test requires macOS and 2–8 seconds".into())}
+    capture_continuous_program(app,display_ids,seconds,profile,ProgramFormat::Flv,layout,false,false,1.,overlay,video_device_id,audio_inputs,transforms,None,bitrate_kbps).await
+}
+
 async fn capture_continuous_program(
     app: tauri::AppHandle, display_ids: Vec<usize>, seconds: u32, profile: String, format: ProgramFormat, layout: Option<String>, webcam: bool, microphone: bool, mic_gain: f32,
     overlay: Option<crate::program_overlay::OverlayInput>, video_device_id: Option<String>, audio_inputs: Option<Vec<crate::program_audio::AudioInput>>, transforms: Option<Vec<crate::source_transform::SourceTransform>>, session_id: Option<String>, bitrate_kbps: Option<u32>,
 ) -> Result<ContinuousProgramReport, String> {
     if session_id.as_ref().is_some_and(|id| uuid::Uuid::parse_str(id).is_err()) { return Err("Invalid Program recording session ID".into()); }
     if cfg!(target_os = "windows") && matches!(format, ProgramFormat::Mp4) && (webcam || seconds > MAX_MP4_SECONDS) { return Err("Windows MP4 supports one video device or displays up to 60 seconds; separate webcam inset is Mac-only".into()); }
-    let validate_duration = if matches!(format, ProgramFormat::Mp4) { validate_mp4_request } else { validate_request };
+    let validate_duration = if matches!(format, ProgramFormat::Mp4|ProgramFormat::Flv) { validate_mp4_request } else { validate_request };
     if let Some(ref inputs) = audio_inputs {
         crate::program_audio::validate(inputs)?;
-        if !cfg!(any(target_os = "macos",target_os = "windows")) || !matches!(format, ProgramFormat::Mp4) { return Err("Audio inputs require native MP4".into()); }
+        if !cfg!(any(target_os = "macos",target_os = "windows")) || !matches!(format, ProgramFormat::Mp4|ProgramFormat::Flv) { return Err("Audio inputs require native H.264 output".into()); }
         #[cfg(target_os = "windows")]
         crate::windows_audio::validate(inputs)?;
     }
     crate::source_transform::validate_list(transforms.as_deref(), display_ids.len()+usize::from(video_device_id.is_some()))?;
     if transforms.is_some() && webcam { return Err("Disable the separate webcam inset for manual scene transforms".into()); }
     let mut selected_profile = if let Some(ref id) = video_device_id {
-        if !cfg!(any(target_os = "macos",target_os = "windows")) || !matches!(format, ProgramFormat::Mp4) || !display_ids.is_empty() || webcam || id.is_empty() || id.len() > 1024 || id.chars().any(char::is_control) {
+        if !cfg!(any(target_os = "macos",target_os = "windows")) || !matches!(format, ProgramFormat::Mp4|ProgramFormat::Flv) || !display_ids.is_empty() || webcam || id.is_empty() || id.len() > 1024 || id.chars().any(char::is_control) {
             return Err("Video device recording requires native MP4, one selected video input only, and webcam inset off".into());
         }
         validate_duration(&[0], seconds, &profile)?
     } else { validate_duration(&display_ids, seconds, &profile)? };
-    if bitrate_kbps.is_some() && !matches!(format, ProgramFormat::Mp4) { return Err("Bitrate presets require MP4".into()); }
+    if bitrate_kbps.is_some() && !matches!(format, ProgramFormat::Mp4|ProgramFormat::Flv) { return Err("Bitrate presets require MP4".into()); }
     selected_profile.bitrate_kbps = validate_bitrate(bitrate_kbps, selected_profile.bitrate_kbps)?;
-    if selected_profile.label == "1080p30" && (!cfg!(any(target_os = "macos",target_os = "windows")) || !matches!(format, ProgramFormat::Mp4)) {
+    if selected_profile.label == "1080p30" && (!cfg!(any(target_os = "macos",target_os = "windows")) || !matches!(format, ProgramFormat::Mp4|ProgramFormat::Flv)) {
         return Err("1080p30 diagnostic requires a native H.264 MP4 encoder".into());
     }
     if webcam && (!cfg!(target_os = "macos") || display_ids.len() > 3) {
