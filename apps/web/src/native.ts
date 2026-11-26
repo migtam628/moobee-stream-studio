@@ -306,12 +306,15 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
     if (typeof body.sessionId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(body.sessionId)) throw new Error('Invalid Program session')
     return { stopRequested: await invoke<boolean>('stop_continuous_program_mp4', { sessionId: body.sessionId }) }
   }
-  if (path === '/clips/capture-program-continuous-avi' || path === '/clips/capture-program-continuous-mp4') {
+  if (path === '/clips/capture-program-continuous-avi' || path === '/clips/capture-program-continuous-mp4' || path === '/clips/capture-program-live-packets') {
     const ids = body.displayIds
     const videoDeviceId = body.videoDeviceId
+    const flv = path.endsWith('-packets')
     const mp4 = path.endsWith('-mp4')
+    const compressed = mp4 || flv
+    if(flv && (!macHost() || typeof body.seconds!=='number' || body.seconds>8 || body.webcam || body.sessionId!==undefined || body.microphone===true)) throw new Error('Offline packet test requires Mac, 2–8 seconds, named audio settings, and webcam inset off')
     const hasVideo = videoDeviceId !== undefined && videoDeviceId !== null
-    if (hasVideo && (!mp4 || (!macHost() && !windowsHost()) || !validVideoInputId(videoDeviceId) || body.webcam)) throw new Error('Select one native video input with webcam inset off')
+    if (hasVideo && (!compressed || (!macHost() && !windowsHost()) || !validVideoInputId(videoDeviceId) || body.webcam)) throw new Error('Select one native video input with webcam inset off')
     if (!Array.isArray(ids) || (hasVideo ? ids.length !== 0 : ids.length < 1) || ids.length > 4 ||
         !ids.every(id => typeof id === 'number' && Number.isSafeInteger(id) && id >= 0 && id <= 24) ||
         new Set(ids).size !== ids.length ||
@@ -322,8 +325,8 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
     }
     if (mp4 && !macHost() && !windowsHost()) throw new Error('Native MP4 requires Mac or Windows')
     if (mp4 && windowsHost() && (body.seconds > 60 || body.webcam)) throw new Error('Windows MP4 supports one video device or displays up to 60 seconds')
-    if (body.bitrateKbps !== undefined && (!mp4 || typeof body.bitrateKbps !== 'number' || ![1500,3000,6000].includes(body.bitrateKbps))) throw new Error('Invalid MP4 bitrate preset')
-    if (body.profile === '1080p30' && !mp4) throw new Error('1080p30 requires native MP4')
+    if (body.bitrateKbps !== undefined && (!compressed || typeof body.bitrateKbps !== 'number' || ![1500,3000,6000].includes(body.bitrateKbps))) throw new Error('Invalid MP4 bitrate preset')
+    if (body.profile === '1080p30' && !compressed) throw new Error('1080p30 requires native MP4')
     if (body.sessionId !== undefined && (!mp4 || typeof body.sessionId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(body.sessionId))) throw new Error('Invalid Program session')
     if (body.webcam !== undefined && typeof body.webcam !== 'boolean') throw new Error('Invalid webcam selection')
     if (body.webcam && (!mp4 || ids.length > 3)) throw new Error('Webcam PiP requires macOS MP4 and one to three displays')
@@ -331,7 +334,7 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
     if (body.microphone && !mp4) throw new Error('Microphone AAC requires macOS MP4')
     const micGain = body.micGain ?? 1
     if (typeof micGain !== 'number' || !Number.isFinite(micGain) || micGain < 0 || micGain > 2) throw new Error('Invalid microphone gain')
-    if (body.audioInputs !== undefined && (!mp4 || !Array.isArray(body.audioInputs) || body.audioInputs.length > 3)) throw new Error('Audio sources require native MP4')
+    if (body.audioInputs !== undefined && (!compressed || !Array.isArray(body.audioInputs) || body.audioInputs.length > 3)) throw new Error('Audio sources require native MP4')
     if (windowsHost() && Array.isArray(body.audioInputs) && body.audioInputs.some(i=>!i || !['device','desktop'].includes(i.kind) || (i.kind==='desktop' && i.deviceId!=null) || (i.deviceId!=null && (typeof i.deviceId!=='string'||!i.deviceId.length||i.deviceId.length>1024)))) throw new Error('Invalid Windows audio endpoint selection')
     if (body.overlay !== undefined && body.overlay !== null) {
       const o = body.overlay as { width: number; height: number; rgbaBase64: string; placement?: { xPercent: number; yPercent: number; widthPercent: number } }
@@ -349,8 +352,8 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
       Array.isArray(body.transforms) && body.transforms.length === (hasVideo?1:ids.length) ? body.transforms.map(validateTransform) : (()=>{throw new Error('Invalid source transform count')})()
     if(captureActive)throw new Error('Another native capture is active')
     activeProgramSession=mp4 && typeof body.sessionId==='string'?body.sessionId:null
-    try { return await captureWithPreviewReleased(mp4 ? 'capture_continuous_program_mp4' : 'capture_continuous_program_avi', {
-      displayIds: ids, seconds: body.seconds, profile: body.profile, layout: validateSceneLayout(body.layout), transforms:transforms??null, overlay: body.overlay ?? null, ...(mp4 ? { sessionId: body.sessionId ?? null, bitrateKbps: body.bitrateKbps ?? null, webcam: body.webcam === true, microphone: body.microphone === true, micGain, ...(body.audioInputs !== undefined ? { audioInputs: body.audioInputs } : {}), ...(hasVideo ? { videoDeviceId } : {}) } : {})
+    try { return await captureWithPreviewReleased(flv ? 'capture_program_live_packet_test' : mp4 ? 'capture_continuous_program_mp4' : 'capture_continuous_program_avi', {
+      displayIds: ids, seconds: body.seconds, profile: body.profile, layout: validateSceneLayout(body.layout), transforms:transforms??null, overlay: body.overlay ?? null, ...(mp4 ? { sessionId: body.sessionId ?? null, bitrateKbps: body.bitrateKbps ?? null, webcam: body.webcam === true, microphone: body.microphone === true, micGain, ...(body.audioInputs !== undefined ? { audioInputs: body.audioInputs } : {}), ...(hasVideo ? { videoDeviceId } : {}) } : flv ? {bitrateKbps:body.bitrateKbps??null,audioInputs:body.audioInputs??[],videoDeviceId:videoDeviceId??null} : {})
     }) } finally { activeProgramSession=null }
   }
   if (path === '/clips/capture-program-test-avi') {

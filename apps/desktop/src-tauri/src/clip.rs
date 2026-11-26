@@ -185,6 +185,7 @@ pub fn list_test_clips(app: tauri::AppHandle) -> Result<Vec<ClipInfo>, String> {
                 filename.strip_suffix(".gif").map(|id| (id, "gif", MAX_CLIP_BYTES))
                     .or_else(|| filename.strip_suffix(".avi").map(|id| (id, "avi", 64 * 1024 * 1024)))
                     .or_else(|| filename.strip_suffix(".mp4").map(|id| (id, "mp4", 256 * 1024 * 1024)))
+                    .or_else(|| filename.strip_suffix(".flv").map(|id| (id, "flv", 64 * 1024 * 1024)))
             });
         if let Some((id, format, max_size)) = parsed {
             if uuid::Uuid::parse_str(id).is_ok_and(|uuid| uuid.to_string() == id) {
@@ -223,7 +224,7 @@ pub fn reveal_test_clip(app: tauri::AppHandle, clip_id: String) -> Result<(), St
 
     let folder = clips_folder(&app)?;
     let mut selected = None;
-    for extension in ["mp4", "avi", "gif"] {
+    for extension in ["mp4", "avi", "gif", "flv"] {
         let candidate = folder.join(format!("clip-{clip_id}.{extension}"));
         if let Ok(metadata) = fs::symlink_metadata(&candidate) {
             if metadata.is_file() && !metadata.file_type().is_symlink() {
