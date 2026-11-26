@@ -5,6 +5,7 @@ fn main() {
     println!("cargo:rerun-if-changed=swift/MooBeeSonomaRecording.swift");
     println!("cargo:rerun-if-changed=swift/MooBeeProgramVideoWriter.swift");
     println!("cargo:rerun-if-changed=swift/MooBeeAVCEncoder.swift");
+    println!("cargo:rerun-if-changed=swift/MooBeeAACEncoder.swift");
     println!("cargo:rerun-if-changed=swift/MooBeeProgramCamera.swift");
     println!("cargo:rerun-if-changed=swift/MooBeeProgramMicrophone.swift");
 
@@ -39,6 +40,7 @@ fn main() {
             .arg("swift/MooBeeSonomaRecording.swift")
             .arg("swift/MooBeeProgramVideoWriter.swift")
             .arg("swift/MooBeeAVCEncoder.swift")
+            .arg("swift/MooBeeAACEncoder.swift")
             .arg("swift/MooBeeProgramCamera.swift")
             .arg("swift/MooBeeProgramMicrophone.swift")
             .status()
