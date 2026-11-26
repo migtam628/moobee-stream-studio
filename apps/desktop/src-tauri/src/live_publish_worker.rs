@@ -7,6 +7,7 @@ const MAX_PENDING_BYTES:usize=8*1024*1024;
 const MAX_PACKET_BYTES:usize=2*1024*1024;
 const POLL:Duration=Duration::from_millis(5);
 const MAX_IDLE:Duration=Duration::from_secs(5);
+const INBOUND_INTERVAL:Duration=Duration::from_millis(20);
 #[derive(Clone,Copy,Debug,PartialEq,Eq)]
 enum Command{Running,Stop,Fail}
 #[derive(Clone,Copy,Debug,PartialEq,Eq)]
@@ -23,13 +24,27 @@ impl Worker{
     /// Caller must supply a transport with finite read/write deadlines.
     /// No credential resolution, DNS, connection or device capture happens here.
     pub(crate) fn start<T:Read+Write+Send+'static>(session:Session<T>)->Result<Self,String>{
+        Self::start_with_poll(session,|_|Ok(()))
+    }
+    pub(crate) fn start_with_poll<T:Read+Write+Send+'static>(
+        session:Session<T>,poll:impl FnMut(&mut Session<T>)->Result<(),String>+Send+'static,
+    )->Result<Self,String>{
         let stats=session.stats();
         if stats.phase!=Phase::Authorized{return Err("Worker requires a fresh authorized session".into())}
         let shared=Arc::new(Shared{mail:Mutex::new(Mailbox{command:Command::Running,packets:VecDeque::new(),bytes:0,inbound_ready:false,stats}),wake:Condvar::new()});
         let state=Arc::clone(&shared);
-        let handle=thread::Builder::new().name("moobee-live-publisher".into()).spawn(move||run(session,state))
+        let handle=thread::Builder::new().name("moobee-live-publisher".into()).spawn(move||run(session,state,poll))
             .map_err(|_|"Could not start publishing worker")?;
         Ok(Self{shared,handle:Some(handle)})
+    }
+    /// Explicit caller only. Run off the UI thread; OS DNS can block.
+    /// This opens one certificate-validated destination and starts automatic
+    /// inbound control servicing after successful publish authorization.
+    #[cfg(any(target_os="macos",target_os="windows"))]
+    pub(crate) fn connect_tls(server_url:&str,stream_key:&str)->Result<Self,String>{
+        let publisher=crate::rtmp_session::tls::connect_tls(server_url,stream_key)?;
+        let session=Session::new(publisher)?;
+        Self::start_with_poll(session,|s|s.poll_tls_inbound())
     }
     pub(crate) fn submit(&self,packet:Packet)->Result<(),String>{self.submit_batch(vec![packet])}
     pub(crate) fn submit_batch(&self,packets:Vec<Packet>)->Result<(),String>{
@@ -76,9 +91,10 @@ impl Worker{
     }
 }
 impl Drop for Worker{fn drop(&mut self){self.request_stop();}}
-fn run<T:Read+Write>(mut session:Session<T>,shared:Arc<Shared>){
+fn run<T:Read+Write>(mut session:Session<T>,shared:Arc<Shared>,mut poll:impl FnMut(&mut Session<T>)->Result<(),String>){
     let mut origin=None::<Instant>;
     let mut last_input=Instant::now();
+    let mut last_poll=Instant::now()-INBOUND_INTERVAL;
     loop{
         // Move one bounded packet out without holding a lock during encoding/I/O.
         let (command,packet,inbound)={
@@ -99,6 +115,7 @@ fn run<T:Read+Write>(mut session:Session<T>,shared:Arc<Shared>){
                     session.submit(p)?;
                 }
                 if inbound{session.service_inbound()?;}
+                if last_poll.elapsed()>=INBOUND_INTERVAL{poll(&mut session)?;last_poll=Instant::now();}
                 if let Some(start)=origin{
                     session.tick(start.elapsed().as_millis().min(u128::from(u64::MAX)) as u64)?;
                 }
