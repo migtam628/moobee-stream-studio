@@ -293,7 +293,7 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
   }
 
   async function captureProgramVideoTest(mode: 'sampled' | 'continuous' | 'mp4' = 'sampled') {
-    if (!supportedDesktop || loading || busy || graphicLoading || (mode === 'mp4' && !mac)) return
+    if (!supportedDesktop || loading || busy || graphicLoading || (mode === 'mp4' && !supportedDesktop)) return
     if (mode !== 'mp4' && (programAviDuration > 8 || continuousProfile === '1080p30')) return
     const sessionId = mode === 'mp4' ? crypto.randomUUID() : null
     programSessionRef.current = sessionId
@@ -323,7 +323,7 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
         displayIds, seconds: programAviDuration, layout, transforms,
         ...(videoDeviceId ? { videoDeviceId } : {}),
         ...(mode !== 'sampled' ? { profile: continuousProfile, overlay: graphic ? { ...graphic, placement } : null } : {}),
-        ...(mode === 'mp4' ? { sessionId, ...(programBitrate === 'auto' ? {} : {bitrateKbps:Number(programBitrate)}), webcam: programWebcam, microphone: programMic, micGain, audioInputs: audioRows.map(row=>row.input) } : {})
+        ...(mode === 'mp4' ? { sessionId, ...(programBitrate === 'auto' ? {} : {bitrateKbps:Number(programBitrate)}), webcam: programWebcam, microphone: programMic, micGain, ...(mac ? {audioInputs: audioRows.map(row=>row.input)} : {}) } : {})
       })
       setSaved(result)
       await refreshSavedClips()
@@ -394,7 +394,7 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
   }
 
   async function recoverFinalizedRecordings() {
-    if (!mac || busy || recoveryBusy) return
+    if (!supportedDesktop || busy || recoveryBusy) return
     setRecoveryBusy(true)
     setRecoveryMessage('')
     try {
@@ -422,7 +422,7 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
     catch { setError('Could not copy automatically. Select the file path below to copy it.') }
   }
 
-  const isMacProgram = mac
+  const isNativeProgramMp4 = supportedDesktop
   const canProgram = supportedDesktop && !recoveryBusy && !busy && !loading && !graphicLoading && !audioSelectionError && (displays.length > 0 || mac)
   const overlayWidth = graphic ? Math.min(placement.widthPercent, 50 * 9 / 16 * graphic.width / graphic.height) : 0
   const overlayHeight = graphic ? overlayWidth * 16 / 9 * graphic.height / graphic.width : 0
@@ -492,21 +492,21 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
         <div className="dock-body">
           <label className="dock-field">Video profile
             <select aria-label="Continuous Program test profile" value={continuousProfile} disabled={busy} onChange={event => { const profile = event.target.value as 'baseline' | '720p15' | '1080p30'; setContinuousProfile(profile) }}>
-              <option value="baseline">360p · 10 fps</option><option value="720p15">720p · 15 fps</option>{mac && <option value="1080p30">1080p · 30 fps (test)</option>}
+              <option value="baseline">360p · 10 fps</option><option value="720p15">720p · 15 fps</option>{supportedDesktop && <option value="1080p30">1080p · 30 fps (test)</option>}
             </select>
           </label>
-          {mac && <label className="dock-field">Target video bitrate
+          {supportedDesktop && <label className="dock-field">Target video bitrate
             <select aria-label="Program MP4 target bitrate" value={programBitrate} disabled={busy} onChange={e=>setProgramBitrate(e.target.value as typeof programBitrate)}>
               <option value="auto">Automatic by profile</option><option value="1500">1.5 Mbps</option><option value="3000">3 Mbps</option><option value="6000">6 Mbps</option>
             </select>
           </label>}
           <label className="dock-field">Recording length
             <select aria-label="Composed Program video test duration" value={programAviDuration} disabled={busy} onChange={event => setProgramAviDuration(Number(event.target.value))}>
-              {(mac ? [2,4,6,8,15,30,45,60,120,180,240,300] : [2,4,6,8]).map(seconds => <option key={seconds} value={seconds}>{seconds > 60 ? `${seconds/60} min · segmented` : `${seconds} seconds`}</option>)}
+              {(mac ? [2,4,6,8,15,30,45,60,120,180,240,300] : supportedDesktop ? [2,4,6,8,15,30,45,60] : [2,4,6,8]).map(seconds => <option key={seconds} value={seconds}>{seconds > 60 ? `${seconds/60} min · segmented` : `${seconds} seconds`}</option>)}
             </select>
           </label>
           {mac && programAviDuration > 60 && <small className="dock-note">Separate 60-second MP4 clips. Sources restart between clips; gaps are expected. Completed clips remain saved if a later segment fails.</small>}
-          <button className="primary-button program-record" type="button" disabled={!canProgram} onClick={() => void captureProgramVideoTest(isMacProgram ? 'mp4' : 'continuous')}><span className="record-dot"/>{busy ? 'Capturing / finalizing…' : 'Record Program test'}</button>
+          <button className="primary-button program-record" type="button" disabled={!canProgram} onClick={() => void captureProgramVideoTest(isNativeProgramMp4 ? 'mp4' : 'continuous')}><span className="record-dot"/>{busy ? 'Capturing / finalizing…' : 'Record Program test'}</button>
           {programSession && busy && <button className="secondary-button" type="button" disabled={stopRequested} onClick={() => void stopProgramCapture()}><Square size={15}/>{stopRequested ? 'Stopping and finalizing…' : 'Stop and save Program MP4'}</button>}
           {programSession && busy && <>
             <button className="secondary-button" type="button" disabled={pausePending || stopRequested || !programStats || !['recording','paused'].includes(programStats.phase)} onClick={() => void toggleProgramPause()}>{programStats?.phase === 'paused' ? 'Resume Program recording' : 'Pause Program recording'}</button>
@@ -523,7 +523,7 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
             </div>
           </>}
           {programStopError && <small className="preview-error" role="status">{programStopError}</small>}
-          <small className="dock-note">{mac ? 'H.264 MP4 · optional AAC' : supportedDesktop ? 'Silent MJPEG AVI' : 'Requires Mac/Windows app'} · bounded diagnostic</small>
+          <small className="dock-note">{mac ? 'H.264 MP4 · optional AAC' : supportedDesktop ? 'Windows H.264 MP4 · silent test'  : 'Requires Mac/Windows app'} · bounded diagnostic</small>
           {streamControl}
           <div className="dock-action-row"><button className="secondary-button" onClick={openClips}><Film size={14}/>Clips</button><button className="secondary-button" onClick={openSettings}><Settings2 size={14}/>Settings</button></div>
           <button className="secondary-button diagnostics-button" onClick={openDiagnostics}><Monitor size={14}/>Capture diagnostics</button>
@@ -586,7 +586,7 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
       <button className="secondary-button" type="button" disabled={busy} onClick={() => void refreshSavedClips()}>
         Refresh saved clips
       </button>
-      {mac && <button className="secondary-button" type="button" disabled={busy || recoveryBusy} onClick={() => void recoverFinalizedRecordings()}>{recoveryBusy ? 'Checking finalized files…' : 'Recover finalized Program recordings'}</button>}
+      {supportedDesktop && <button className="secondary-button" type="button" disabled={busy || recoveryBusy} onClick={() => void recoverFinalizedRecordings()}>{recoveryBusy ? 'Checking finalized files…' : 'Recover finalized Program recordings'}</button>}
       {recoveryMessage && <small role="status">{recoveryMessage}</small>}
       {inventoryError && <small role="alert">{inventoryError}</small>}
     </div>}
