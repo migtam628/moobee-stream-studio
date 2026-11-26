@@ -37,6 +37,8 @@ mod live_publish_worker;
 mod macos_avc;
 #[cfg(target_os = "macos")]
 mod macos_aac;
+#[cfg(target_os = "macos")]
+mod live_program_encoder;
 
 use axum::{
     extract::State,
