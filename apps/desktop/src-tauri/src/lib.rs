@@ -30,6 +30,8 @@ mod stream_mux;
 mod rtmp_receive;
 mod rtmp_session;
 mod live_media_queue;
+#[cfg(target_os = "macos")]
+mod macos_avc;
 
 use axum::{
     extract::State,
