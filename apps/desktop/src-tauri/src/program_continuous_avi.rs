@@ -92,7 +92,7 @@ pub fn continuous_program_stats(session_id: String) -> Option<ProgramRecordingSt
 pub fn recover_finalized_program_recordings(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
     #[cfg(target_os = "macos")]
     {
-        let report = crate::program_mp4_sink::recover_finalized_program_recordings(app)?;
+        let report = crate::program_mp4_sink::recover_finalized(app)?;
         serde_json::to_value(report).map_err(|e| e.to_string())
     }
     #[cfg(not(target_os = "macos"))]
