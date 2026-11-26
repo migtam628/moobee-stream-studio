@@ -200,7 +200,7 @@ function SourcesPanel({ status, perform, pending, selectedSource, selectSource, 
   const [testing, setTesting] = useState(false)
   const [signal, setSignal] = useState('')
   const [deviceError, setDeviceError] = useState('')
-  const mac = runningInTauri() && /Macintosh|Mac OS X/i.test(navigator.userAgent)
+  const mac = runningInTauri() && /Macintosh|Mac OS X|Windows/i.test(navigator.userAgent)
   const refreshSources = useCallback(async () => {
     if (!runningInTauri()) return
     setScanning(true); setDeviceError(''); setSignal('')
@@ -250,10 +250,10 @@ function SourcesPanel({ status, perform, pending, selectedSource, selectSource, 
         <button className="secondary-button" disabled={pending || scanning || testing || !selected} onClick={() => void addSource()}>+ Add source</button>
         {mac && <button className="secondary-button" disabled={!selectedVideo || testing || scanning} onClick={() => void testSignal()}>{testing ? 'Testing…' : 'Test video signal'}</button>}
       </div>
-      {mac && <small className="dock-note">{devices.length} video input(s) detected. USB/UVC devices appear by their macOS names. Detection does not confirm HDMI signal.</small>}
+      {mac && <small className="dock-note">{devices.length} video input(s) detected. USB/UVC devices appear by their operating system names. Detection does not confirm HDMI signal.</small>}
       {signal && <small className="dock-note" role="status">{signal}</small>}
       {deviceError && <small className="preview-error" role="alert">{deviceError}</small>}
-      {selectedVideo && <small className="dock-note">Mac recording test: enable just this video source. Disable the separate webcam inset. Choose Live video inputs in Preview refresh for moving video. For preview only, two distinct video inputs may share Grid or PiP.</small>}
+      {selectedVideo && <small className="dock-note">Native recording test: enable just this video source. Disable the separate webcam inset. Choose Live video inputs in Preview refresh for moving video. For preview only, two distinct video inputs may share Grid or PiP.</small>}
     </div>
     <div className="clip-form">
       <label>Scene layout
@@ -294,7 +294,7 @@ function Studio({ status, perform, pending, setTab, active }: { status: StudioSt
   const [refreshRate, setRefreshRate] = useState<PreviewRefresh>('fast')
   const [monitorTransitionKind,setMonitorTransitionKind]=useState<MonitorTransition['kind']>('cut')
   const [monitorTransitionMs,setMonitorTransitionMs]=useState(300)
-  const macVideoPreview = runningInTauri() && /Macintosh|Mac OS X/i.test(navigator.userAgent)
+  const macVideoPreview = runningInTauri() && /Macintosh|Mac OS X|Windows/i.test(navigator.userAgent)
   useEffect(() => {
     if (!active || refreshRate !== 'live' || !macVideoPreview) return
     const release = () => { void request('/capture/stop-video-previews', {}).catch(() => { /* native lease is a second cleanup path */ }) }
@@ -317,7 +317,7 @@ function Studio({ status, perform, pending, setTab, active }: { status: StudioSt
     <div className="production-toolbar">
       <div className="production-heading"><h1>Studio</h1><span className="production-mode">{status.connected ? 'Local workspace' : 'Offline'}</span></div>
       <div className="production-toolbar-actions">
-        <label className="preview-rate-control">Preview refresh <select aria-label="Preview refresh" value={refreshRate} onChange={e => setRefreshRate(e.target.value as PreviewRefresh)}>{macVideoPreview && <option value="live">Live video inputs (Mac)</option>}<option value="fast">1 second</option><option value="normal">5 seconds</option><option value="paused">Paused</option></select></label>
+        <label className="preview-rate-control">Preview refresh <select aria-label="Preview refresh" value={refreshRate} onChange={e => setRefreshRate(e.target.value as PreviewRefresh)}>{macVideoPreview && <option value="live">Live video inputs (Mac/Windows)</option>}<option value="fast">1 second</option><option value="normal">5 seconds</option><option value="paused">Paused</option></select></label>
         <button className={`tool-button ${status.studioMode ? 'tool-active' : ''}`} aria-pressed={status.studioMode} disabled={!status.connected || pending} onClick={() => void perform('/studio/action', { action: 'studioMode', studioModeEnabled: !status.studioMode })}><Layers size={15}/>Studio Mode</button>
         {runningInTauri() && <button className={`tool-button ${editTransforms?'tool-active':''}`} aria-pressed={editTransforms} disabled={pending||!initial} onClick={()=>setEditTransforms(v=>!v)}><SlidersHorizontal size={15}/>Edit sources</button>}
         {status.studioMode && runningInTauri() && <><label className="preview-rate-control">Scene transition <select aria-label="Monitor transition" value={monitorTransitionKind} onChange={e=>setMonitorTransitionKind(e.target.value as MonitorTransition['kind'])}><option value="cut">Cut</option><option value="fade">Fade</option><option value="slide">Slide reveal</option><option value="wipe">Wipe</option></select></label>{monitorTransitionKind!=='cut' && <label className="preview-rate-control">Duration <select aria-label="Monitor transition duration" value={monitorTransitionMs} onChange={e=>setMonitorTransitionMs(Number(e.target.value))}>{[150,300,500,1000].map(ms=><option key={ms} value={ms}>{ms} ms</option>)}</select></label>}</>}
