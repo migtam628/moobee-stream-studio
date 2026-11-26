@@ -15,7 +15,7 @@ const HEIGHT: u32 = 360;
 const MAX_TOTAL_SOURCE_PIXELS: u64 = 36_000_000;
 const MAX_STALE_MS: u64 = 1_500;
 const MAX_DRAIN_PER_SOURCE_PER_TICK: usize = 64;
-const MAX_MP4_SECONDS: u32 = 30;
+const MAX_MP4_SECONDS: u32 = 60;
 
 // Control and telemetry are scoped to the active Program MP4 session.
 #[derive(Clone, Serialize)]
@@ -88,24 +88,36 @@ pub fn continuous_program_stats(session_id: String) -> Option<ProgramRecordingSt
         .filter(|s| s.id == session_id).map(|s| s.stats.clone())
 }
 
+#[tauri::command]
+pub fn recover_finalized_program_recordings(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let report = crate::program_mp4_sink::recover_finalized(app)?;
+        serde_json::to_value(report).map_err(|e| e.to_string())
+    }
+    #[cfg(not(target_os = "macos"))]
+    { let _ = app; Err("Finalized Program MP4 recovery is available on macOS only".into()) }
+}
+
 #[derive(Copy, Clone)]
 struct EncodingProfile {
     label: &'static str,
     width: u32,
     height: u32,
     fps: u32,
+    bitrate_kbps: u32,
 }
 
 fn encoding_profile(value: &str) -> Result<EncodingProfile, String> {
     match value {
         "baseline" => Ok(EncodingProfile {
-            label: "baseline", width: WIDTH, height: HEIGHT, fps: FPS,
+            label: "baseline", width: WIDTH, height: HEIGHT, fps: FPS, bitrate_kbps: 3000,
         }),
         "720p15" => Ok(EncodingProfile {
-            label: "720p15", width: 1280, height: 720, fps: 15,
+            label: "720p15", width: 1280, height: 720, fps: 15, bitrate_kbps: 3000,
         }),
         "1080p30" => Ok(EncodingProfile {
-            label: "1080p30", width: 1920, height: 1080, fps: 30,
+            label: "1080p30", width: 1920, height: 1080, fps: 30, bitrate_kbps: 6000,
         }),
         _ => Err("Unsupported Program test profile".into()),
     }
@@ -122,6 +134,7 @@ pub struct ContinuousProgramReport {
     duration_seconds: f64,
     requested_max_seconds: u32,
     stopped_early: bool,
+    target_bitrate_kbps: Option<u32>,
     paused_ms: u64,
     frame_count: u32,
     width: u32,
@@ -165,9 +178,16 @@ fn validate_request(display_ids: &[usize], seconds: u32, selected_profile: &str)
 fn validate_mp4_request(display_ids: &[usize], seconds: u32, selected_profile: &str) -> Result<EncodingProfile, String> {
     crate::scene_compositor::validate_ids(display_ids)?;
     if !(2..=MAX_MP4_SECONDS).contains(&seconds) {
-        return Err("Program MP4 supports 2–30 second recording tests".into());
+        return Err("Program MP4 supports 2–60 second recording tests".into());
     }
     encoding_profile(selected_profile)
+}
+
+fn validate_bitrate(value: Option<u32>, default: u32) -> Result<u32, String> {
+    match value.unwrap_or(default) {
+        value @ (1500 | 3000 | 6000) => Ok(value),
+        _ => Err("Choose a supported MP4 target bitrate (1500, 3000 or 6000 kbps)".into()),
+    }
 }
 
 fn validate_frame_geometry(width: u32, height: u32, cumulative: u64) -> Result<u64, String> {
@@ -238,7 +258,7 @@ impl FrameSink {
             }
             ProgramFormat::Mp4 => {
                 #[cfg(target_os = "macos")]
-                { Ok(Self::Mp4(crate::program_mp4_sink::ProgramMp4Sink::new_with_audio(path, profile.width, profile.height, profile.fps, microphone)?)) }
+                { Ok(Self::Mp4(crate::program_mp4_sink::ProgramMp4Sink::new_with_settings(path, profile.width, profile.height, profile.fps, microphone, profile.bitrate_kbps)?)) }
                 #[cfg(not(target_os = "macos"))]
                 { Err("Native composed H.264 MP4 is currently a macOS-only test".into()) }
             }
@@ -559,14 +579,33 @@ fn capture_to_dir(
         Err(error) => { let _ = fs::remove_file(&temporary); return Err(error); }
     };
     let finalization_ms = finalizing.elapsed().as_millis() as u64;
-    if let Err(error) = fs::rename(&temporary, &final_path) {
-        let _ = fs::remove_file(&temporary);
-        return Err(format!("Unable to publish completed Program video: {error}"));
+    match format {
+        ProgramFormat::Avi => {
+            if let Err(error) = fs::rename(&temporary, &final_path) {
+                let _ = fs::remove_file(&temporary);
+                return Err(format!("Unable to publish completed Program video: {error}"));
+            }
+        }
+        ProgramFormat::Mp4 => {
+            #[cfg(target_os = "macos")]
+            {
+                // The encoder is closed and the container has passed validation.
+                // A distinct ready name permits explicit recovery after a failed
+                // or interrupted publication, without treating raw .part as valid.
+                let ready = directory.join(format!(".clip-{id}.ready.mp4"));
+                fs::rename(&temporary, &ready)
+                    .map_err(|e| format!("Finalized MP4 retained as a private partial file; could not stage recovery: {e}"))?;
+                crate::program_mp4_sink::publish_ready(&ready, &final_path)?;
+            }
+            #[cfg(not(target_os = "macos"))]
+            return Err("Native composed MP4 unavailable".into());
+        }
     }
     Ok(ContinuousProgramReport {
         id, path: final_path.to_string_lossy().into_owned(), format: extension,
         bytes, duration_seconds: actual_duration, requested_max_seconds: seconds,
         stopped_early: written_frames < total_frames, paused_ms,
+        target_bitrate_kbps: matches!(format, ProgramFormat::Mp4).then_some(profile.bitrate_kbps),
         frame_count: written_frames, width: profile.width, height: profile.height, fps: profile.fps,
         profile: profile.label,
         display_count: ids.len(), video_input_count: usize::from(video_device_id.is_some()), elapsed_ms, finalization_ms, audio_track_verified: false,
@@ -588,23 +627,23 @@ pub async fn capture_continuous_program_avi(
     app: tauri::AppHandle, display_ids: Vec<usize>, seconds: u32, profile: String, layout: Option<String>,
     overlay: Option<crate::program_overlay::OverlayInput>, transforms: Option<Vec<crate::source_transform::SourceTransform>>,
 ) -> Result<ContinuousProgramReport, String> {
-    capture_continuous_program(app, display_ids, seconds, profile, ProgramFormat::Avi, layout, false, false, 1.0, overlay, None, None, transforms, None).await
+    capture_continuous_program(app, display_ids, seconds, profile, ProgramFormat::Avi, layout, false, false, 1.0, overlay, None, None, transforms, None, None).await
 }
 
 #[tauri::command]
 pub async fn capture_continuous_program_mp4(
     app: tauri::AppHandle, display_ids: Vec<usize>, seconds: u32, profile: String, layout: Option<String>, webcam: Option<bool>, microphone: Option<bool>, mic_gain: Option<f32>,
-    overlay: Option<crate::program_overlay::OverlayInput>, video_device_id: Option<String>, audio_inputs: Option<Vec<crate::program_audio::AudioInput>>, transforms: Option<Vec<crate::source_transform::SourceTransform>>, session_id: Option<String>,
+    overlay: Option<crate::program_overlay::OverlayInput>, video_device_id: Option<String>, audio_inputs: Option<Vec<crate::program_audio::AudioInput>>, transforms: Option<Vec<crate::source_transform::SourceTransform>>, session_id: Option<String>, bitrate_kbps: Option<u32>,
 ) -> Result<ContinuousProgramReport, String> {
     #[cfg(target_os = "macos")]
-    { capture_continuous_program(app, display_ids, seconds, profile, ProgramFormat::Mp4, layout, webcam.unwrap_or(false), microphone.unwrap_or(false), mic_gain.unwrap_or(1.0), overlay, video_device_id, audio_inputs, transforms, session_id).await }
+    { capture_continuous_program(app, display_ids, seconds, profile, ProgramFormat::Mp4, layout, webcam.unwrap_or(false), microphone.unwrap_or(false), mic_gain.unwrap_or(1.0), overlay, video_device_id, audio_inputs, transforms, session_id, bitrate_kbps).await }
     #[cfg(not(target_os = "macos"))]
-    { let _ = (app, display_ids, seconds, profile, layout, webcam, microphone, mic_gain, overlay, video_device_id, audio_inputs, transforms, session_id); Err("Composed H.264 MP4 is a macOS-only experimental test".into()) }
+    { let _ = (app, display_ids, seconds, profile, layout, webcam, microphone, mic_gain, overlay, video_device_id, audio_inputs, transforms, session_id, bitrate_kbps); Err("Composed H.264 MP4 is a macOS-only experimental test".into()) }
 }
 
 async fn capture_continuous_program(
     app: tauri::AppHandle, display_ids: Vec<usize>, seconds: u32, profile: String, format: ProgramFormat, layout: Option<String>, webcam: bool, microphone: bool, mic_gain: f32,
-    overlay: Option<crate::program_overlay::OverlayInput>, video_device_id: Option<String>, audio_inputs: Option<Vec<crate::program_audio::AudioInput>>, transforms: Option<Vec<crate::source_transform::SourceTransform>>, session_id: Option<String>,
+    overlay: Option<crate::program_overlay::OverlayInput>, video_device_id: Option<String>, audio_inputs: Option<Vec<crate::program_audio::AudioInput>>, transforms: Option<Vec<crate::source_transform::SourceTransform>>, session_id: Option<String>, bitrate_kbps: Option<u32>,
 ) -> Result<ContinuousProgramReport, String> {
     if session_id.as_ref().is_some_and(|id| uuid::Uuid::parse_str(id).is_err()) { return Err("Invalid Program recording session ID".into()); }
     let validate_duration = if matches!(format, ProgramFormat::Mp4) { validate_mp4_request } else { validate_request };
@@ -614,12 +653,14 @@ async fn capture_continuous_program(
     }
     crate::source_transform::validate_list(transforms.as_deref(), display_ids.len()+usize::from(video_device_id.is_some()))?;
     if transforms.is_some() && webcam { return Err("Disable the separate webcam inset for manual scene transforms".into()); }
-    let selected_profile = if let Some(ref id) = video_device_id {
+    let mut selected_profile = if let Some(ref id) = video_device_id {
         if !cfg!(target_os = "macos") || !matches!(format, ProgramFormat::Mp4) || !display_ids.is_empty() || webcam || id.is_empty() || id.len() > 1024 || id.chars().any(char::is_control) {
             return Err("Video device recording requires Mac MP4, one selected video input only, and webcam inset off".into());
         }
         validate_duration(&[0], seconds, &profile)?
     } else { validate_duration(&display_ids, seconds, &profile)? };
+    if bitrate_kbps.is_some() && !matches!(format, ProgramFormat::Mp4) { return Err("Bitrate presets require MP4".into()); }
+    selected_profile.bitrate_kbps = validate_bitrate(bitrate_kbps, selected_profile.bitrate_kbps)?;
     if selected_profile.label == "1080p30" && (!cfg!(target_os = "macos") || !matches!(format, ProgramFormat::Mp4)) {
         return Err("1080p30 diagnostic requires the Mac H.264 MP4 encoder".into());
     }
@@ -648,7 +689,7 @@ async fn capture_continuous_program(
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
-        let _ = (app, display_ids, selected_profile, format, layout, webcam, microphone, mic_gain, overlay, video_device_id, audio_inputs, transforms, session_id);
+        let _ = (app, display_ids, selected_profile, format, layout, webcam, microphone, mic_gain, overlay, video_device_id, audio_inputs, transforms, session_id, bitrate_kbps);
         Err("Continuous Program video capture requires a Mac or Windows desktop build".into())
     }
 }
@@ -660,7 +701,12 @@ mod tests {
     fn mp4_duration_and_stop_are_bounded_and_session_scoped() {
         use super::{validate_mp4_request, ProgramStopGuard, stop_continuous_program_mp4};
         assert!(validate_mp4_request(&[0], 30, "1080p30").is_ok());
-        assert!(validate_mp4_request(&[0], 31, "1080p30").is_err());
+        assert!(validate_mp4_request(&[0], 60, "1080p30").is_ok());
+        assert!(validate_mp4_request(&[0], 61, "1080p30").is_err());
+        use super::validate_bitrate;
+        assert_eq!(validate_bitrate(None, 6000).unwrap(), 6000);
+        assert_eq!(validate_bitrate(Some(1500), 6000).unwrap(), 1500);
+        assert!(validate_bitrate(Some(8000), 6000).is_err());
         assert!(validate_mp4_request(&[0], 1, "baseline").is_err());
         let guard = ProgramStopGuard::begin("current".into());
         assert!(!stop_continuous_program_mp4("old".into()));

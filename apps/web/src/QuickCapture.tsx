@@ -21,6 +21,7 @@ type CapturedFile = {
   requestedMaxSeconds?: number
   stoppedEarly?: boolean
   pausedMs?: number
+  targetBitrateKbps?: number
   audioTrackVerified?: boolean
   displayCount?: number
   videoInputCount?: number
@@ -68,6 +69,7 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
   const [mp4AvailabilityReason, setMp4AvailabilityReason] = useState('Native MP4 availability has not been checked')
   const [duration, setDuration] = useState(6)
   const [programAviDuration, setProgramAviDuration] = useState(4)
+  const [programBitrate, setProgramBitrate] = useState<'auto'|'1500'|'3000'|'6000'>('auto')
   const [continuousProfile, setContinuousProfile] = useState<'baseline' | '720p15' | '1080p30'>('baseline')
   const [programWebcam, setProgramWebcam] = useState(false)
   const [programMic, setProgramMic] = useState(false)
@@ -163,6 +165,8 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
   const [saved, setSaved] = useState<CapturedFile | null>(null)
   const [persistedClips, setPersistedClips] = useState<{ id: string; format: string }[] | null>(null)
   const [inventoryError, setInventoryError] = useState('')
+  const [recoveryBusy, setRecoveryBusy] = useState(false)
+  const [recoveryMessage, setRecoveryMessage] = useState('')
 
   useEffect(() => {
     if (!desktop) return
@@ -317,7 +321,7 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
         displayIds, seconds: programAviDuration, layout, transforms,
         ...(videoDeviceId ? { videoDeviceId } : {}),
         ...(mode !== 'sampled' ? { profile: continuousProfile, overlay: graphic ? { ...graphic, placement } : null } : {}),
-        ...(mode === 'mp4' ? { sessionId, webcam: programWebcam, microphone: programMic, micGain, audioInputs: audioRows.map(row=>row.input) } : {})
+        ...(mode === 'mp4' ? { sessionId, ...(programBitrate === 'auto' ? {} : {bitrateKbps:Number(programBitrate)}), webcam: programWebcam, microphone: programMic, micGain, audioInputs: audioRows.map(row=>row.input) } : {})
       })
       setSaved(result)
       await refreshSavedClips()
@@ -387,6 +391,19 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
     }
   }
 
+  async function recoverFinalizedRecordings() {
+    if (!mac || busy || recoveryBusy) return
+    setRecoveryBusy(true)
+    setRecoveryMessage('')
+    try {
+      const result = await request<{recovered:number;skipped:number;failed:number}>('/clips/recover-finalized-program', {})
+      setRecoveryMessage(`Recovered ${result.recovered} finalized recording(s); ${result.skipped} already present; ${result.failed} could not be recovered.`)
+      await refreshSavedClips()
+    } catch (cause) {
+      setRecoveryMessage('Recovery failed: ' + (cause as Error).message)
+    } finally { setRecoveryBusy(false) }
+  }
+
   async function reveal() {
     if (!saved) return
     setError('')
@@ -404,7 +421,7 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
   }
 
   const isMacProgram = mac
-  const canProgram = supportedDesktop && !busy && !loading && !graphicLoading && !audioSelectionError && (displays.length > 0 || mac)
+  const canProgram = supportedDesktop && !recoveryBusy && !busy && !loading && !graphicLoading && !audioSelectionError && (displays.length > 0 || mac)
   const overlayWidth = graphic ? Math.min(placement.widthPercent, 50 * 9 / 16 * graphic.width / graphic.height) : 0
   const overlayHeight = graphic ? overlayWidth * 16 / 9 * graphic.height / graphic.width : 0
   const peak = saved?.microphoneIncluded && typeof saved.audioPeak === 'number' ? saved.audioPeak : null
@@ -476,9 +493,14 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
               <option value="baseline">360p · 10 fps</option><option value="720p15">720p · 15 fps</option>{mac && <option value="1080p30">1080p · 30 fps (test)</option>}
             </select>
           </label>
+          {mac && <label className="dock-field">Target video bitrate
+            <select aria-label="Program MP4 target bitrate" value={programBitrate} disabled={busy} onChange={e=>setProgramBitrate(e.target.value as typeof programBitrate)}>
+              <option value="auto">Automatic by profile</option><option value="1500">1.5 Mbps</option><option value="3000">3 Mbps</option><option value="6000">6 Mbps</option>
+            </select>
+          </label>}
           <label className="dock-field">Recording length
             <select aria-label="Composed Program video test duration" value={programAviDuration} disabled={busy} onChange={event => setProgramAviDuration(Number(event.target.value))}>
-              {(mac ? [2,4,6,8,15,30] : [2,4,6,8]).map(seconds => <option key={seconds} value={seconds}>{seconds} seconds</option>)}
+              {(mac ? [2,4,6,8,15,30,45,60] : [2,4,6,8]).map(seconds => <option key={seconds} value={seconds}>{seconds} seconds</option>)}
             </select>
           </label>
           <button className="primary-button program-record" type="button" disabled={!canProgram} onClick={() => void captureProgramVideoTest(isMacProgram ? 'mp4' : 'continuous')}><span className="record-dot"/>{busy ? 'Capturing / finalizing…' : 'Record Program test'}</button>
@@ -558,6 +580,8 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
       <button className="secondary-button" type="button" disabled={busy} onClick={() => void refreshSavedClips()}>
         Refresh saved clips
       </button>
+      {mac && <button className="secondary-button" type="button" disabled={busy || recoveryBusy} onClick={() => void recoverFinalizedRecordings()}>{recoveryBusy ? 'Checking finalized files…' : 'Recover finalized Program recordings'}</button>}
+      {recoveryMessage && <small role="status">{recoveryMessage}</small>}
       {inventoryError && <small role="alert">{inventoryError}</small>}
     </div>}
     {!supportedDesktop && <p className="help-text">Native screen capture requires the Mac/Windows desktop application. Android and browser editions cannot record local desktop screens.</p>}
@@ -596,6 +620,7 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
           {saved.elapsedMs !== undefined ? ` ${(saved.elapsedMs / 1000).toFixed(2)}s wall-clock capture` : ' elapsed time unknown'}.
           The nominal output clock can differ from wall-clock capture when frames arrive late.
         </p>}
+        {typeof saved.targetBitrateKbps === 'number' && <p className="help-text">Requested video bitrate: {saved.targetBitrateKbps} kbps (encoder target, not guaranteed actual bitrate).</p>}
         {typeof saved.pausedMs === 'number' && saved.pausedMs > 0 && <p className="help-text">{(saved.pausedMs/1000).toFixed(2)}s paused input omitted from the nominal recording timeline.</p>}
         {saved.stoppedEarly && <p className="help-text" role="status">Program recording stopped early and finalized.</p>}
         {saved.overlayIncluded && <p className="help-text">Static graphic overlay included in output.</p>}

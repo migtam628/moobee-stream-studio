@@ -253,6 +253,10 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
   if (path === '/clips/macos-mp4-availability') {
     return await invoke('macos_mp4_availability')
   }
+  if (path === '/clips/recover-finalized-program') {
+    if (!macHost()) throw new Error('Program MP4 recovery requires macOS')
+    return await invoke('recover_finalized_program_recordings')
+  }
   if (path === '/clips/reveal') {
     if (typeof body.clipId !== 'string' ||
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(body.clipId)) {
@@ -295,10 +299,11 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
         !ids.every(id => typeof id === 'number' && Number.isSafeInteger(id) && id >= 0 && id <= 24) ||
         new Set(ids).size !== ids.length ||
         typeof body.seconds !== 'number' || !Number.isSafeInteger(body.seconds) ||
-        body.seconds < 2 || body.seconds > (mp4 ? 30 : 8) ||
+        body.seconds < 2 || body.seconds > (mp4 ? 60 : 8) ||
         (body.profile !== 'baseline' && body.profile !== '720p15' && body.profile !== '1080p30')) {
-      throw new Error('Choose 1–4 unique Program displays, a supported duration (MP4 up to 30 seconds, AVI up to 8) and capture profile')
+      throw new Error('Choose 1–4 unique Program displays, a supported duration (MP4 up to 60 seconds, AVI up to 8) and capture profile')
     }
+    if (body.bitrateKbps !== undefined && (!mp4 || typeof body.bitrateKbps !== 'number' || ![1500,3000,6000].includes(body.bitrateKbps))) throw new Error('Invalid MP4 bitrate preset')
     if (body.profile === '1080p30' && !mp4) throw new Error('1080p30 requires Mac MP4')
     if (body.sessionId !== undefined && (!mp4 || typeof body.sessionId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(body.sessionId))) throw new Error('Invalid Program session')
     if (body.webcam !== undefined && typeof body.webcam !== 'boolean') throw new Error('Invalid webcam selection')
@@ -323,7 +328,7 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
     const transforms = body.transforms === undefined || body.transforms === null ? undefined :
       Array.isArray(body.transforms) && body.transforms.length === (hasVideo?1:ids.length) ? body.transforms.map(validateTransform) : (()=>{throw new Error('Invalid source transform count')})()
     return await captureWithPreviewReleased(mp4 ? 'capture_continuous_program_mp4' : 'capture_continuous_program_avi', {
-      displayIds: ids, seconds: body.seconds, profile: body.profile, layout: validateSceneLayout(body.layout), transforms:transforms??null, overlay: body.overlay ?? null, ...(mp4 ? { sessionId: body.sessionId ?? null, webcam: body.webcam === true, microphone: body.microphone === true, micGain, ...(body.audioInputs !== undefined ? { audioInputs: body.audioInputs } : {}), ...(hasVideo ? { videoDeviceId } : {}) } : {})
+      displayIds: ids, seconds: body.seconds, profile: body.profile, layout: validateSceneLayout(body.layout), transforms:transforms??null, overlay: body.overlay ?? null, ...(mp4 ? { sessionId: body.sessionId ?? null, bitrateKbps: body.bitrateKbps ?? null, webcam: body.webcam === true, microphone: body.microphone === true, micGain, ...(body.audioInputs !== undefined ? { audioInputs: body.audioInputs } : {}), ...(hasVideo ? { videoDeviceId } : {}) } : {})
     })
   }
   if (path === '/clips/capture-program-test-avi') {

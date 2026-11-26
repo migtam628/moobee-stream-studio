@@ -4,7 +4,7 @@ use std::{ffi::{CStr, CString, c_void}, fs::OpenOptions, os::raw::{c_char,c_int}
 
 unsafe extern "C" {
     fn moobee_program_writer_create(path: *const c_char, width: c_int, height: c_int,
-        fps: c_int, microphone: c_int, error: *mut c_char, capacity: c_int) -> *mut c_void;
+        fps: c_int, microphone: c_int, bitrate_kbps: c_int, error: *mut c_char, capacity: c_int) -> *mut c_void;
     fn moobee_program_writer_append(handle: *mut c_void, rgba: *const u8, length: usize,
         error: *mut c_char, capacity: c_int) -> c_int;
     fn moobee_program_writer_append_audio(handle: *mut c_void, pcm: *const f32, frames: usize, error: *mut c_char, capacity: c_int) -> c_int;
@@ -22,10 +22,14 @@ impl ProgramMp4Sink {
         Self::new_with_audio(path,width,height,fps,false)
     }
     pub(crate) fn new_with_audio(path: &Path, width: u32, height: u32, fps: u32, microphone: bool) -> Result<Self,String> {
+        Self::new_with_settings(path, width, height, fps, microphone, if width == 1920 { 6000 } else { 3000 })
+    }
+    pub(crate) fn new_with_settings(path: &Path, width: u32, height: u32, fps: u32, microphone: bool, bitrate_kbps: u32) -> Result<Self,String> {
+        if !matches!(bitrate_kbps, 1500 | 3000 | 6000) { return Err("Invalid MP4 bitrate preset".into()); }
         let path = CString::new(path.to_string_lossy().as_bytes()).map_err(|_| "Invalid MP4 path")?;
         let mut error = [0; 512];
         let handle = unsafe { moobee_program_writer_create(path.as_ptr(), width as c_int,
-            height as c_int, fps as c_int, if microphone { 1 } else { 0 }, error.as_mut_ptr(), 512) };
+            height as c_int, fps as c_int, if microphone { 1 } else { 0 }, bitrate_kbps as c_int, error.as_mut_ptr(), 512) };
         if handle.is_null() { Err(message(&error)) } else { Ok(Self(handle)) }
     }
 
@@ -64,9 +68,100 @@ pub(crate) fn validate_finished(path: &Path) -> Result<(u64, f64), String> {
     Ok((bytes, duration))
 }
 
+// A ready file exists only after the encoder has finished and the MP4 has
+// passed the structural guard. Publish without replacing an existing clip.
+pub(crate) fn publish_ready(ready: &Path, destination: &Path) -> Result<(), String> {
+    let metadata = std::fs::symlink_metadata(ready).map_err(|e| e.to_string())?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err("Recording recovery requires a regular ready file".into());
+    }
+    std::fs::hard_link(ready, destination)
+        .map_err(|e| format!("Could not publish finalized recording; ready copy retained: {e}"))?;
+    // A failure to unlink the ready name must not turn a published clip into
+    // an error. The destination exists and the next recovery skips duplicates.
+    let _ = std::fs::remove_file(ready);
+    Ok(())
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecoveryReport {
+    recovered: u32,
+    skipped: u32,
+    failed: u32,
+}
+
+fn recover_ready_files(directory: &Path) -> Result<RecoveryReport, String> {
+    let mut report = RecoveryReport { recovered: 0, skipped: 0, failed: 0 };
+    if !directory.exists() { return Ok(report); }
+    for entry in std::fs::read_dir(directory).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        let Some(id) = name.strip_prefix(".clip-").and_then(|s| s.strip_suffix(".ready.mp4")) else { continue };
+        if !uuid::Uuid::parse_str(id).is_ok_and(|v| v.to_string() == id) { continue; }
+        let path = entry.path();
+        let destination = directory.join(format!("clip-{id}.mp4"));
+        if std::fs::symlink_metadata(&destination).is_ok() {
+            report.skipped += 1;
+            continue;
+        }
+        if !entry.file_type().is_ok_and(|t| t.is_file() && !t.is_symlink()) ||
+            validate_finished(&path).is_err() ||
+            publish_ready(&path, &destination).is_err() {
+            report.failed += 1;
+        } else { report.recovered += 1; }
+    }
+    Ok(report)
+}
+
+pub(crate) fn recover_finalized(app: tauri::AppHandle) -> Result<RecoveryReport, String> {
+    use tauri::Manager;
+    use std::sync::atomic::Ordering;
+    use crate::clip::{CaptureLock, CAPTURE_BUSY};
+    CAPTURE_BUSY.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .map_err(|_| "Stop the current native capture before recovery".to_owned())?;
+    let _guard = CaptureLock;
+    let directory = app.path().app_data_dir().map_err(|e| e.to_string())?.join("test-clips");
+    recover_ready_files(&directory)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn ready_publish_never_replaces_existing_destination() {
+        let dir = std::env::temp_dir().join(format!("moobee-ready-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&dir).unwrap();
+        let ready = dir.join(".ready.mp4");
+        let destination = dir.join("clip.mp4");
+        std::fs::write(&ready, b"new").unwrap();
+        std::fs::write(&destination, b"old").unwrap();
+        assert!(publish_ready(&ready, &destination).is_err());
+        assert_eq!(std::fs::read(&destination).unwrap(), b"old");
+        assert!(ready.exists());
+        std::fs::remove_file(&destination).unwrap();
+        publish_ready(&ready, &destination).unwrap();
+        assert_eq!(std::fs::read(&destination).unwrap(), b"new");
+        assert!(!ready.exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn recovery_ignores_partial_and_rejects_invalid_ready_files() {
+        let dir = std::env::temp_dir().join(format!("moobee-recovery-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&dir).unwrap();
+        let id = uuid::Uuid::new_v4();
+        let part = dir.join(format!(".clip-{id}.part.mp4"));
+        let ready = dir.join(format!(".clip-{id}.ready.mp4"));
+        std::fs::write(&part, b"incomplete").unwrap();
+        std::fs::write(&ready, b"invalid").unwrap();
+        let result = recover_ready_files(&dir).unwrap();
+        assert_eq!((result.recovered, result.skipped, result.failed), (0, 0, 1));
+        assert!(part.exists() && ready.exists());
+        assert!(!dir.join(format!("clip-{id}.mp4")).exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
     #[test]
     fn rejects_unsupported_dimensions_before_opening_output() {
         let path = std::env::temp_dir().join(format!("moobee-invalid-{}.mp4", uuid::Uuid::new_v4()));

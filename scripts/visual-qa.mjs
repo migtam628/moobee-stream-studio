@@ -175,7 +175,7 @@ try {
       if (cmd === 'list_test_clips') return window.__programRequests.length ? [clip] : [];
       if (cmd === 'capture_continuous_program_mp4') {
         window.__captureOrder.push('record'); window.__programRequests.push(args);
-        if (args.seconds === 30) return await new Promise(resolve => { window.__pendingProgram = {id:args.sessionId, resolve, paused:false}; });
+        if (args.seconds === 60) return await new Promise(resolve => { window.__pendingProgram = {id:args.sessionId, resolve, paused:false}; });
         return clip;
       }
       if (cmd === 'continuous_program_stats') {
@@ -188,11 +188,12 @@ try {
         window.__pendingProgram.paused = args.paused;
         return true;
       }
+      if (cmd === 'recover_finalized_program_recordings') return {recovered:1,skipped:0,failed:0};
       if (cmd === 'stop_continuous_program_mp4') {
         if (window.__pendingProgram?.id !== args.sessionId) return false;
         const pending = window.__pendingProgram;
         window.__pendingProgram = null;
-        pending.resolve({...clip, requestedMaxSeconds:30, stoppedEarly:true});
+        pending.resolve({...clip, requestedMaxSeconds:60, targetBitrateKbps:3000, stoppedEarly:true});
         return true;
       }
       throw new Error('Unexpected simulated command: '+cmd);
@@ -306,7 +307,8 @@ try {
   const transformed=await macPage.evaluate(()=>window.__programRequests[2].transforms?.[0]);
   if(transformed?.x!==2500||transformed?.height!==5000||transformed?.cropLeft!==1000||transformed?.rotation!==90)throw new Error('Manual source geometry did not reach native recorder');
   await macPage.getByRole('button',{name:'Saved MP4 · View result',exact:true}).waitFor();
-  await macPage.getByLabel('Composed Program video test duration',{exact:true}).selectOption('30');
+  await macPage.getByLabel('Composed Program video test duration',{exact:true}).selectOption('60');
+  await macPage.getByLabel('Program MP4 target bitrate',{exact:true}).selectOption('3000');
   await macPage.getByRole('button',{name:'Record Program test',exact:true}).click();
   await macPage.waitForFunction(()=>!!window.__pendingProgram);
   await macPage.getByText('recording · 2.0s media',{exact:true}).waitFor();
@@ -317,7 +319,10 @@ try {
   await macPage.getByRole('button',{name:'Stop and save Program MP4',exact:true}).click();
   await macPage.getByRole('button',{name:'Saved MP4 · View result',exact:true}).waitFor();
   const longer = await macPage.evaluate(()=>window.__programRequests.at(-1));
-  if (longer.seconds!==30 || !longer.sessionId) throw new Error('Long Program capture did not route session');
+  if (longer.seconds!==60 || longer.bitrateKbps!==3000 || !longer.sessionId) throw new Error('Long Program capture did not route session');
+  await macPage.getByRole('button',{name:'Capture diagnostics',exact:true}).click();
+  await macPage.getByRole('button',{name:'Recover finalized Program recordings',exact:true}).click();
+  await macPage.getByText('Recovered 1 finalized recording(s); 0 already present; 0 could not be recovered.',{exact:true}).waitFor();
   await macPage.close();
   const mobile = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
   await mobile.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'domcontentloaded' });
