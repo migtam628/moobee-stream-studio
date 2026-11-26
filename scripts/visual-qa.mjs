@@ -367,6 +367,33 @@ try {
   await macPage.getByRole('button',{name:'Stop and save Program MP4',exact:true}).click();
   await macPage.getByRole('button',{name:'Saved MP4 · View result',exact:true}).waitFor();
   await macPage.close();
+  const winPage = await browser.newPage({viewport:{width:1440,height:900},userAgent:'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36'});
+  winPage.on('pageerror',error=>errors.push(error.message));
+  await winPage.addInitScript(()=>{
+    window.isTauri=true;
+    localStorage.setItem('moobee-native-studio.v1',JSON.stringify({version:1,currentScene:'Gameplay',previewScene:'Gameplay',studioMode:false,scenes:[{name:'Gameplay',layout:'grid',sources:[{id:1,name:'Display',kind:'display',deviceId:'0',enabled:true}]}]}));
+    const clip={id:'e9525c58-0e63-40b3-94b6-a9d0f0de4e99',path:'C:/test/clip.mp4',format:'mp4',bytes:200000,durationSeconds:4,displayCount:1,microphoneIncluded:false,width:1920,height:1080,fps:30};
+    const canvas=document.createElement('canvas');canvas.width=960;canvas.height=540;
+    const ctx=canvas.getContext('2d');ctx.fillStyle='#123456';ctx.fillRect(0,0,960,540);
+    window.__TAURI_INTERNALS__={invoke:async(cmd,args)=>{
+      if(cmd==='list_displays')return [{id:0,name:'Display',width:1920,height:1080}];
+      if(cmd==='capture_scene_snapshot')return canvas.toDataURL('image/png');
+      if(cmd==='macos_mp4_availability')return {supported:false};
+      if(cmd==='list_test_clips')return window.__winRequest?[clip]:[];
+      if(cmd==='continuous_program_stats')return null;
+      if(cmd==='capture_continuous_program_mp4'){window.__winRequest=args;return clip;}
+      throw new Error('Unexpected Windows simulated command: '+cmd);
+    }};
+  });
+  await winPage.goto(`http://127.0.0.1:${port}/`,{waitUntil:'domcontentloaded'});
+  await winPage.getByLabel('Continuous Program test profile',{exact:true}).selectOption('1080p30');
+  await winPage.getByLabel('Program MP4 target bitrate',{exact:true}).selectOption('3000');
+  if(await winPage.getByRole('checkbox',{name:'Enable microphone',exact:true}).isEnabled())throw new Error('Windows audio incorrectly enabled');
+  await winPage.getByRole('button',{name:'Record Program test',exact:true}).click();
+  await winPage.getByRole('button',{name:'Saved MP4 · View result',exact:true}).waitFor();
+  const winRequest=await winPage.evaluate(()=>window.__winRequest);
+  if(winRequest.profile!=='1080p30'||winRequest.bitrateKbps!==3000||winRequest.microphone||winRequest.webcam||winRequest.audioInputs!==undefined||!winRequest.sessionId)throw new Error('Windows silent MP4 routing failed');
+  await winPage.close();
   const mobile = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
   await mobile.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'domcontentloaded' });
   await mobile.getByRole('heading', { name: 'Studio' }).waitFor();
