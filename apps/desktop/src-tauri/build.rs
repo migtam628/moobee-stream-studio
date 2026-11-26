@@ -57,5 +57,15 @@ fn main() {
         println!("cargo:rustc-link-lib=framework=CoreVideo");
         println!("cargo:rustc-link-lib=framework=ScreenCaptureKit");
     }
+    println!("cargo:rerun-if-changed=windows/MooBeeProgramWriter.cpp");
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        // The MSVC Windows SDK supplies Media Foundation and COM. No runtime
+        // helper executable or third-party encoder is packaged.
+        cc::Build::new().cpp(true).file("windows/MooBeeProgramWriter.cpp")
+            .flag_if_supported("/std:c++17").compile("moobee_mf");
+        for lib in ["mfplat","mfreadwrite","mfuuid","ole32"] {
+            println!("cargo:rustc-link-lib={lib}");
+        }
+    }
     tauri_build::build();
 }
