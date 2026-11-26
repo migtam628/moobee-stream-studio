@@ -31,15 +31,24 @@ impl Worker{
             .map_err(|_|"Could not start publishing worker")?;
         Ok(Self{shared,handle:Some(handle)})
     }
-    pub(crate) fn submit(&self,packet:Packet)->Result<(),String>{
+    pub(crate) fn submit(&self,packet:Packet)->Result<(),String>{self.submit_batch(vec![packet])}
+    pub(crate) fn submit_batch(&self,packets:Vec<Packet>)->Result<(),String>{
         let mut m=self.shared.mail.lock().map_err(|_|"Publishing worker unavailable")?;
         if m.command!=Command::Running||matches!(m.stats.phase,Phase::Stopped|Phase::Failed){return Err("Publishing worker is inactive".into())}
-        let len=packet.payload.len();
-        if len<2||len>MAX_PACKET_BYTES||m.packets.len()>=MAX_PENDING_PACKETS||len>MAX_PENDING_BYTES-m.bytes{
+        let len=packets.iter().try_fold(0usize,|sum,p|{
+            if !(2..=MAX_PACKET_BYTES).contains(&p.payload.len()){None}else{sum.checked_add(p.payload.len())}
+        });
+        if packets.is_empty()||packets.len()>MAX_PENDING_PACKETS-m.packets.len()||len.is_none_or(|n|n>MAX_PENDING_BYTES-m.bytes){
             m.command=Command::Fail;m.packets.clear();m.bytes=0;self.shared.wake.notify_one();
             return Err("Publishing mailbox overflow or invalid packet; new session required".into());
         }
-        m.bytes+=len;m.packets.push_back(packet);self.shared.wake.notify_one();Ok(())
+        m.bytes+=len.unwrap();m.packets.extend(packets);self.shared.wake.notify_one();Ok(())
+    }
+    pub(crate) fn request_failure(&self){
+        if let Ok(mut m)=self.shared.mail.lock(){
+            if m.command==Command::Running{m.command=Command::Fail;}
+            m.packets.clear();m.bytes=0;m.inbound_ready=false;self.shared.wake.notify_one();
+        }
     }
     /// The transport owner must establish that a complete inbound chunk can be
     /// read before signaling. A socket becoming readable alone is insufficient.
