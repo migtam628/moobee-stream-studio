@@ -1,0 +1,12 @@
+# Priority 5A — Native source filters and monitor transition previews
+
+The native source transform editor now accepts optional validated color and alpha controls: brightness (-100 to 100), contrast and saturation (0 to 200, neutral 100), opacity (0 to 100), and a basic green chroma key. Older scene collections without filters retain their prior rendering behavior. Filter settings persist as part of native source geometry and are applied by the same Rust compositor for supported display snapshots, moving Mac video preview, composed AVI and Mac Program MP4. Direct display recording is separate and does not apply filters. Existing source-count, separate webcam inset and device restrictions remain. The basic green key is a hard green-dominance threshold, not professional matte estimation or spill suppression. Opaque letterbox behavior is retained for unkeyed opaque sources; keyed and partially transparent layers reveal lower layers.
+
+Studio Mode offers Cut, Fade, Slide reveal and Wipe, with a 150/300/500/1000 ms monitor animation. The outgoing monitor snapshot is animated over the incoming monitor frame when it arrives. This is a **monitor-only preview**; it does not alter the native encoded Program stream or active recording, which still snapshots scene configuration on start. Reduced-motion preference, unavailable frames, paused refresh and preview failures fall back to a cut or a bounded wait. Settings are local to the current Studio view. Native scene switching during recording, two-scene simultaneous composition and timestamped output transitions remain a separate milestone.
+
+## Acceptance
+
+- Rust pixel regression verifies keyed/zero-opacity layers reveal underlying pixels, grayscale and brightness, and old geometry round trips; run source_transform tests on Mac.
+- Browser smoke tests use simulated native IPC to verify filter values reach moving preview and recording commands and a Studio Take displays and dismisses the outgoing transition layer.
+- On physical Mac and Windows, compare display preview with independently decoded recordings for each filter and profile. Use a real capture card/camera for chroma key; check edges, opacity and frame performance. Verify imported/exported scene settings. On Mac measure A/V timing and capture backlog with filters enabled.
+- Check all monitor transitions and durations, reduced motion, missing inputs, paused preview and repeated Take. Do not represent monitor animation as encoded output. No installer release is requested.

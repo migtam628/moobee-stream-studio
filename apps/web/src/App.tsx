@@ -75,14 +75,52 @@ function formatElapsed(seconds: number) {
 }
 
 type PreviewRefresh = 'live' | 'fast' | 'normal' | 'paused'
+type MonitorTransition = { kind: 'cut' | 'fade' | 'slide' | 'wipe'; durationMs: number }
 
-function ScenePreview({ status, label, previewScene, active, refreshRate, revision, editor }: { status: StudioStatus; label: string; previewScene: string; active: boolean; refreshRate: PreviewRefresh; revision: string; editor?:ReactNode }) {
+function ScenePreview({ status, label, previewScene, active, refreshRate, revision, editor, monitorTransition }: { status: StudioStatus; label: string; previewScene: string; active: boolean; refreshRate: PreviewRefresh; revision: string; editor?:ReactNode; monitorTransition?:MonitorTransition }) {
   const [image, setImage] = useState('')
   const [previewError, setPreviewError] = useState('')
   const [lastFrame, setLastFrame] = useState<number | null>(null)
   const [moving, setMoving] = useState(false)
   const inFlight = useRef(false)
-  useEffect(() => { setImage(''); setPreviewError(''); setLastFrame(null); setMoving(false) }, [previewScene, revision, refreshRate])
+  const lastImage = useRef('')
+  const lastScene = useRef(previewScene)
+  const transitionConfig = useRef(monitorTransition)
+  transitionConfig.current = monitorTransition
+  const [outgoing, setOutgoing] = useState<{image:string;kind:MonitorTransition['kind'];durationMs:number}|null>(null)
+  const [incomingReady,setIncomingReady] = useState(false)
+  const outgoingRef = useRef<HTMLImageElement>(null)
+  useEffect(() => {
+    const config=transitionConfig.current
+    const changed=lastScene.current!==previewScene
+    setOutgoing(changed && refreshRate!=='paused' && config && config.kind!=='cut' && lastImage.current &&
+      !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      ? {image:lastImage.current,kind:config.kind,durationMs:config.durationMs} : null)
+    lastScene.current=previewScene
+    lastImage.current=''
+    setIncomingReady(false)
+    setImage(''); setPreviewError(''); setLastFrame(null); setMoving(false)
+  }, [previewScene, revision, refreshRate])
+  useEffect(()=>{
+    if(!outgoing)return
+    // Avoid displaying a stale scene indefinitely if its replacement cannot load.
+    const timeout=setTimeout(()=>setOutgoing(current=>current===outgoing?null:current),5000)
+    return ()=>clearTimeout(timeout)
+  },[outgoing])
+  const hasIncomingImage=Boolean(image)
+  useEffect(()=>{
+    if(!outgoing||!incomingReady||!hasIncomingImage||!outgoingRef.current)return
+    const frames:Keyframe[]=outgoing.kind==='fade'?[{opacity:1},{opacity:0}]:
+      outgoing.kind==='slide'?[{transform:'translateX(0)'},{transform:'translateX(-100%)'}]:
+      [{clipPath:'inset(0 0 0 0)'},{clipPath:'inset(0 0 0 100%)'}]
+    let cancelled=false
+    let animation:Animation|undefined
+    try{
+      animation=outgoingRef.current.animate(frames,{duration:outgoing.durationMs,easing:'linear',fill:'forwards'})
+      void animation.finished.then(()=>{if(!cancelled)setOutgoing(current=>current===outgoing?null:current)}).catch(()=>{})
+    }catch{setOutgoing(current=>current===outgoing?null:current)}
+    return ()=>{cancelled=true;animation?.cancel()}
+  },[outgoing,incomingReady,hasIncomingImage])
   useEffect(() => {
     if (!active || !status.connected || !previewScene || refreshRate === 'paused') return
     let cancelled = false
@@ -101,12 +139,12 @@ function ScenePreview({ status, label, previewScene, active, refreshRate, revisi
           setMoving(response.liveVideo === true)
           setPreviewError('')
           delay = response.liveVideo ? 100 : refreshRate === 'normal' ? 5000 : 1000
-          if (response.waiting) { setImage(''); setLastFrame(null); key = null }
-          else if (response.image) { setImage(response.image); setLastFrame(Date.now()); key = response.frameKey ?? null }
-          else if (!response.liveVideo || !response.frameKey) { setImage(''); setLastFrame(null); key = null }
+          if (response.waiting) { lastImage.current=''; setImage(''); setLastFrame(null); key = null }
+          else if (response.image) { lastImage.current=response.image; setImage(response.image); setLastFrame(Date.now()); key = response.frameKey ?? null }
+          else if (!response.liveVideo || !response.frameKey) { lastImage.current=''; setImage(''); setLastFrame(null); key = null }
         }
       } catch (error) {
-        if (!cancelled) { setImage(''); setLastFrame(null); setMoving(false); key = null; delay = 1000; setPreviewError((error as Error).message || 'Could not render native scene preview') }
+        if (!cancelled) { lastImage.current=''; setOutgoing(null); setImage(''); setLastFrame(null); setMoving(false); key = null; delay = 1000; setPreviewError((error as Error).message || 'Could not render native scene preview') }
       } finally {
         inFlight.current = false
         if (!cancelled) timer = setTimeout(load, delay)
@@ -118,7 +156,8 @@ function ScenePreview({ status, label, previewScene, active, refreshRate, revisi
   return <div className="preview-block">
     <div className="preview-heading"><span><Monitor size={15}/>{label}</span><span>{!status.connected ? 'Local studio offline' : refreshRate === 'paused' ? 'Preview paused' : moving ? 'Native video · up to 10 fps' : refreshRate === 'live' ? 'Display stills / waiting for video' : refreshRate === 'fast' ? 'Still frames · 1s interval' : 'Still frames · 5s interval'}</span></div>
     <div className="preview-canvas">
-      {image ? <img src={image} alt={`MooBee scene: ${previewScene}`} /> : <div className="preview-empty"><Radio size={34}/><strong>{refreshRate === 'paused' ? 'Preview paused' : moving ? 'Waiting for native video' : 'No preview available'}</strong><span>{status.connected ? 'Add or enable a compatible source in this scene' : 'Add a native display source to preview this scene'}</span></div>}
+      {image ? <img src={image} alt={`MooBee scene: ${previewScene}`} onLoad={()=>setIncomingReady(true)} /> : <div className="preview-empty"><Radio size={34}/><strong>{refreshRate === 'paused' ? 'Preview paused' : moving ? 'Waiting for native video' : 'No preview available'}</strong><span>{status.connected ? 'Add or enable a compatible source in this scene' : 'Add a native display source to preview this scene'}</span></div>}
+      {outgoing && <><img ref={outgoingRef} className="monitor-transition-outgoing" src={outgoing.image} alt="" aria-hidden="true"/><span className="monitor-transition-label">Monitor transition preview</span></>}
       {editor}
       {status.streaming && <span className="live-flag">LIVE</span>}
       {lastFrame !== null && <span className="snapshot-timestamp" title="Time the last preview frame was received">{new Date(lastFrame).toLocaleTimeString()}</span>}
@@ -253,6 +292,8 @@ function MixerPanel({ status, perform, pending }: { status: StudioStatus; perfor
 
 function Studio({ status, perform, pending, setTab, active }: { status: StudioStatus; perform: (path: string, body: object) => Promise<boolean>; pending: boolean; setTab: (t: Tab) => void; active: boolean }) {
   const [refreshRate, setRefreshRate] = useState<PreviewRefresh>('fast')
+  const [monitorTransitionKind,setMonitorTransitionKind]=useState<MonitorTransition['kind']>('cut')
+  const [monitorTransitionMs,setMonitorTransitionMs]=useState(300)
   const macVideoPreview = runningInTauri() && /Macintosh|Mac OS X/i.test(navigator.userAgent)
   useEffect(() => {
     if (!active || refreshRate !== 'live' || !macVideoPreview) return
@@ -279,12 +320,13 @@ function Studio({ status, perform, pending, setTab, active }: { status: StudioSt
         <label className="preview-rate-control">Preview refresh <select aria-label="Preview refresh" value={refreshRate} onChange={e => setRefreshRate(e.target.value as PreviewRefresh)}>{macVideoPreview && <option value="live">Live video inputs (Mac)</option>}<option value="fast">1 second</option><option value="normal">5 seconds</option><option value="paused">Paused</option></select></label>
         <button className={`tool-button ${status.studioMode ? 'tool-active' : ''}`} aria-pressed={status.studioMode} disabled={!status.connected || pending} onClick={() => void perform('/studio/action', { action: 'studioMode', studioModeEnabled: !status.studioMode })}><Layers size={15}/>Studio Mode</button>
         {runningInTauri() && <button className={`tool-button ${editTransforms?'tool-active':''}`} aria-pressed={editTransforms} disabled={pending||!initial} onClick={()=>setEditTransforms(v=>!v)}><SlidersHorizontal size={15}/>Edit sources</button>}
+        {status.studioMode && runningInTauri() && <><label className="preview-rate-control">Monitor transition <select aria-label="Monitor transition" value={monitorTransitionKind} onChange={e=>setMonitorTransitionKind(e.target.value as MonitorTransition['kind'])}><option value="cut">Cut</option><option value="fade">Fade</option><option value="slide">Slide reveal</option><option value="wipe">Wipe</option></select></label>{monitorTransitionKind!=='cut' && <label className="preview-rate-control">Duration <select aria-label="Monitor transition duration" value={monitorTransitionMs} onChange={e=>setMonitorTransitionMs(Number(e.target.value))}>{[150,300,500,1000].map(ms=><option key={ms} value={ms}>{ms} ms</option>)}</select></label>}</>}
         {status.studioMode && <button className="tool-button take-button" disabled={!status.connected || pending} onClick={() => void perform('/studio/action', { action: 'transition' })}><RefreshCcw size={15}/>Take</button>}
       </div>
     </div>
     <div className={`production-monitor-grid ${status.studioMode ? 'dual-monitor' : 'single-monitor'}`}>
       {status.studioMode && <div className="production-monitor preview-monitor"><ScenePreview status={status} label="Preview" previewScene={status.previewScene || status.currentScene} active={active} refreshRate={refreshRate} revision={revisionFor(status.previewScene || status.currentScene)} editor={editor}/><span className="monitor-scene-name">{status.previewScene || status.currentScene || 'No scene'}</span></div>}
-      <div className="production-monitor program-monitor"><ScenePreview status={status} label="Program" previewScene={status.currentScene} active={active} refreshRate={refreshRate} revision={revisionFor(status.currentScene)} editor={status.studioMode?undefined:editor}/><span className="monitor-scene-name">{status.currentScene || 'No scene'} <small>· Not live output</small></span></div>
+      <div className="production-monitor program-monitor"><ScenePreview status={status} label="Program" previewScene={status.currentScene} active={active} refreshRate={refreshRate} revision={revisionFor(status.currentScene)} editor={status.studioMode?undefined:editor} monitorTransition={status.studioMode?{kind:monitorTransitionKind,durationMs:monitorTransitionMs}:undefined}/><span className="monitor-scene-name">{status.currentScene || 'No scene'} <small>· Not live output{status.studioMode && monitorTransitionKind!=='cut' ? ' · Monitor transition only' : ''}</small></span></div>
     </div>
     <QuickCapture active={active} scenes={<ScenesPanel status={status} perform={perform} pending={pending}/>}
       sources={<SourcesPanel status={status} perform={perform} pending={pending} selectedSource={source?.id??null} selectSource={id=>{setSelectedSource(id);setEditTransforms(true)}} inspector={inspector}/>}
