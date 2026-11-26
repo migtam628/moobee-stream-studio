@@ -127,7 +127,7 @@ pub(crate) mod tls {
         }
         let socket=socket.ok_or("RTMPS TCP connection failed")?;
         socket.set_nodelay(true).map_err(|_|"RTMPS socket configuration failed")?;
-        let connector=native_tls::TlsConnector::new().map_err(|_|"RTMPS TLS initialization failed")?;
+        let connector=native_tls::TlsConnector::builder().min_protocol_version(Some(native_tls::Protocol::Tlsv12)).build().map_err(|_|"RTMPS TLS initialization failed")?;
         let tls=connector.connect(&target.host,DeadlineSocket{socket,deadline:Some(Instant::now()+NEGOTIATION_TIMEOUT)})
             .map_err(|_|"RTMPS TLS certificate validation or handshake failed")?;
         let mut random=[0u8;1528];getrandom::fill(&mut random).map_err(|_|"RTMP handshake randomness unavailable")?;
