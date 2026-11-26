@@ -16,9 +16,9 @@ private final class EncodedFrame {
     var status: OSStatus = -1
     let done = DispatchSemaphore(value:0)
 }
-private let outputCallback: VTCompressionOutputCallback = { _, ref, status, _, sample in
+private let outputCallback: VTCompressionOutputCallback = { ref, _, status, _, sample in
     guard let ref else { return }
-    let frame = Unmanaged<EncodedFrame>.fromOpaque(ref).takeRetainedValue()
+    let frame = Unmanaged<EncodedFrame>.fromOpaque(ref).takeUnretainedValue()
     frame.lock.lock()
     frame.status = status
     frame.sample = sample
@@ -26,6 +26,7 @@ private let outputCallback: VTCompressionOutputCallback = { _, ref, status, _, s
     frame.done.signal()
 }
 private final class AVCEncoder {
+    let frame = EncodedFrame()
     var session: VTCompressionSession?
     let width:Int
     let height:Int
@@ -44,7 +45,7 @@ private final class AVCEncoder {
             width:width,height:height,codecType:kCMVideoCodecType_H264,
             encoderSpecification:nil,imageBufferAttributes:nil,
             compressedDataAllocator:nil,outputCallback:outputCallback,
-            refcon:nil,compressionSessionOut:&created)
+            refcon:Unmanaged.passUnretained(frame).toOpaque(),compressionSessionOut:&created)
         guard status == noErr, let created else { return nil }
         session=created
         let props: [(CFString, CFTypeRef)] = [
@@ -86,20 +87,19 @@ private final class AVCEncoder {
             dst[j]=rgba[i+2];dst[j+1]=rgba[i+1];dst[j+2]=rgba[i];dst[j+3]=255
         }}
         CVPixelBufferUnlockBaseAddress(pixel,[])
-        let frame=EncodedFrame()
-        let token=Unmanaged.passRetained(frame).toOpaque()
+        frame.lock.lock();frame.sample=nil;frame.status = -1;frame.lock.unlock()
         let options = (forceKey || index==0) ? [kVTEncodeFrameOptionKey_ForceKeyFrame:kCFBooleanTrue] as CFDictionary : nil
         let rc=VTCompressionSessionEncodeFrame(session,imageBuffer:pixel,
             presentationTimeStamp:CMTime(value:index,timescale:fps),
             duration:CMTime(value:1,timescale:fps),frameProperties:options,
-            sourceFrameRefcon:token,infoFlagsOut:nil)
-        if rc != noErr { Unmanaged<EncodedFrame>.fromOpaque(token).release();failed=true;return -1 }
+            sourceFrameRefcon:nil,infoFlagsOut:nil)
+        if rc != noErr {failed=true;return -1}
         // Flush each submitted frame. The diagnostic bridge is intentionally
         // synchronous; native driver stalls still need a separate watchdog.
         if VTCompressionSessionCompleteFrames(session,untilPresentationTime:.invalid) != noErr {
             failed=true;return -1
         }
-        guard frame.done.wait(timeout:.now()+2)==.success else {failed=true;return -1}
+        guard frame.done.wait(timeout: .now() + 2) == .success else {failed=true;return -1}
         frame.lock.lock();defer{frame.lock.unlock()}
         guard frame.status==noErr,let sample=frame.sample,
               let block=CMSampleBufferGetDataBuffer(sample),
