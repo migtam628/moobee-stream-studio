@@ -88,6 +88,8 @@ pub struct ProgramRecordingStats {
     completed_segments: u32,
     transition_busy: bool,
     transitions_completed: u32,
+    audio_peak: f32,
+    audio_missing_source_frames: u64,
 }
 struct ProgramSession {
     id: String,
@@ -107,6 +109,7 @@ impl ProgramStopGuard {
                 paused_ms: 0, file_bytes: 0, late_frames: 0, repeated_source_slots: 0,
                 segment_index: 1, segment_count: 1, completed_segments: 0,
                 transition_busy:false, transitions_completed:0,
+                audio_peak:0., audio_missing_source_frames:0,
             },
         });
         Self
@@ -147,6 +150,7 @@ impl ProgramStopGuard {
                 paused_ms: 0, file_bytes: 0, late_frames: 0, repeated_source_slots: 0,
                 segment_index: index, segment_count: count, completed_segments: index - 1,
                 transition_busy:false, transitions_completed:0,
+                audio_peak:0., audio_missing_source_frames:0,
             };
         }
     }
@@ -535,6 +539,7 @@ fn capture_to_dir(
     let mut audio_missing_source_frames=0u64;
     let mut audio_samples_written = 0u64;
     let mut audio_peak = 0.0f32;
+    let mut block_audio_peak = 0.0f32;
     let mut audio_clipped_samples = 0usize;
     let started = Instant::now();
     let total_frames = profile.fps * seconds;
@@ -617,6 +622,7 @@ fn capture_to_dir(
                 }
                 validate_frame_geometry(frame.width(), frame.height(), total_pixels)?;
             }
+            block_audio_peak=0.;
             if paused {
                 // Drain input queues while paused; no video or PCM is submitted
                 // to the encoder. Resume continues the contiguous media clock.
@@ -661,6 +667,7 @@ fn capture_to_dir(
                 let mixed = source.read((range.end-range.start) as usize, mic_gain)?;
                 writer.append_audio(&mixed.samples)?;
                 audio_samples_written = range.end;
+                block_audio_peak=mixed.peak;
                 audio_peak = audio_peak.max(mixed.peak);
                 audio_clipped_samples = audio_clipped_samples.saturating_add(mixed.clipped);
             }
@@ -670,6 +677,7 @@ fn capture_to_dir(
                 let (mixed,_) = mixer.read((range.end-range.start) as usize,inputs)?;
                 writer.append_audio(&mixed.samples)?;
                 audio_samples_written = range.end;
+                block_audio_peak=mixed.peak;
                 audio_peak = audio_peak.max(mixed.peak);
                 audio_clipped_samples = audio_clipped_samples.saturating_add(mixed.clipped);
             }
@@ -680,6 +688,7 @@ fn capture_to_dir(
                 writer.append_audio(&mixed.samples)?;
                 audio_samples_written=range.end;
                 audio_missing_source_frames=audio_missing_source_frames.saturating_add(missing);
+                block_audio_peak=mixed.peak;
                 audio_peak=audio_peak.max(mixed.peak);
                 audio_clipped_samples=audio_clipped_samples.saturating_add(mixed.clipped);
             }
@@ -706,6 +715,7 @@ fn capture_to_dir(
                     file_bytes, late_frames,
                     segment_index: 1, segment_count: 1, completed_segments: 0,
                     transition_busy:false, transitions_completed:0,
+                audio_peak:block_audio_peak, audio_missing_source_frames,
                     repeated_source_slots: repeats.iter().map(|n| u64::from(*n)).sum::<u64>() + u64::from(webcam_repeated_slots),
                 });
             }
