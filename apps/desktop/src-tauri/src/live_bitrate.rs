@@ -73,8 +73,9 @@ mod tests{
         assert_eq!(a.inplace_target(5000,1),None);
         assert_eq!(a.inplace_target(3000,1),Some(3000));
         a.inplace_result(3000,Ok(true));assert_eq!(a.reading().current_kbps,Some(3000));
-        for n in 4..=13{a.observe(n*1000,&[row("sending",5*1024*1024)]);}
+        for n in 4..=12{a.observe(n*1000,&[row("sending",5*1024*1024)]);}
         assert_eq!(a.inplace_target(12000,1),None);
+        a.observe(13000,&[row("sending",5*1024*1024)]);
         assert_eq!(a.inplace_target(13000,1),Some(1500));
         a.inplace_result(1500,Ok(false));assert_eq!(a.reading().current_kbps,Some(3000));
         assert!(a.reading().inplace_unsupported);
