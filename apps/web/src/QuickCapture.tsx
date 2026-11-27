@@ -297,7 +297,7 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
 
   async function captureProgramVideoTest(mode: 'sampled' | 'continuous' | 'mp4' | 'flv' = 'sampled') {
     if (!supportedDesktop || loading || busy || graphicLoading || (mode === 'mp4' && !supportedDesktop)) return
-    if (mode === 'flv' && (!mac || programWebcam || programAviDuration>8)) return
+    if (mode === 'flv' && (!supportedDesktop || programWebcam || programAviDuration>8)) return
     if (mode !== 'mp4' && mode !== 'flv' && (programAviDuration > 8 || continuousProfile === '1080p30')) return
     const sessionId = mode === 'mp4' ? crypto.randomUUID() : null
     programSessionRef.current = sessionId
@@ -545,8 +545,8 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
         {supportedDesktop && <div className="clip-actions">
           <button className="secondary-button" disabled={!canProgram || programAviDuration > 8 || continuousProfile === '1080p30'} onClick={() => void captureProgramVideoTest('sampled')}>Sampled Program AVI</button>
           <button className="secondary-button" disabled={!canProgram || continuousProfile === '1080p30' || programAviDuration > 8} onClick={() => void captureProgramVideoTest('continuous')}>Continuous-source Program AVI</button>
-          {mac && <button className="secondary-button" disabled={!canProgram || programWebcam || programAviDuration>8} onClick={()=>void captureProgramVideoTest('flv')}>Offline streaming packet FLV test</button>}
-          {mac && <small className="dock-note">FLV: local 2–8 second live-encoder diagnostic. No network connection; separate webcam inset must be off.</small>}
+          {supportedDesktop && <button className="secondary-button" disabled={!canProgram || programWebcam || programAviDuration>8} onClick={()=>void captureProgramVideoTest('flv')}>Offline streaming packet FLV test</button>}
+          {supportedDesktop && <small className="dock-note">FLV: local 2–8 second live-encoder diagnostic. No network connection; separate webcam inset must be off.</small>}
         </div>}
     <div className="quick-capture-options">
       <label>Display
