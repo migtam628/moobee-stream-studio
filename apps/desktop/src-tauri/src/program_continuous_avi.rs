@@ -388,7 +388,6 @@ enum FrameSink {
     #[cfg(target_os = "windows")]
     Mp4(crate::windows_mp4_sink::WindowsMp4Sink),
     Flv(crate::live_flv::NativeSink),
-    #[cfg(target_os = "macos")]
     Live(crate::live_program_sink::Sink),
 }
 
@@ -397,10 +396,7 @@ impl FrameSink {
     fn open(path: &std::path::Path, format: ProgramFormat, profile: EncodingProfile, microphone: bool, live_connector:Option<Box<dyn FnOnce()->Result<crate::live_publish_worker::Worker,String>>>) -> Result<Self, String> {
         match format {
             ProgramFormat::Live => {
-                #[cfg(target_os = "macos")]
-                { Ok(Self::Live(crate::live_program_sink::Sink::open(profile.width,profile.height,profile.fps,profile.bitrate_kbps,microphone,live_connector.ok_or("Missing authorized publisher connector")?)?)) }
-                #[cfg(target_os = "windows")]
-                { let _=live_connector; Err("Native live encoding requires macOS".into()) }
+                Ok(Self::Live(crate::live_program_sink::Sink::open(profile.width,profile.height,profile.fps,profile.bitrate_kbps,microphone,live_connector.ok_or("Missing authorized publisher connector")?)?))
             }
             ProgramFormat::Flv => {
                 Ok(Self::Flv(crate::live_flv::NativeSink::open(path,profile.width,profile.height,profile.fps,profile.bitrate_kbps,microphone)?))
@@ -433,7 +429,6 @@ impl FrameSink {
             #[cfg(any(target_os = "macos", target_os = "windows"))]
             Self::Mp4(writer) => writer.append(canvas.as_raw()),
             Self::Flv(writer) => writer.append(canvas),
-            #[cfg(target_os = "macos")]
             Self::Live(writer) => writer.append(canvas),
         }
     }
@@ -442,28 +437,24 @@ impl FrameSink {
         match self {
             Self::Mp4(writer) => writer.append_audio(pcm),
             Self::Flv(writer) => writer.append_audio(pcm),
-            #[cfg(target_os = "macos")]
             Self::Live(writer) => writer.append_audio(pcm),
             Self::Avi(_) => Err("AVI does not support the composed AAC diagnostic".into()),
         }
     }
     fn live_stats(&self)->Option<crate::live_publish_worker::WorkerStats>{
         match self{
-            #[cfg(target_os="macos")]
             Self::Live(w)=>w.stats().ok(),
             _=>None,
         }
     }
     fn retry_failure(&self)->Option<crate::live_reconnect::Failure>{
         match self{
-            #[cfg(target_os="macos")]
             Self::Live(w)=>w.retry_failure(),
             _=>None,
         }
     }
     fn sent_bytes(&self)->u64{
         match self{
-            #[cfg(target_os="macos")]
             Self::Live(w)=>w.sent_bytes(),
             _=>0,
         }
@@ -474,7 +465,6 @@ impl FrameSink {
             #[cfg(any(target_os = "macos", target_os = "windows"))]
             Self::Mp4(writer) => writer.finish(),
             Self::Flv(writer) => writer.finish().map_err(|e|(e,false)),
-            #[cfg(target_os = "macos")]
             Self::Live(writer) => writer.finish().map_err(|e|(e,false)),
         }
     }
@@ -880,7 +870,7 @@ fn capture_to_dir(
 }
 
 // This entry point is intentionally not registered as a Tauri command.
-#[cfg(target_os="macos")]
+#[cfg(any(target_os="macos",target_os="windows"))]
 pub(crate) fn capture_rtmps_program_test(
     display_ids:Vec<usize>,video_device_id:Option<String>,seconds:u32,profile:&str,
     bitrate_kbps:Option<u32>,layout:Option<&str>,
@@ -902,7 +892,7 @@ pub(crate) fn capture_rtmps_program_test(
 }
 
 // Internal only; no registered command can open an RTMPS destination.
-#[cfg(target_os="macos")]
+#[cfg(any(target_os="macos",target_os="windows"))]
 pub(crate) fn run_authorized_rtmps_session(
     run:crate::live_lifecycle::Run,display_ids:Vec<usize>,video_device_id:Option<String>,
     seconds:u32,profile:&str,bitrate_kbps:Option<u32>,layout:Option<&str>,
@@ -950,7 +940,7 @@ struct LiveOutput{
     lifecycle:Option<crate::live_lifecycle::Run>,
 }
 
-#[cfg(target_os="macos")]
+#[cfg(any(target_os="macos",target_os="windows"))]
 pub(crate) fn capture_authorized_live_program(
     display_ids:Vec<usize>,video_device_id:Option<String>,seconds:u32,profile:&str,
     bitrate_kbps:Option<u32>,layout:Option<&str>,
@@ -962,7 +952,7 @@ pub(crate) fn capture_authorized_live_program(
     capture_authorized_live_program_with_lifecycle(display_ids,video_device_id,seconds,profile,bitrate_kbps,layout,overlay,audio_inputs,transforms,stop,connect,None)
 }
 
-#[cfg(target_os="macos")]
+#[cfg(any(target_os="macos",target_os="windows"))]
 fn capture_authorized_live_program_with_lifecycle(
     display_ids:Vec<usize>,video_device_id:Option<String>,seconds:u32,profile:&str,
     bitrate_kbps:Option<u32>,layout:Option<&str>,
@@ -981,6 +971,8 @@ fn capture_authorized_live_program_with_lifecycle(
         }
     }else{crate::scene_compositor::validate_ids(&display_ids)?;}
     crate::program_audio::validate(&audio_inputs)?;
+    #[cfg(target_os="windows")]
+    crate::windows_audio::validate(&audio_inputs)?;
     crate::source_transform::validate_list(transforms.as_deref(),display_ids.len()+usize::from(video_device_id.is_some()))?;
     let layout=crate::scene_compositor::SceneLayout::parse(layout)?;
     if stop.load(Ordering::Acquire){return Err("Live Program cancelled before capture".into())}
@@ -1127,7 +1119,7 @@ async fn capture_continuous_program(
 #[cfg(test)]
 mod tests {
     use super::{validate_request, validate_frame_geometry, MAX_TOTAL_SOURCE_PIXELS};
-    #[cfg(target_os="macos")]
+    #[cfg(any(target_os="macos",target_os="windows"))]
     #[test]
     fn invalid_or_cancelled_live_request_never_connects(){
         use std::sync::{Arc,atomic::AtomicBool};
