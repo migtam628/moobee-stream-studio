@@ -1,14 +1,18 @@
 //! Same-thread producer for composed RGBA and aligned mixed PCM.
 //! The caller owns native capture, timing and user authorization.
-use crate::{macos_avc,macos_aac,media_clock::MediaClock,stream_mux::Packet,live_publish_worker::Worker};
+use crate::{media_clock::MediaClock,stream_mux::Packet,live_publish_worker::Worker};
+#[cfg(target_os="macos")]
+use crate::{macos_avc as avc,macos_aac as aac};
+#[cfg(target_os="windows")]
+use crate::{windows_avc as avc,windows_aac as aac};
 pub(crate) struct Encoder{
-    video:macos_avc::Encoder,audio:Option<macos_aac::Encoder>,clock:MediaClock,
+    video:avc::Encoder,audio:Option<aac::Encoder>,clock:MediaClock,
     fps:u32,tick:u32,failed:bool,
 }
 impl Encoder{
     pub(crate) fn new(width:u32,height:u32,fps:u32,kbps:u32,audio:bool)->Result<Self,String>{
-        Ok(Self{video:macos_avc::Encoder::new(width,height,fps,kbps)?,
-            audio:if audio{Some(macos_aac::Encoder::new()?)}else{None},
+        Ok(Self{video:avc::Encoder::new(width,height,fps,kbps)?,
+            audio:if audio{Some(aac::Encoder::new()?)}else{None},
             clock:MediaClock::new(fps)?,fps,tick:0,failed:false})
     }
     pub(crate) fn tick(&mut self,rgba:&[u8],pcm:Option<&[f32]>)->Result<Vec<Packet>,String>{
@@ -45,7 +49,7 @@ impl Encoder{
 mod tests{
     use super::*;
     #[test]
-    #[ignore="requires native macOS AVC and AAC encoders"]
+    #[ignore="requires functioning native AVC and AAC encoders"]
     fn composed_ticks_produce_queue_compatible_av_packets(){
         let mut e=Encoder::new(640,360,10,1500,true).unwrap();
         let mut q=crate::live_media_queue::MediaQueue::default();
