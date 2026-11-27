@@ -19,6 +19,8 @@ type CapturedFile = {
   format: string
   durationSeconds: number | null
   requestedMaxSeconds?: number
+  replayCaptureFrames?: number
+  replayWindowSeconds?: number
   stoppedEarly?: boolean
   pausedMs?: number
   targetBitrateKbps?: number
@@ -72,6 +74,7 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
   const [mp4AvailabilityReason, setMp4AvailabilityReason] = useState('Native MP4 availability has not been checked')
   const [duration, setDuration] = useState(6)
   const [programAviDuration, setProgramAviDuration] = useState(4)
+  const [replayWindow,setReplayWindow]=useState(10)
   const [programBitrate, setProgramBitrate] = useState<'auto'|'1500'|'3000'|'6000'>('auto')
   const [continuousProfile, setContinuousProfile] = useState<'baseline' | '720p15' | '1080p30'>('baseline')
   const [programWebcam, setProgramWebcam] = useState(false)
@@ -295,10 +298,11 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
     finally { setGraphicLoading(false) }
   }
 
-  async function captureProgramVideoTest(mode: 'sampled' | 'continuous' | 'mp4' | 'flv' = 'sampled') {
+  async function captureProgramVideoTest(mode: 'sampled' | 'continuous' | 'mp4' | 'flv' | 'replay' = 'sampled') {
     if (!supportedDesktop || loading || busy || graphicLoading || (mode === 'mp4' && !supportedDesktop)) return
     if (mode === 'flv' && (!supportedDesktop || programWebcam || programAviDuration>8)) return
-    if (mode !== 'mp4' && mode !== 'flv' && (programAviDuration > 8 || continuousProfile === '1080p30')) return
+    if (mode === 'replay' && (!supportedDesktop||programWebcam||programAviDuration>60||replayWindow>programAviDuration))return
+    if (mode !== 'mp4' && mode !== 'flv' && mode !== 'replay' && (programAviDuration > 8 || continuousProfile === '1080p30')) return
     const sessionId = mode === 'mp4' ? crypto.randomUUID() : null
     programSessionRef.current = sessionId
     setProgramSession(sessionId)
@@ -314,7 +318,7 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
       const videoDeviceId = programVideoInput(collection)
       const transforms=programTransforms(collection)
       if(transforms && mode==='mp4' && programWebcam)throw new Error('Disable the separate webcam inset to use manual source geometry.')
-      if (videoDeviceId && ((mode !== 'mp4' && mode !== 'flv') || !supportedDesktop || programWebcam)) throw new Error('Capture card recording requires native MP4; turn off the separate webcam inset.')
+      if (videoDeviceId && ((mode !== 'mp4' && mode !== 'flv' && mode !== 'replay') || !supportedDesktop || programWebcam)) throw new Error('Capture card recording requires native MP4; turn off the separate webcam inset.')
       const displayIds = videoDeviceId ? [] : programTestDisplayIds(collection)
       const state = collection as MinimalSceneCollection
       const layout = videoDeviceId ? validateSceneLayout(state.scenes.find(scene => scene.name === state.currentScene)?.layout) : programTestLayout(collection)
@@ -323,16 +327,16 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
       }
       const result = await request<CapturedFile>(mode === 'mp4'
         ? '/clips/capture-program-continuous-mp4'
-        : mode === 'flv' ? '/clips/capture-program-live-packets' : mode === 'continuous' ? '/clips/capture-program-continuous-avi' : '/clips/capture-program-test-avi', {
+        : (mode === 'flv'||mode==='replay') ? '/clips/capture-program-live-packets' : mode === 'continuous' ? '/clips/capture-program-continuous-avi' : '/clips/capture-program-test-avi', {
         displayIds, seconds: programAviDuration, layout, transforms,
         ...(videoDeviceId ? { videoDeviceId } : {}),
         ...(mode !== 'sampled' ? { profile: continuousProfile, overlay: graphic ? { ...graphic, placement } : null } : {}),
-        ...(mode === 'mp4' ? { sessionId, ...(programBitrate === 'auto' ? {} : {bitrateKbps:Number(programBitrate)}), webcam: programWebcam, microphone: programMic, micGain, audioInputs: audioRows.map(row=>row.input) } : mode === 'flv' ? { ...(programBitrate === 'auto' ? {} : {bitrateKbps:Number(programBitrate)}),audioInputs:audioRows.map(row=>row.input) } : {})
+        ...(mode === 'mp4' ? { sessionId, ...(programBitrate === 'auto' ? {} : {bitrateKbps:Number(programBitrate)}), webcam: programWebcam, microphone: programMic, micGain, audioInputs: audioRows.map(row=>row.input) } : (mode === 'flv'||mode==='replay') ? { ...(mode==='replay'?{replaySeconds:replayWindow}:{}), ...(programBitrate === 'auto' ? {} : {bitrateKbps:Number(programBitrate)}),audioInputs:audioRows.map(row=>row.input) } : {})
       })
       setSaved(result)
       await refreshSavedClips()
     } catch (cause) {
-      setError((mode === 'mp4' ? 'Composed H.264 MP4' : mode === 'flv' ? 'Offline streaming packet FLV' : mode === 'continuous' ? 'Continuous Program AVI' : 'Sampled Program AVI') + ' test failed: ' + (cause as Error).message)
+      setError((mode === 'mp4' ? 'Composed H.264 MP4' : mode === 'replay' ? 'Rolling replay' : mode === 'flv' ? 'Offline streaming packet FLV' : mode === 'continuous' ? 'Continuous Program AVI' : 'Sampled Program AVI') + ' test failed: ' + (cause as Error).message)
     } finally {
       programSessionRef.current = null
       setProgramSession(null)
@@ -546,6 +550,9 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
           <button className="secondary-button" disabled={!canProgram || programAviDuration > 8 || continuousProfile === '1080p30'} onClick={() => void captureProgramVideoTest('sampled')}>Sampled Program AVI</button>
           <button className="secondary-button" disabled={!canProgram || continuousProfile === '1080p30' || programAviDuration > 8} onClick={() => void captureProgramVideoTest('continuous')}>Continuous-source Program AVI</button>
           {supportedDesktop && <button className="secondary-button" disabled={!canProgram || programWebcam || programAviDuration>8} onClick={()=>void captureProgramVideoTest('flv')}>Offline streaming packet FLV test</button>}
+          <label>Replay window <select aria-label="Replay window" value={replayWindow} disabled={busy} onChange={e=>setReplayWindow(Number(e.target.value))}>{[2,4,5,10,15,20,30].map(s=><option key={s} value={s}>{s} seconds</option>)}</select></label>
+          <button className="secondary-button" disabled={!canProgram||programWebcam||programAviDuration>60||replayWindow>programAviDuration} onClick={()=>void captureProgramVideoTest('replay')}>Capture and save rolling replay</button>
+          <small className="dock-note">Offline replay exports the recent keyframe-aligned window at the end of the selected 2–60 second capture. No network or always-on recording.</small>
           {supportedDesktop && <small className="dock-note">FLV: local 2–8 second live-encoder diagnostic. No network connection; separate webcam inset must be off.</small>}
         </div>}
     <div className="quick-capture-options">
@@ -644,6 +651,7 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
         {typeof saved.pausedMs === 'number' && saved.pausedMs > 0 && <p className="help-text">{(saved.pausedMs/1000).toFixed(2)}s paused input omitted from the nominal recording timeline.</p>}
         {saved.stoppedEarly && <p className="help-text" role="status">Program recording stopped early and finalized.</p>}
         {saved.overlayIncluded && <p className="help-text">Static graphic overlay included in output.</p>}
+         {saved.replayWindowSeconds!==undefined&&<p className="help-text">Replay window: {saved.replayWindowSeconds}s requested · {saved.frameCount} saved frames of {saved.replayCaptureFrames} captured. Duration is keyframe-aligned, and may differ from the requested window.</p>}
         {(saved.microphoneIncluded || (saved.audioInputCount??0)>0) && <p className="help-text" role="status">AAC requested · {saved.audioSamplesWritten ?? 0} PCM frames supplied at 48 kHz · peak {Math.round((saved.audioPeak ?? 0)*100)}% · {saved.audioClippedSamples ?? 0} clipped samples. {typeof saved.audioMissingSourceFrames==='number'&&saved.audioMissingSourceFrames>0 ? ` Windows source shortfall: ${saved.audioMissingSourceFrames} source frames filled with silence.` : ''} Confirm the AAC track and audible audio independently; capture timestamps and drift are not verified.</p>}
         {saved.webcamIncluded && <p className="help-text" role="status">Webcam inset included · {saved.webcamFrames ?? 0} received frames · {saved.webcamRepeatedSlots ?? 0} repeated slots. Verify the actual clip.</p>}
         {saved.sourceFramesReceived && <p className="help-text" role="status">
