@@ -955,6 +955,55 @@ pub(crate) fn run_saved_destination_session(
     drop(lease);result
 }
 
+// All destinations must have explicit, independently confirmed previews.
+// Parallel negotiation occurs before any media is submitted. Keep leases
+// outside the connector until the entire capture and drain have finished.
+#[cfg(any(target_os="macos",target_os="windows"))]
+pub(crate) fn run_saved_multistream_session(
+    app:&tauri::AppHandle,run:crate::live_lifecycle::Run,
+    destinations:Vec<(String,String,String)>,explicitly_authorized:bool,
+    display_ids:Vec<usize>,video_device_id:Option<String>,seconds:u32,profile:&str,
+    bitrate_kbps:Option<u32>,layout:Option<&str>,
+    overlay:Option<crate::program_overlay::OverlayInput>,audio_inputs:Vec<crate::program_audio::AudioInput>,
+    transforms:Option<Vec<crate::source_transform::SourceTransform>>,
+)->Result<ContinuousProgramReport,String>{
+    if !run.native_active(){return Err("An active native streaming session is required".into())}
+    let result=(||{
+        if !explicitly_authorized||!(2..=crate::live_fanout::MAX_DESTINATIONS).contains(&destinations.len()){return Err("Confirm two or three destinations".into())}
+        let mut leases=Vec::new();let mut ids=std::collections::HashSet::new();
+        for (id,name,url) in destinations{
+            if !ids.insert(id.clone()){return Err("Duplicate destination".into())}
+            let lease=crate::stream_destinations::authorized_destination(app,&id,&name,&url,true)?;
+            leases.push((id,lease));
+        }
+        let credentials=leases.iter().map(|(id,l)|{let (url,key)=l.credentials();(id.clone(),url.to_owned(),key.to_owned())}).collect::<Vec<_>>();
+        let stop=run.stop_flag();let cancel=stop.clone();
+        let result=capture_live_fanout(display_ids,video_device_id,seconds,profile,bitrate_kbps,layout,overlay,audio_inputs,transforms,stop,move||{
+            if cancel.load(Ordering::Acquire){return Err("Multistream cancelled before connection".into())}
+            let publishers=std::thread::scope(|scope|{
+                let handles=credentials.into_iter().map(|(id,url,key)|scope.spawn(move||{
+                    crate::rtmp_session::tls::connect_tls(&url,&key).map(|p|(id,p))
+                })).collect::<Vec<_>>();
+                let mut publishers=Vec::new();
+                for h in handles{
+                    publishers.push(h.join().map_err(|_|"Destination negotiation worker stopped")??);
+                }
+                Ok::<_,String>(publishers)
+            })?;
+            if cancel.load(Ordering::Acquire){return Err("Multistream cancelled during connection".into())}
+            let mut workers=Vec::new();
+            for (id,publisher) in publishers{
+                let session=crate::live_session::Session::new(publisher)?;
+                let worker=crate::live_publish_worker::Worker::start_with_poll(session,|s|s.poll_tls_inbound())?;
+                workers.push((id,worker));
+            }
+            crate::live_fanout::Fanout::new(workers)
+        },Some(run.clone()));
+        drop(leases);result
+    })();
+    run.finish(result.is_ok());result
+}
+
 // The connector is injected by an explicitly authorized native caller.
 // Neither the browser nor Tauri command dispatcher can invoke this path yet.
 #[cfg(any(target_os="macos",target_os="windows"))]
