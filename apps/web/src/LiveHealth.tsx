@@ -2,7 +2,7 @@ import {useEffect,useState} from 'react'
 import {request,runningInTauri} from './api'
 
 type Health='unavailable'|'warmingUp'|'normal'|'backpressure'|'stalled'|'stale'|'ended'
-type Snapshot={mode:'native'|'rehearsal';phase:string;elapsedMs:number;sentPackets:number;sentPayloadBytes:number;mediaFrames:number;health:{health:Health;payloadKbps:number|null;outputFpsTenths:number|null;queueBytes:number;queuePackets:number;lateFramesInWindow:number|null;sampleAgeMs:number|null}}
+type Snapshot={mode:'native'|'rehearsal';phase:string;elapsedMs:number;sentPackets:number;sentPayloadBytes:number;mediaFrames:number;reconnectAttempt?:number;health:{health:Health;payloadKbps:number|null;outputFpsTenths:number|null;queueBytes:number;queuePackets:number;lateFramesInWindow:number|null;sampleAgeMs:number|null}}
 const labels:Record<Health,string>={unavailable:'Unavailable',warmingUp:'Collecting samples',normal:'Sender normal',backpressure:'Queue pressure',stalled:'Sender stalled',stale:'Stale sample',ended:'Ended'}
 export default function LiveHealth(){
   const native=runningInTauri()
@@ -32,8 +32,9 @@ export default function LiveHealth(){
     ['Queued payload',h==null?'—':(h.queueBytes/1048576).toFixed(2)+' MiB'],
     ['Late frames in sample window',h?.lateFramesInWindow==null?'—':String(h.lateFramesInWindow)],
     ['Sample age',h?.sampleAgeMs==null?'—':h.sampleAgeMs+' ms'],
-    ['Total sent payload',h==null?'—':((snapshot?.sentPayloadBytes??0)/1048576).toFixed(2)+' MiB'],
-    ['Total sent packets',h==null?'—':String(snapshot?.sentPackets??0)]
+    ['Epoch sent payload',h==null?'—':((snapshot?.sentPayloadBytes??0)/1048576).toFixed(2)+' MiB'],
+    ['Epoch sent packets',h==null?'—':String(snapshot?.sentPackets??0)],
+    ['Reconnect attempt',h==null?'—':String(snapshot?.reconnectAttempt??0)]
   ]
   return <section className="panel" aria-label="Native streaming health">
     <div className="panel-heading"><h2>Native streaming health</h2></div>
