@@ -296,8 +296,8 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
     finally { setGraphicLoading(false) }
   }
 
-  async function prepareLiveAcceptance(){
-    if(!supportedDesktop||busy||loading||graphicLoading||audioSelectionError||programWebcam||programAviDuration>60)throw new Error('Select a valid 2–60 second native Program capture with webcam inset off.')
+  async function prepareLiveAcceptance(seconds:number){
+    if(!supportedDesktop||busy||loading||graphicLoading||audioSelectionError||programWebcam||!Number.isInteger(seconds)||seconds<2||seconds>1800)throw new Error('Select a valid 2–1800 second native Program capture with webcam inset off.')
     const collection=await request<unknown>('/studio/collection')
     const state=collection as MinimalSceneCollection
     const videoDeviceId=programVideoInput(collection)
@@ -307,7 +307,7 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
     const layout=videoDeviceId?validateSceneLayout(scene?.layout):programTestLayout(collection)
     return {scene:state.currentScene,sources:videoDeviceId?[ 'Selected capture device: '+videoDeviceId ]:displayIds.map(id=>displays.find(d=>d.id===id)?.name??String(id)),
       audio:audioRows.map(row=>row.name+' · '+(row.input.muted?'muted':Math.round(row.input.gain*100)+'% gain')),
-      config:{displayIds,videoDeviceId:videoDeviceId??null,seconds:programAviDuration,profile:continuousProfile,layout,transforms:programTransforms(collection)??null,
+      config:{displayIds,videoDeviceId:videoDeviceId??null,seconds,profile:continuousProfile,layout,transforms:programTransforms(collection)??null,
         overlay:graphic?{...graphic,placement}:null,audioInputs:audioRows.map(row=>row.input),bitrateKbps:programBitrate==='auto'?null:Number(programBitrate)}}
   }
 
@@ -546,7 +546,7 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
           {programStopError && <small className="preview-error" role="status">{programStopError}</small>}
           <small className="dock-note">{mac ? 'H.264 MP4 · optional AAC' : supportedDesktop ? 'Windows H.264 MP4 · optional AAC'  : 'Requires Mac/Windows app'} · bounded diagnostic</small>
           {streamControl}
-          <LiveAcceptance active={active} disabled={!canProgram||programWebcam||programAviDuration>60} prepare={prepareLiveAcceptance} onBusy={setBusy}/>
+          <LiveAcceptance active={active} disabled={!canProgram||programWebcam} prepare={prepareLiveAcceptance} onBusy={setBusy}/>
           <div className="dock-action-row"><button className="secondary-button" onClick={openClips}><Film size={14}/>Clips</button><button className="secondary-button" onClick={openSettings}><Settings2 size={14}/>Settings</button></div>
           <button className="secondary-button diagnostics-button" onClick={openDiagnostics}><Monitor size={14}/>Capture diagnostics</button>
           {saved?.segmentedSession?.warning && <small className="preview-error" role="status">{saved.segmentedSession.warning}</small>}
