@@ -406,9 +406,11 @@ try {
   await acceptance.getByRole('button',{name:'Load test destinations',exact:true}).click();
   await acceptance.getByRole('checkbox').check();
   await acceptance.getByLabel('Lower bitrate after reconnect',{exact:true}).check();
+  await acceptance.getByLabel('Adaptive bitrate during stream',{exact:true}).check();
   await acceptance.getByLabel('Test stream duration',{exact:true}).selectOption('7200');
   await acceptance.getByRole('button',{name:'Review real stream test',exact:true}).click();
   await acceptance.getByText('Bitrate fallback: Enabled — lower preset after a classified transport retry',{exact:true}).waitFor();
+  await acceptance.getByText('In-place bitrate reduction: Enabled — experimental single-output downshift',{exact:true}).waitFor();
   const startReal=acceptance.getByRole('button',{name:'Start real test stream',exact:true});
   if(!await startReal.isDisabled())throw new Error('Real test must require explicit confirmation');
   if(await macPage.evaluate(()=>!!window.__acceptanceRequest))throw new Error('Review must not start streaming');
@@ -416,7 +418,7 @@ try {
   await startReal.click();
   await acceptance.getByText(/Native test: streaming/).waitFor();
   const accepted=await macPage.evaluate(()=>window.__acceptanceRequest);
-  if(accepted.displayIds.join()!=='1'||accepted.destinations[0].name!=='Private fixture'||accepted.seconds!==7200||accepted.fallbackOnReconnect!==true||'streamKey' in accepted.destinations[0])throw new Error('Invalid acceptance source or destination handoff');
+  if(accepted.displayIds.join()!=='1'||accepted.destinations[0].name!=='Private fixture'||accepted.seconds!==7200||accepted.fallbackOnReconnect!==true||accepted.adaptiveBitrate!==true||'streamKey' in accepted.destinations[0])throw new Error('Invalid acceptance source or destination handoff');
   await acceptance.getByRole('button',{name:'Stop real test stream',exact:true}).click();
   await acceptance.getByText(/Native test: stopped/).waitFor();
   await macPage.evaluate(()=>{window.__destinationRows=[];});
@@ -427,11 +429,12 @@ try {
   await macPage.getByText(/Rehearsal: stopped/).waitFor();
   await macPage.getByRole('button',{name:'Analytics',exact:true}).click();
   await macPage.getByRole('region',{name:'Native streaming health'}).getByText('Offline rehearsal — no network measurements',{exact:true}).waitFor();
-  await macPage.evaluate(()=>{window.__healthFixture={mode:'native',phase:'streaming',elapsedMs:2000,sentPackets:90,sentPayloadBytes:750000,mediaFrames:60,bitrateAdvice:{initialKbps:6000,currentKbps:6000,fallbackEnabled:true,suggestedKbps:3000,pressureMs:3000},resources:{samples:2,sampleElapsedMs:1900,residentBytes:134217728,baselineResidentBytes:100663296,peakResidentBytes:134217728,cpuTenths:735,peakCpuTenths:735},timing:{videoPackets:60,audioPackets:90,videoEndMs:2000,audioEndMs:1920,encodedVideoLeadMs:80,maxAbsEncodedGapMs:80,pendingAudioFrames:3840,pcmFramesSupplied:96000,windowsMissingSourceFrames:null,maxEncodeMs:14},health:{health:'normal',payloadKbps:3000,outputFpsTenths:300,queueBytes:0,queuePackets:0,lateFramesInWindow:0,sampleAgeMs:25}};});
+  await macPage.evaluate(()=>{window.__healthFixture={mode:'native',phase:'streaming',elapsedMs:2000,sentPackets:90,sentPayloadBytes:750000,mediaFrames:60,bitrateAdvice:{initialKbps:6000,currentKbps:6000,fallbackEnabled:true,suggestedKbps:3000,pressureMs:3000,inplaceEnabled:true,inplaceChanges:0,inplaceUnsupported:false,inplaceUncertain:false},resources:{samples:2,sampleElapsedMs:1900,residentBytes:134217728,baselineResidentBytes:100663296,peakResidentBytes:134217728,cpuTenths:735,peakCpuTenths:735},timing:{videoPackets:60,audioPackets:90,videoEndMs:2000,audioEndMs:1920,encodedVideoLeadMs:80,maxAbsEncodedGapMs:80,pendingAudioFrames:3840,pcmFramesSupplied:96000,windowsMissingSourceFrames:null,maxEncodeMs:14},health:{health:'normal',payloadKbps:3000,outputFpsTenths:300,queueBytes:0,queuePackets:0,lateFramesInWindow:0,sampleAgeMs:25}};});
   const health=macPage.getByRole('region',{name:'Native streaming health'});
   await health.getByText('3000 kbps',{exact:true}).waitFor();
   await health.getByText('Sender normal',{exact:true}).waitFor();
   await health.getByText(/Sustained sender queue pressure: consider 3000 kbps/).waitFor();
+  await health.getByText(/In-place bitrate: Enabled/).waitFor();
   await health.getByText('Process resources',{exact:true}).waitFor();
   await health.getByText('Encoded A/V timing',{exact:true}).waitFor();
   await health.getByText('73.5%',{exact:true}).first().waitFor();
