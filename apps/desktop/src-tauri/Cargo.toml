@@ -38,3 +38,6 @@ url = "2"
 getrandom = "0.3"
 # Explicit OS backends; never use keyring mock or plaintext fallback in the desktop app.
 keyring = { version = "=3.6.3", default-features = false, features = ["apple-native", "windows-native"] }
+
+[target.'cfg(any(target_os = "windows", target_os = "macos"))'.dev-dependencies]
+rcgen = "=0.13.2"
