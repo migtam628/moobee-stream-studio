@@ -914,6 +914,7 @@ pub(crate) fn run_authorized_rtmps_session(
     transforms:Option<Vec<crate::source_transform::SourceTransform>>,server_url:String,stream_key:String,
     explicitly_authorized:bool,lease:Option<std::sync::Arc<crate::stream_destinations::Lease>>,
 )->Result<ContinuousProgramReport,String>{
+    let stream_key=zeroize::Zeroizing::new(stream_key);
     let result=(||{
         if !explicitly_authorized{return Err("Explicit destination authorization is required".into())}
         if !(2..=crate::live_acceptance::MAX_LIVE_SECONDS).contains(&seconds){return Err("Live integration test supports 2–7200 seconds".into())}
