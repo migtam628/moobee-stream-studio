@@ -989,8 +989,7 @@ pub(crate) fn run_authorized_rtmps_session(
                     },Some(run.clone()));
                 result.map_err(|e|(run.take_retry_failure(),e))
             });
-        if retried&&outcome.is_ok(){return Err("Recovered stream was interrupted; not an uninterrupted acceptance pass".into())}
-        outcome
+        crate::live_bitrate::uninterrupted_result(retried,outcome)
     })();
     run.finish(result.is_ok());result
 }
