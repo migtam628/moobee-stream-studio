@@ -261,10 +261,11 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
   if(path==='/studio/live-acceptance/start'){
     if(captureActive||pendingLive)throw new Error('Another native capture is active');
     const id=body.sessionId;
-    if(typeof id!=='string'||!await invoke<boolean>('live_acceptance_available'))throw new Error('Native acceptance is unavailable');
-    if(captureActive||pendingLive)throw new Error('Another native capture is active');
+    if(typeof id!=='string')throw new Error('Invalid acceptance session');
     const run={id,cancelled:false,dispatched:false};pendingLive=run;captureActive=true;
     try{
+      if(!await invoke<boolean>('live_acceptance_available'))throw new Error('Native acceptance is unavailable');
+      if(run.cancelled)throw new Error('Cancelled before native connection');
       await releaseAudioMeter();await releaseVideoPreviews();
       if(run.cancelled)throw new Error('Cancelled before native connection');
       run.dispatched=true;
