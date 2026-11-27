@@ -444,6 +444,7 @@ impl FrameSink {
             Self::Avi(_) => Err("AVI does not support the composed AAC diagnostic".into()),
         }
     }
+    fn timing(&self)->Option<crate::live_soak::Timing>{match self{Self::Live(w)=>Some(w.timing()),_=>None}}
     fn destination_stats(&self)->Vec<crate::live_fanout::DestinationStats>{match self{Self::Live(w)=>w.destinations(),_=>vec![]}}
     fn live_stats(&self)->Option<crate::live_publish_worker::WorkerStats>{
         match self{
@@ -744,7 +745,7 @@ fn capture_to_dir(
                 audio_clipped_samples=audio_clipped_samples.saturating_add(mixed.clipped);
             }
             written_frames += 1;
-            if let (Some(run),Some(stats))=(&lifecycle,writer.live_stats()){run.telemetry(written_frames,late_frames,stats);run.destination_telemetry(writer.destination_stats());}
+            if let (Some(run),Some(stats))=(&lifecycle,writer.live_stats()){run.telemetry(written_frames,late_frames,stats);run.destination_telemetry(writer.destination_stats());if let Some(mut timing)=writer.timing(){timing.pcm_frames_supplied=audio_samples_written;timing.windows_missing_source_frames=if cfg!(target_os="windows")&&audio_input_count>0{Some(audio_missing_source_frames)}else{None};run.timing_sample(timing);}}
             if finished_take {
                 transition=None;
                 transitions_completed+=1;
@@ -791,7 +792,7 @@ fn capture_to_dir(
     #[cfg(target_os = "windows")]
     drop(windows_mixer);
     if let Err(error) = recording {
-        if let Some(run)=&lifecycle{run.destination_telemetry(writer.destination_stats());if let Some(cause)=writer.retry_failure(){run.record_retry_failure(cause);}}
+        if let Some(run)=&lifecycle{run.destination_telemetry(writer.destination_stats());if let Some(mut timing)=writer.timing(){timing.pcm_frames_supplied=audio_samples_written;timing.windows_missing_source_frames=if cfg!(target_os="windows")&&audio_input_count>0{Some(audio_missing_source_frames)}else{None};run.timing_sample(timing);}if let Some(cause)=writer.retry_failure(){run.record_retry_failure(cause);}}
         drop(writer);
         if !live{let _ = fs::remove_file(&temporary);}
         return Err(error);
@@ -799,7 +800,7 @@ fn capture_to_dir(
     let finalizing = Instant::now();
     let result = writer.finish();
     let sent_bytes=writer.sent_bytes();
-    if let (Some(run),Some(stats))=(&lifecycle,writer.live_stats()){run.telemetry(written_frames,late_frames,stats);run.destination_telemetry(writer.destination_stats());}
+    if let (Some(run),Some(stats))=(&lifecycle,writer.live_stats()){run.telemetry(written_frames,late_frames,stats);run.destination_telemetry(writer.destination_stats());if let Some(mut timing)=writer.timing(){timing.pcm_frames_supplied=audio_samples_written;timing.windows_missing_source_frames=if cfg!(target_os="windows")&&audio_input_count>0{Some(audio_missing_source_frames)}else{None};run.timing_sample(timing);}}
     drop(writer);
     if let Err((error, still_writing)) = result {
         // A timed-out AVFoundation writer may still own the private file.
