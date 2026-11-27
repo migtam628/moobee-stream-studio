@@ -15,6 +15,7 @@ type MovingFrame = { image: string | null; frameKey: string | null; liveVideo: b
 const pendingPreview = new Set<Promise<MovingFrame>>()
 let previewUsed = false
 let captureActive = false
+let pendingLive: {id:string;cancelled:boolean;dispatched:boolean}|null=null
 let activeProgramSession: string | null = null
 let meterUsed = false
 let pendingMeter: Promise<unknown> | null = null
@@ -256,6 +257,25 @@ function collection() {
   return JSON.parse(JSON.stringify(draft)) as Saved
 }
 export async function nativeRequest(path: string, body: Body = {}): Promise<unknown> {
+  if(path==='/studio/live-acceptance/available')return invoke('live_acceptance_available');
+  if(path==='/studio/live-acceptance/start'){
+    if(captureActive||pendingLive)throw new Error('Another native capture is active');
+    const id=body.sessionId;
+    if(typeof id!=='string'||!await invoke<boolean>('live_acceptance_available'))throw new Error('Native acceptance is unavailable');
+    if(captureActive||pendingLive)throw new Error('Another native capture is active');
+    const run={id,cancelled:false,dispatched:false};pendingLive=run;captureActive=true;
+    try{
+      await releaseAudioMeter();await releaseVideoPreviews();
+      if(run.cancelled)throw new Error('Cancelled before native connection');
+      run.dispatched=true;
+      return await invoke('start_live_acceptance',{request:body});
+    }finally{pendingLive=null;captureActive=false;}
+  }
+  if(path==='/studio/live-acceptance/stop'){
+    if(typeof body.sessionId!=='string')throw new Error('Invalid acceptance session');
+    if(pendingLive?.id===body.sessionId&&!pendingLive.dispatched){pendingLive.cancelled=true;return true;}
+    return invoke('stop_live_acceptance',{sessionId:body.sessionId});
+  }
   if(path==='/studio/destinations')return invoke('list_stream_destinations');
   if(path==='/studio/destinations/add'){
     if(!macHost()&&!windowsHost())throw new Error('Native credential storage requires Mac or Windows');
