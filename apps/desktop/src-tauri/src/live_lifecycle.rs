@@ -17,7 +17,7 @@ pub(crate) struct Snapshot{
     sent_packets:u64,sent_payload_bytes:u64,pending_packets:usize,pending_bytes:usize,
     late_frames:u32,bitrate_kbps:u64,error:Option<&'static str>,health:Reading,reconnect_attempt:u8,
 }
-struct Entry{snapshot:Snapshot,start:Instant,stop:Arc<AtomicBool>,monitor:Monitor}
+struct Entry{snapshot:Snapshot,start:Instant,stop:Arc<AtomicBool>,monitor:Monitor,epoch_started_ms:u64}
 #[derive(Default)]
 pub(crate) struct Controller{entry:Mutex<Option<Entry>>}
 #[derive(Clone)]
@@ -29,7 +29,7 @@ impl Controller{
         if e.as_ref().is_some_and(|v|!matches!(v.snapshot.phase,Phase::Stopped|Phase::Failed)){return Err("Another streaming session is active".into())}
         let stop=Arc::new(AtomicBool::new(false));
         *e=Some(Entry{snapshot:Snapshot{session_id:id.clone(),mode,phase:Phase::Starting,elapsed_ms:0,media_frames:0,
-            sent_packets:0,sent_payload_bytes:0,pending_packets:0,pending_bytes:0,late_frames:0,bitrate_kbps:0,error:None,health:Reading::default(),reconnect_attempt:0},start:Instant::now(),stop:stop.clone(),monitor:Monitor::default()});
+            sent_packets:0,sent_payload_bytes:0,pending_packets:0,pending_bytes:0,late_frames:0,bitrate_kbps:0,error:None,health:Reading::default(),reconnect_attempt:0},start:Instant::now(),stop:stop.clone(),monitor:Monitor::default(),epoch_started_ms:0});
         Ok(Run{controller:self.clone(),id,stop,retry_failure:Arc::new(Mutex::new(None))})
     }
     pub(crate) fn current(&self)->Option<Snapshot>{
@@ -82,7 +82,7 @@ impl Run{
                 if self.cancelled()||matches!(s.phase,Phase::Stopped|Phase::Failed){return}
                 s.phase=Phase::Starting;s.reconnect_attempt=attempt;s.media_frames=0;s.sent_packets=0;s.sent_payload_bytes=0;
                 s.pending_packets=0;s.pending_bytes=0;s.late_frames=0;s.bitrate_kbps=0;s.health=Reading::default();
-                e.monitor=Monitor::default();
+                e.monitor=Monitor::default();e.epoch_started_ms=e.start.elapsed().as_millis() as u64;
             }
         }
     }
@@ -99,7 +99,7 @@ impl Run{
             s.sent_payload_bytes=worker.session.sent_payload_bytes;
             s.pending_packets=worker.pending_packets+worker.session.queued_packets;
             s.pending_bytes=worker.pending_bytes+worker.session.queued_bytes;
-            s.bitrate_kbps=s.sent_payload_bytes.saturating_mul(8)/s.elapsed_ms.max(1);
+            s.bitrate_kbps=s.sent_payload_bytes.saturating_mul(8)/s.elapsed_ms.saturating_sub(e.epoch_started_ms).max(1);
             if s.phase==Phase::Starting&&!self.cancelled()&&worker.session.phase==crate::live_session::Phase::Sending{s.phase=Phase::Streaming;}
         }
         e.monitor.observe(Sample{elapsed_ms:s.elapsed_ms,frames,late_frames:late,sent_bytes:s.sent_payload_bytes,sent_packets:s.sent_packets,queue_bytes:s.pending_bytes,queue_packets:s.pending_packets});
