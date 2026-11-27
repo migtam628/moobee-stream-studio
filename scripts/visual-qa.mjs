@@ -416,6 +416,7 @@ try {
       if(cmd==='list_test_clips')return window.__winRequest?[clip]:[];
       if(cmd==='continuous_program_stats')return null;
       if(cmd==='capture_continuous_program_mp4'){window.__winRequest=args;return clip;}
+       if(cmd==='capture_program_live_packet_test'){window.__winFlv=args;return {...clip,format:'flv',path:'/test/clip.flv'};}
       throw new Error('Unexpected Windows simulated command: '+cmd);
     }};
   });
@@ -449,6 +450,14 @@ try {
   await winPage.waitForFunction(()=>window.__winRequest?.videoDeviceId==='win-card');
   await winPage.getByRole('button',{name:'Saved MP4 · View result',exact:true}).waitFor();
   if(!await winPage.evaluate(()=>window.__winPreviewStopped&&window.__winRequest.displayIds.length===0))throw new Error('Windows video preview handoff failed');
+  await winPage.getByLabel('Composed Program video test duration',{exact:true}).selectOption('4');
+  await winPage.getByRole('button',{name:'Capture diagnostics',exact:true}).click();
+  await winPage.getByRole('button',{name:'Offline streaming packet FLV test',exact:true}).click();
+  await winPage.waitForFunction(()=>window.__winFlv?.videoDeviceId==='win-card');
+  const winFlv=await winPage.evaluate(()=>window.__winFlv);
+  if(winFlv.seconds!==4||winFlv.audioInputs.length!==3||winFlv.displayIds.length!==0||winFlv.sessionId!==undefined)throw new Error('Windows FLV route failed');
+  await winPage.getByRole('button',{name:'Close capture diagnostics',exact:true}).click();
+  await winPage.getByRole('button',{name:'Saved FLV · View result',exact:true}).waitFor();
   await winPage.close();
   const mobile = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
   await mobile.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'domcontentloaded' });
