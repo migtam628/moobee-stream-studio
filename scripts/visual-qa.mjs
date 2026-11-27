@@ -403,6 +403,7 @@ try {
   const acceptance=macPage.getByRole('region',{name:'Real native streaming acceptance'});
   await acceptance.getByRole('button',{name:'Load test destinations',exact:true}).click();
   await acceptance.getByRole('checkbox').check();
+  await acceptance.getByLabel('Test stream duration',{exact:true}).selectOption('300');
   await acceptance.getByRole('button',{name:'Review real stream test',exact:true}).click();
   const startReal=acceptance.getByRole('button',{name:'Start real test stream',exact:true});
   if(!await startReal.isDisabled())throw new Error('Real test must require explicit confirmation');
@@ -411,7 +412,7 @@ try {
   await startReal.click();
   await acceptance.getByText(/Native test: streaming/).waitFor();
   const accepted=await macPage.evaluate(()=>window.__acceptanceRequest);
-  if(accepted.displayIds.join()!=='1'||accepted.destinations[0].name!=='Private fixture'||accepted.seconds!==4||'streamKey' in accepted.destinations[0])throw new Error('Invalid acceptance source or destination handoff');
+  if(accepted.displayIds.join()!=='1'||accepted.destinations[0].name!=='Private fixture'||accepted.seconds!==300||'streamKey' in accepted.destinations[0])throw new Error('Invalid acceptance source or destination handoff');
   await acceptance.getByRole('button',{name:'Stop real test stream',exact:true}).click();
   await acceptance.getByText(/Native test: stopped/).waitFor();
   await macPage.evaluate(()=>{window.__destinationRows=[];});
