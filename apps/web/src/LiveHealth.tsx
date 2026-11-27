@@ -40,11 +40,11 @@ export default function LiveHealth(){
     <div className="panel-heading"><h2>Native streaming health</h2></div>
     <div style={{padding:'16px'}}>
       <p className="dock-note">Sender-side measurements only. These are not viewer reception, network packet loss, or decoder verification.</p>
-      <p role="status">{!native?'Desktop application required':error?'Health status unavailable':snapshot?.mode==='rehearsal'?'Offline rehearsal — no network measurements':h?labels[h.health]:'No native publishing session'}</p>
+      <p role="status">{!native?'Desktop application required':error?'Health status unavailable':snapshot?.mode==='rehearsal'?'Offline rehearsal — no network measurements':snapshot?.phase==='reconnecting'?'Waiting to reconnect — previous epoch ended':h?labels[h.health]:'No native publishing session'}</p>
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))',gap:'12px'}}>
         {metrics.map(([label,value])=><div className="dock-note" key={label}><span>{label}</span><br/><strong>{value}</strong></div>)}
       </div>
-      <p className="dock-note">Actual Go Live and automatic reconnection remain gated pending destination authorization and receiving-side acceptance.</p>
+      <p className="dock-note">Actual Go Live and native recovery remain gated pending secure destination authorization and receiving-side acceptance. Counters reset for each new publishing epoch.</p>
     </div>
   </section>
 }
