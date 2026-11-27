@@ -72,6 +72,7 @@ mod mac {
             for s in &sources{unsafe{moobee_audio_source_reset(s.0)}}
             Ok(Self{sources})
         }
+        pub(crate) fn reset(&self){for s in &self.sources{unsafe{moobee_audio_source_reset(s.0)}}}
         pub(crate) fn read(&self,frames:usize,inputs:&[AudioInput])->Result<(crate::audio_mix::MixResult,AudioLevels),String>{
             if !(1..=4800).contains(&frames)||inputs.len()!=self.sources.len(){return Err("Invalid audio block".into());}
             let pcm=self.sources.iter().map(|s|s.read(frames)).collect::<Result<Vec<_>,_>>()?;
