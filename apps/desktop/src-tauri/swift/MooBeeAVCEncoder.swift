@@ -71,7 +71,7 @@ private final class AVCEncoder {
                 _ sps:UnsafeMutablePointer<UInt8>,_ pps:UnsafeMutablePointer<UInt8>,_ configCapacity:Int,
                 _ spsLength:UnsafeMutablePointer<Int>,_ ppsLength:UnsafeMutablePointer<Int>,
                 _ key:UnsafeMutablePointer<Int32>) -> Int {
-        guard !failed,let session,length==width*height*4,index<Int64(fps)*3600,
+        guard !failed,let session,length==width*height*4,index<Int64(fps)*7200,
               capacity>0,configCapacity>0 else {return -1}
         var pixel:CVPixelBuffer?
         guard CVPixelBufferCreate(kCFAllocatorDefault,width,height,kCVPixelFormatType_32BGRA,
