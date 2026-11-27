@@ -912,7 +912,7 @@ pub(crate) fn run_authorized_rtmps_session(
     seconds:u32,profile:&str,bitrate_kbps:Option<u32>,layout:Option<&str>,
     overlay:Option<crate::program_overlay::OverlayInput>,audio_inputs:Vec<crate::program_audio::AudioInput>,
     transforms:Option<Vec<crate::source_transform::SourceTransform>>,server_url:String,stream_key:String,
-    explicitly_authorized:bool,
+    explicitly_authorized:bool,lease:Option<std::sync::Arc<crate::stream_destinations::Lease>>,
 )->Result<ContinuousProgramReport,String>{
     let result=(||{
         if !explicitly_authorized{return Err("Explicit destination authorization is required".into())}
@@ -927,13 +927,14 @@ pub(crate) fn run_authorized_rtmps_session(
             |attempt,remaining|{
                 run.begin_epoch(attempt);
                 let epoch_run=run.clone();let cancel=stop.clone();
-                let server_url=server_url.clone();let stream_key=stream_key.clone();
+                let server_url=server_url.clone();let stream_key=stream_key.clone();let lease=lease.clone();
                 let duration=seconds.min((remaining/1000) as u32);
                 let result=capture_authorized_live_program_with_lifecycle(display_ids.clone(),video_device_id.clone(),duration,profile,bitrate_kbps,layout,
                     overlay.clone(),audio_inputs.clone(),transforms.clone(),stop.clone(),move||{
                         if cancel.load(Ordering::Acquire){return Err("Live Program cancelled before connection".into())}
                         let mut cause=crate::live_reconnect::Failure::Unknown;
-                        let worker=match crate::live_publish_worker::Worker::connect_tls_classified(&server_url,&stream_key,&mut cause){
+                        let check=cancel.clone();let permit:crate::rtmp_session::ConnectionPermit=std::sync::Arc::new(move||!check.load(Ordering::Acquire));
+                        let worker=match crate::live_publish_worker::Worker::connect_tls_permitted(&server_url,&stream_key,&mut cause,permit,lease){
                             Ok(w)=>w,Err(e)=>{epoch_run.record_retry_failure(cause);return Err(e)}
                         };
                         if cancel.load(Ordering::Acquire){worker.request_stop();return Err("Live Program cancelled during connection".into())}
@@ -962,9 +963,10 @@ pub(crate) fn run_saved_destination_session(
         Ok(lease)=>lease,Err(error)=>{run.finish(false);return Err(error)}
     };
     if !run.native_active(){run.finish(false);return Err("Streaming session cancelled before connection".into())}
+    let lease=std::sync::Arc::new(lease);
     let (url,key)=lease.credentials();
     let result=run_authorized_rtmps_session(run,display_ids,video_device_id,seconds,profile,bitrate_kbps,layout,
-        overlay,audio_inputs,transforms,url.to_owned(),key.to_owned(),explicitly_authorized);
+        overlay,audio_inputs,transforms,url.to_owned(),key.to_owned(),explicitly_authorized,Some(lease.clone()));
     drop(lease);result
 }
 
@@ -987,16 +989,20 @@ pub(crate) fn run_saved_multistream_session(
         for (id,name,url) in destinations{
             if !ids.insert(id.clone()){return Err("Duplicate destination".into())}
             let lease=crate::stream_destinations::authorized_destination(app,&id,&name,&url,true)?;
-            leases.push((id,lease));
+            leases.push((id,std::sync::Arc::new(lease)));
         }
-        let credentials=leases.iter().map(|(id,l)|{let (url,key)=l.credentials();(id.clone(),url.to_owned(),key.to_owned())}).collect::<Vec<_>>();
+        let credentials=leases.clone();
         let stop=run.stop_flag();let cancel=stop.clone();
         let result=capture_live_fanout(display_ids,video_device_id,seconds,profile,bitrate_kbps,layout,overlay,audio_inputs,transforms,stop,move||{
             if cancel.load(Ordering::Acquire){return Err("Multistream cancelled before connection".into())}
             let publishers=std::thread::scope(|scope|{
-                let handles=credentials.into_iter().map(|(id,url,key)|scope.spawn(move||{
-                    crate::rtmp_session::tls::connect_tls(&url,&key).map(|p|(id,p,url,key))
-                })).collect::<Vec<_>>();
+                let handles=credentials.into_iter().map(|(id,lease)|{
+                    let check=cancel.clone();let permit:crate::rtmp_session::ConnectionPermit=std::sync::Arc::new(move||!check.load(Ordering::Acquire));
+                    scope.spawn(move||{
+                        let (url,key)=lease.credentials();
+                        crate::rtmp_session::tls::connect_tls_permitted(url,key,&mut crate::live_reconnect::Failure::Unknown,Some(permit),Some(lease.clone())).map(|p|(id,p,lease))
+                    })
+                }).collect::<Vec<_>>();
                 let mut publishers=Vec::new();
                 for h in handles{
                     publishers.push(h.join().map_err(|_|"Destination negotiation worker stopped")??);
@@ -1005,12 +1011,13 @@ pub(crate) fn run_saved_multistream_session(
             })?;
             if cancel.load(Ordering::Acquire){return Err("Multistream cancelled during connection".into())}
             let mut workers=Vec::new();
-            for (id,publisher,url,key) in publishers{
+            for (id,publisher,lease) in publishers{
                 let session=crate::live_session::Session::new(publisher)?;
                 let worker=crate::live_publish_worker::Worker::start_with_poll(session,|s|s.poll_tls_inbound())?;
-                let connector:crate::live_fanout::Connector=std::sync::Arc::new(move||{
+                let connector:crate::live_fanout::Connector=std::sync::Arc::new(move|permit|{
                     let mut cause=crate::live_reconnect::Failure::Unknown;
-                    crate::live_publish_worker::Worker::connect_tls_classified(&url,&key,&mut cause).map_err(|_|cause)
+                    let (url,key)=lease.credentials();
+                    crate::live_publish_worker::Worker::connect_tls_permitted(url,key,&mut cause,permit,Some(lease.clone())).map_err(|_|cause)
                 });
                 workers.push((id,worker,Some(connector)));
             }
