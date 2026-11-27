@@ -80,3 +80,6 @@ PRs #87 and #88 merged encrypted loopback receiver and independent decoder harne
 
 ## Workstream 10 — bounded native streaming startup
 This increment validates audio device open before live publish negotiation, purges pre-publish display backlog, requests subsequent camera/display arrivals and resets/discards named audio before media clock start. It rejects queue saturation and excessive scheduling lag. Existing local recorder startup order is preserved. See LIVE_STARTUP_RELIABILITY.md for conservative diagnostic limits and unresolved source-channel, hardware and receiver acceptance risks. Formal completion remains 8/20 until integration and acceptance gates are satisfied.
+
+## Workstream 10 — bitrate recovery and sender pressure
+PR #90 merged startup refresh and overload protection. This increment adds explicit single-output lower-bitrate recovery epochs, per-destination sustained-queue advisory and interrupted acceptance enforcement. See LIVE_BITRATE_RELIABILITY.md. In-place adaptation, native fault injection, physical acceptance, capture-device recovery and persistent diagnostic history remain outstanding. Core completion stays 8/20.
