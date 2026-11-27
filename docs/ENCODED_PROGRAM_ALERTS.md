@@ -1,0 +1,7 @@
+# Encoded Program alerts — priority 9A, first increment
+
+The native Mac/Windows continuous Program loop can subscribe to the existing local alert test event bus when explicitly opted in. A compact, deterministic bitmap text card is composited into actual output pixels before AVI, MP4 or FLV encoding. The most recent fresh event replaces the previous card, lasts three seconds of active media ticks, and is marked TEST. Four supported alert types use different accent colors. Events older than five seconds are ignored; per-frame drain and display size are bounded. Names/messages are truncated to 42 characters per line; unsupported glyphs use a fallback. This is a local test layer, not a real platform event connector.
+
+Use Studio, enable **Encoded test alerts** under Recording layers, select a single capture of up to 60 seconds, and start a continuous Program test. During capture, use **Emit local test alert** or the existing Alert Test Bench. The result reports observed encoded alert events and frames. An event emitted too early/late may not appear; playback must be inspected. Segmented and sampled tests are not supported; actual live output has no alert subscription in this increment. No automatic posting, live platform alert ingestion or broadcast. Static graphics retain their existing behavior.
+
+Regression tests check pixel changes, expiration, stale events, bounded burst handling and frontend option routing. Real playback and native runtime remain unverified. No installers/releases or actual broadcasting initiated.
