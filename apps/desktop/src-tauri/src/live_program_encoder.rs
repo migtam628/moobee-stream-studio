@@ -55,6 +55,26 @@ impl Encoder{
 mod tests{
     use super::*;
     #[test]
+    #[ignore="requires native encoder supporting dynamic bitrate updates"]
+    fn native_inplace_bitrate_preserves_packet_epoch(){
+        let mut encoder=Encoder::new(640,360,10,3000,true).unwrap();
+        let mut q=crate::live_media_queue::MediaQueue::default();
+        let mut video=0u32;let mut config=0u32;let mut audio=0u32;
+        for tick in 0..40u32{
+            if tick==20{assert!(encoder.lower_bitrate(1500).unwrap(),"Native encoder does not support in-place bitrate update");}
+            let frame=image::RgbaImage::from_pixel(640,360,image::Rgba([(tick*4)as u8,50,100,255]));
+            for p in encoder.tick(frame.as_raw(),Some(&vec![0.1;9600])).unwrap(){
+                if p.kind==9{
+                    if p.payload[1]==0{config+=1;}
+                    else{assert_eq!(p.timestamp_ms,tick*100);video+=1;if tick==20{assert_eq!(p.payload[0],0x17);}}
+                }else if p.payload[1]==1{audio+=1;}
+                q.push(p).unwrap();
+            }
+            while q.pop().is_some(){}
+        }
+        assert_eq!(video,40);assert_eq!(config,1);assert!(audio>170);
+    }
+    #[test]
     #[ignore="requires functioning native AVC and AAC encoders"]
     fn composed_ticks_produce_queue_compatible_av_packets(){
         let mut e=Encoder::new(640,360,10,1500,true).unwrap();
