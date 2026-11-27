@@ -244,7 +244,7 @@ pub(crate) mod tls {
                 .with_single_cert(vec![leaf.der().clone(),ca.der().clone()],rustls::pki_types::PrivatePkcs8KeyDer::from(key.serialize_der()).into()).unwrap();
             (std::sync::Arc::new(config),native_tls::Certificate::from_der(ca.der().as_ref()).unwrap())
         }
-        fn loopback(f:impl FnOnce(&mut crate::live_publish_worker::Worker)->(u64,u64,u64,u64)){
+        fn loopback(capture_path:Option<std::path::PathBuf>,f:impl FnOnce(&mut crate::live_publish_worker::Worker)->(u64,u64,u64,u64)){
             use std::net::{TcpListener,Ipv4Addr};
             use crate::{live_session::Session,live_publish_worker::Worker};
             let (config,root)=certificates();
@@ -255,7 +255,7 @@ pub(crate) mod tls {
                 let (socket,peer)=listener.accept().unwrap();assert!(peer.ip().is_loopback());
                 socket.set_read_timeout(Some(Duration::from_secs(5))).unwrap();socket.set_write_timeout(Some(Duration::from_secs(5))).unwrap();
                 let mut stream=rustls::StreamOwned::new(rustls::ServerConnection::new(config).unwrap(),socket);
-                crate::rtmps_test_receiver::serve(&mut stream,key)
+                crate::rtmps_test_receiver::serve(&mut stream,key,capture_path.as_deref())
             });
             let socket=TcpStream::connect_timeout(&addr,Duration::from_secs(3)).unwrap();
             socket.set_nodelay(true).unwrap();
@@ -301,7 +301,7 @@ pub(crate) mod tls {
         }
         #[test]fn loopback_tls_independent_receiver_accepts_drained_synthetic_packets(){
             use crate::stream_mux::{avc_sequence,avc_access_unit,aac_sequence,aac_access_unit};
-            loopback(|worker|{
+            loopback(None,|worker|{
                 let mut nal=vec![0x65];nal.extend([0x42;300]);
                 let batch=vec![avc_sequence(&[0x67,0x64,0,0x28],&[0x68,0xee]).unwrap(),aac_sequence(),
                     avc_access_unit(&[&nal],0,0,true).unwrap(),aac_access_unit(&[1,2,3],0).unwrap(),
@@ -315,13 +315,14 @@ pub(crate) mod tls {
         #[test]
         #[ignore="requires working native AVC/AAC encoders; local receiver only"]
         fn loopback_tls_native_encoder_acceptance(){
-            loopback(|worker|{
+            let capture=std::env::var_os("MOOBEE_RECEIVER_FLV").map(std::path::PathBuf::from);
+            loopback(capture,|worker|{
                 let mut encoder=crate::live_program_encoder::Encoder::new(640,360,10,1500,true).unwrap();
                 let mut totals=(0u64,0u64,0u64,0u64);
                 let start=Instant::now();
                 for tick in 0..20u32{
                     let frame=image::RgbaImage::from_pixel(640,360,image::Rgba([tick as u8,50,100,255]));
-                    let pcm=vec![0.1;9600];
+                    let pcm=(0..4800).flat_map(|i|{let sample=0.2*((tick*4800+i) as f32*440.0*std::f32::consts::TAU/48000.).sin();[sample,sample]}).collect::<Vec<_>>();
                     let batch=encoder.tick(frame.as_raw(),Some(&pcm)).unwrap();
                     for p in &batch{
                         totals.0+=1;totals.1+=p.payload.len()as u64;

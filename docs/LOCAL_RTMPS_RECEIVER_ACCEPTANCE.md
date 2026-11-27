@@ -21,3 +21,12 @@ cargo test --lib rtmp_session::tls::tests::loopback_tls_native_encoder_acceptanc
 ```
 
 Retain the CI log or local JSON report, platform/OS, commit SHA and exact test name. A passing framing test is not receiver decoding, external RTMPS interoperability, physical capture, A/V lip sync or a two-hour soak. The native test does not use a physical camera, display or microphone. Continue the staged private receiver tests in LIVE_SOAK_DIAGNOSTICS.md before production activation. No actual public broadcast, installer execution or release initiated.
+
+## Independent decoded continuity check
+On Mac or Windows with the native Rust toolchain, Python 3 and separately installed FFmpeg/ffprobe, run from the repository root:
+
+```sh
+python3 scripts/verify-native-rtmps-decode.py
+```
+
+The opt-in native test encodes 20 synthetic video frames and a 440 Hz stereo tone. The receiver writes its independently parsed media as FLV only when the explicit MOOBEE_RECEIVER_FLV path is set, with create-new file semantics and a 16 MiB cap. The Python harness supplies a private temporary directory and removes it on exit. It checks the sender/receiver accounting reported by the Rust test, independently probes decoded H.264/AAC frames, verifies 640x360 video, 48 kHz stereo, 20 decoded video frames, matching AAC block counts, 1024 samples per AAC block, nominal zero-based per-track cadence and a maximum 200 ms encoded tail difference. It forces full FFmpeg decoding with fail-on-error and prints DECODED_RECEIVER_REPORT JSON. The 200 ms tolerance is an initial diagnostic bound for the two-second synthetic fixture, not a production lip-sync threshold. No video/audio content comparison or physical source timing measurement is claimed. FFmpeg is strictly an optional QA dependency, not integrated into MooBee's runtime. The regular CI checks validate the FLV framing and mocked report decisions; the actual native encode-and-decode harness is opt-in and not yet executed. No public stream, installer or release.
