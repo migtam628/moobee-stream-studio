@@ -334,7 +334,7 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
     const flv = path.endsWith('-packets')
     const mp4 = path.endsWith('-mp4')
     const compressed = mp4 || flv
-    if(flv && (!macHost() || typeof body.seconds!=='number' || body.seconds>8 || body.webcam || body.sessionId!==undefined || body.microphone===true)) throw new Error('Offline packet test requires Mac, 2–8 seconds, named audio settings, and webcam inset off')
+    if(flv && ((!macHost()&&!windowsHost()) || typeof body.seconds!=='number' || body.seconds>8 || body.webcam || body.sessionId!==undefined || body.microphone===true)) throw new Error('Offline packet test requires Mac or Windows, 2–8 seconds, named audio settings, and webcam inset off')
     const hasVideo = videoDeviceId !== undefined && videoDeviceId !== null
     if (hasVideo && (!compressed || (!macHost() && !windowsHost()) || !validVideoInputId(videoDeviceId) || body.webcam)) throw new Error('Select one native video input with webcam inset off')
     if (!Array.isArray(ids) || (hasVideo ? ids.length !== 0 : ids.length < 1) || ids.length > 4 ||

@@ -32,6 +32,8 @@ jobs:
         run: |
           cargo test --lib windows_mp4_sink::tests
           cargo test --lib windows_avc::tests
+          cargo test --lib windows_aac::tests
+          cargo test --lib live_program_encoder::tests
           cargo test --lib windows_audio::tests
           cargo test --lib program_camera::tests
           cargo test --lib video_preview::tests

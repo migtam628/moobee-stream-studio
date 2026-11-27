@@ -46,7 +46,7 @@ pub(crate) fn rgba_to_nv12(rgba:&[u8],w:usize,h:usize,out:&mut [u8])->Result<(),
     }}
     Ok(())
 }
-fn pcm16(pcm:&[f32])->Result<Vec<i16>,String>{
+pub(crate) fn pcm16(pcm:&[f32])->Result<Vec<i16>,String>{
     if pcm.is_empty()||pcm.len()%2!=0||pcm.len()>9600||pcm.iter().any(|v|!v.is_finite()){return Err("Invalid stereo PCM block".into())}
     Ok(pcm.iter().map(|v|(v.clamp(-1.,1.)*32768.).round().clamp(-32768.,32767.) as i16).collect())
 }
