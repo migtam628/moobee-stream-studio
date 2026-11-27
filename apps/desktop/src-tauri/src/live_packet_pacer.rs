@@ -89,7 +89,8 @@ mod tests{
                 next_audio+=1024;
             }
             assert!(q.stats().queued_packets<=5);
-            let t=p.tick(&mut q,u64::from(time),|packet|{
+            let elapsed=clock.time(frame+1).as_millis() as u64;
+            let t=p.tick(&mut q,elapsed,|packet|{
                 bytes+=packet.payload.len() as u64;
                 if packet.payload[1]==1{
                     if packet.kind==9{assert!(packet.timestamp_ms>=last_video);last_video=packet.timestamp_ms;video+=1;}
