@@ -36,7 +36,7 @@ impl<T:Read+Write> Publisher<T>{
     pub(crate) fn establish(io:T,app:&str,tc_url:&str,stream_name:&str,time:u32,random:&[u8])->Result<Self>{
         // Validate and build credential-bearing commands before any write.
         let connect=rtmp::connect(app,tc_url,1)?;
-        let publish=rtmp::publish(stream_name)?;
+        let publish=zeroize::Zeroizing::new(rtmp::publish(stream_name)?);
         let hello=rtmp::client_hello(time,random)?;
         let mut s=Self{io,reader:Reader::default(),state:Negotiation::default(),failed:false,inbound:Vec::new(),transport_failure:None};
         s.send_raw(&hello)?;
@@ -51,7 +51,10 @@ impl<T:Read+Write> Publisher<T>{
             if let Some(ack)=s.state.acknowledge(s.reader.bytes()){s.respond(ack)?;}
             match action{
                 Some(Action::CreateStream)=>s.command(0,&rtmp::create_stream(2)?)?,
-                Some(Action::Publish(id))=>s.command(id,&publish)?,
+                Some(Action::Publish(id))=>{
+                    let wire=zeroize::Zeroizing::new(rtmp::chunks(3,id,20,0,&publish,OUT_CHUNK)?);
+                    s.send_raw(&wire)?;
+                },
                 Some(Action::Ready(_))=>return Ok(s),
                 Some(other)=>s.respond(other)?,
                 None=>{}
@@ -176,7 +179,7 @@ pub(crate) mod tls {
     }
     pub(crate) fn validate_destination(server_url:&str,stream_key:&str)->Result<()>{
         endpoint(server_url)?;
-        rtmp::publish(stream_key)?;
+        let _validated=zeroize::Zeroizing::new(rtmp::publish(stream_key)?);
         Ok(())
     }
     /// Explicit future caller only. DNS resolution is OS-blocking and must
@@ -192,7 +195,7 @@ pub(crate) mod tls {
         let allowed=||if permit.as_ref().is_some_and(|p|!p()){Err("RTMPS negotiation cancelled".to_owned())}else{Ok(())};
         allowed()?;
         let target=endpoint(server_url)?;
-        rtmp::publish(stream_key)?;
+        let _validated=zeroize::Zeroizing::new(rtmp::publish(stream_key)?);
         let addresses=(target.host.as_str(),target.port).to_socket_addrs().map_err(|_|"RTMPS DNS resolution failed")?;
         allowed()?;
         let deadline=Instant::now()+CONNECT_TIMEOUT;
