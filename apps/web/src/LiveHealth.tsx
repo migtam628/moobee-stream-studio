@@ -5,7 +5,8 @@ type Health='unavailable'|'warmingUp'|'normal'|'backpressure'|'stalled'|'stale'|
 type Destination={id:string;phase:string;sentPackets:number;sentPayloadBytes:number;queuedPackets:number;queuedBytes:number;admittedPackets:number;admittedBytes:number;reconnectAttempt?:number;interrupted?:boolean}
 type Resources={samples:number;sampleElapsedMs:number;residentBytes:number|null;baselineResidentBytes:number|null;peakResidentBytes:number|null;cpuTenths:number|null;peakCpuTenths:number|null}
 type Timing={videoPackets:number;audioPackets:number;videoEndMs:number|null;audioEndMs:number|null;encodedVideoLeadMs:number|null;maxAbsEncodedGapMs:number|null;pendingAudioFrames:number|null;pcmFramesSupplied:number;windowsMissingSourceFrames:number|null;maxEncodeMs:number}
-type Snapshot={resources?:Resources;timing?:Timing|null;destinations?:Destination[];mode:'native'|'rehearsal';phase:string;elapsedMs:number;sentPackets:number;sentPayloadBytes:number;mediaFrames:number;reconnectAttempt?:number;health:{health:Health;payloadKbps:number|null;outputFpsTenths:number|null;queueBytes:number;queuePackets:number;lateFramesInWindow:number|null;sampleAgeMs:number|null}}
+type BitrateAdvice={initialKbps:number|null;currentKbps:number|null;fallbackEnabled:boolean;suggestedKbps:number|null;pressureMs:number}
+type Snapshot={bitrateAdvice?:BitrateAdvice;resources?:Resources;timing?:Timing|null;destinations?:Destination[];mode:'native'|'rehearsal';phase:string;elapsedMs:number;sentPackets:number;sentPayloadBytes:number;mediaFrames:number;reconnectAttempt?:number;health:{health:Health;payloadKbps:number|null;outputFpsTenths:number|null;queueBytes:number;queuePackets:number;lateFramesInWindow:number|null;sampleAgeMs:number|null}}
 const labels:Record<Health,string>={unavailable:'Unavailable',warmingUp:'Collecting samples',normal:'Sender normal',backpressure:'Queue pressure',stalled:'Sender stalled',stale:'Stale sample',ended:'Ended'}
 export default function LiveHealth(){
   const native=runningInTauri()
@@ -28,6 +29,7 @@ export default function LiveHealth(){
     return()=>{active=false;clearInterval(timer)}
   },[native])
   const h=snapshot?.mode==='native'?snapshot.health:null
+  const advice=snapshot?.mode==='native'?snapshot.bitrateAdvice:null
   const r=snapshot?.mode==='native'?snapshot.resources:null
   const t=snapshot?.mode==='native'?snapshot.timing:null
   const mib=(bytes:number|null|undefined)=>bytes==null?'—':(bytes/1048576).toFixed(1)+' MiB'
@@ -67,6 +69,9 @@ export default function LiveHealth(){
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))',gap:'12px'}}>
         {metrics.map(([label,value])=><div className="dock-note" key={label}><span>{label}</span><br/><strong>{value}</strong></div>)}
       </div>
+      <h3>Bitrate recovery</h3>
+      <p className="dock-note">Initial target: {advice?.initialKbps??'—'} kbps · Current target: {advice?.currentKbps??'—'} kbps · Retry fallback: {advice==null?'—':advice.fallbackEnabled?'Enabled':'Disabled'}</p>
+      <p className="dock-note">{advice?.suggestedKbps!=null&&snapshot?.phase==='streaming'? `Sustained sender queue pressure: consider ${advice.suggestedKbps} kbps for a future session.`:'No active bitrate recommendation.'} A recommendation does not change a running encoder or measure network capacity.</p>
       <h3>Process resources</h3>
       <p className="dock-note">Native process only, sampled about once per second. CPU uses 100% per logical core; browser/WebView helper processes, GPU usage and unsampled peaks are not included. Ended sessions show their last sample.</p>
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))',gap:'12px'}}>{resourceMetrics.map(([label,value])=><div className="dock-note" key={label}><span>{label}</span><br/><strong>{value}</strong></div>)}</div>
