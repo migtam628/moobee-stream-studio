@@ -19,6 +19,7 @@ type CapturedFile = {
   format: string
   durationSeconds: number | null
   requestedMaxSeconds?: number
+  frameCount?: number
   replayCaptureFrames?: number
   replayWindowSeconds?: number
   stoppedEarly?: boolean
