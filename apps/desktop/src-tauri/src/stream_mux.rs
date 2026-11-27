@@ -166,6 +166,12 @@ pub(crate) mod rtmp {
         if stream_name.is_empty(){return Err("Missing RTMP stream name".into())}
         let mut out=command("publish",0)?;out.push(5);text(&mut out,stream_name)?;text(&mut out,"live")?;Ok(out)
     }
+    // RTMP NetConnection deleteStream releases the assigned message stream.
+    // No stream name/key is repeated during shutdown.
+    pub(crate) fn delete_stream(id:u32)->Result<Vec<u8>,String>{
+        if id==0{return Err("Missing assigned RTMP stream ID".into())}
+        let mut out=command("deleteStream",0)?;out.push(5);number(&mut out,f64::from(id));Ok(out)
+    }
     pub(crate) fn media(packet:&super::Packet,stream_id:u32,chunk_size:usize)->Result<Vec<u8>,String>{
         if stream_id==0{return Err("RTMP media requires an assigned message stream ID".into())}
         let csid=match packet.kind{8=>4,9=>6,_=>return Err("Invalid RTMP media type".into())};
@@ -206,6 +212,7 @@ mod tests_rtmp {
         assert!(!publish(invalid).unwrap_err().contains("private-fixture"));
         assert!(publish("").is_err());
         assert!(create_stream(0).is_err());
+        let close=delete_stream(5).unwrap();assert_eq!(&close[..15],b"\x02\x00\x0cdeleteStream");assert!(close.ends_with(&5f64.to_be_bytes()));assert!(delete_stream(0).is_err());
     }
     #[test]fn existing_avc_aac_packets_route_to_distinct_chunk_streams(){
         let a=media(&aac_sequence(),1,128).unwrap();
