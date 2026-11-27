@@ -98,7 +98,8 @@ jobs:
           cargo test --lib program_overlay::tests
           cargo test --lib stream_mux::tests
           cargo test --lib rtmp_receive::tests
-          cargo test --lib rtmp_session
+          cargo test --lib rtmp_session -- --nocapture
+          cargo test --lib rtmps_test_receiver
           cargo test --lib live_media_queue::tests
           cargo test --lib live_packet_pacer::tests
           cargo test --lib macos_avc::tests

@@ -36,6 +36,8 @@ mod source_transform;
 mod stream_mux;
 mod rtmp_receive;
 mod rtmp_session;
+#[cfg(all(test,any(target_os="macos",target_os="windows")))]
+mod rtmps_test_receiver;
 mod live_media_queue;
 mod live_packet_pacer;
 mod live_session;
