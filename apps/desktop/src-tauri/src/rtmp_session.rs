@@ -253,13 +253,19 @@ pub(crate) mod tls {
             ca.is_ca=IsCa::Ca(BasicConstraints::Unconstrained);
             ca.distinguished_name.push(DnType::CommonName,"MooBee loopback test CA");
             ca.key_usages=vec![KeyUsagePurpose::KeyCertSign,KeyUsagePurpose::CrlSign];
-            ca.not_before=date_time_ymd(2020,1,1);ca.not_after=date_time_ymd(2040,1,1);
+            // Apple trust policy rejects overly long server certificate lifetimes.
+            // Derive a short test-only validity window from the runner clock.
+            let now=SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+            let epoch=date_time_ymd(1970,1,1);
+            let not_before=epoch+now.saturating_sub(Duration::from_secs(86400));
+            let not_after=epoch+now+Duration::from_secs(7*86400);
+            ca.not_before=not_before;ca.not_after=not_after;
             let ca_key=KeyPair::generate().unwrap();let ca=ca.self_signed(&ca_key).unwrap();
             let mut leaf=CertificateParams::new(vec!["localhost".to_owned()]).unwrap();
             leaf.distinguished_name.push(DnType::CommonName,"localhost");
             leaf.key_usages=vec![KeyUsagePurpose::DigitalSignature];
             leaf.extended_key_usages=vec![ExtendedKeyUsagePurpose::ServerAuth];
-            leaf.not_before=date_time_ymd(2020,1,1);leaf.not_after=date_time_ymd(2040,1,1);
+            leaf.not_before=not_before;leaf.not_after=not_after;
             let key=KeyPair::generate().unwrap();let leaf=leaf.signed_by(&key,&ca,&ca_key).unwrap();
             let config=rustls::ServerConfig::builder_with_provider(std::sync::Arc::new(rustls::crypto::ring::default_provider()))
                 .with_protocol_versions(&[&rustls::version::TLS12]).unwrap().with_no_client_auth()
