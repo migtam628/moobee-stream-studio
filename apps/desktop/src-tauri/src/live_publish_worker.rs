@@ -136,7 +136,7 @@ fn run<T:Read+Write>(mut session:Session<T>,shared:Arc<Shared>,mut poll:impl FnM
                 if command==Command::Drain{
                     if drain_started.is_some_and(|t|t.elapsed()>=Duration::from_secs(3)){return Err("Publishing drain deadline exceeded".into());}
                     let pending=shared.mail.lock().map_err(|_|"Publishing mailbox unavailable")?.packets.len();
-                    if pending==0&&session.stats().queued_packets==0{session.stop();}
+                    if pending==0&&session.stats().queued_packets==0{session.finish_drained()?;}
                 }else if last_input.elapsed()>=MAX_IDLE{session.abort();return Err("Encoded media input stalled".into());}
                 Ok(())
             })()};
