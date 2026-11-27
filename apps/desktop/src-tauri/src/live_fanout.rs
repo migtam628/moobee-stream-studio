@@ -43,6 +43,10 @@ impl Fanout{
         if accepted==0{return Err("All publishing destinations failed".into())}
         Ok(())
     }
+    #[cfg(test)]
+    pub(crate) fn test_signal_inbound(&self,id:&str)->Result<(),String>{
+        self.outputs.iter().find(|o|o.id==id).ok_or("Unknown test destination")?.worker.signal_inbound()
+    }
     pub(crate) fn retry_failure(&self)->Option<Failure>{
         // A single destination may restart its entire encoder epoch. Do not
         // restart a surviving destination's shared encoder after another fails.
