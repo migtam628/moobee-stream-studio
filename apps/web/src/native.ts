@@ -256,6 +256,17 @@ function collection() {
   return JSON.parse(JSON.stringify(draft)) as Saved
 }
 export async function nativeRequest(path: string, body: Body = {}): Promise<unknown> {
+  if (path.startsWith('/studio/live-rehearsal/')) {
+    if (typeof body.sessionId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(body.sessionId)) throw new Error('Invalid rehearsal session');
+    const sessionId=body.sessionId;
+    if(path==='/studio/live-rehearsal/start'){
+      if(typeof body.seconds!=='number'||!Number.isInteger(body.seconds)||body.seconds<2||body.seconds>15)throw new Error('Invalid rehearsal duration');
+      await invoke('start_live_rehearsal',{sessionId,seconds:body.seconds});return {started:true};
+    }
+    if(path==='/studio/live-rehearsal/status')return invoke('live_session_status',{sessionId});
+    if(path==='/studio/live-rehearsal/stop')return invoke('stop_live_rehearsal',{sessionId});
+    throw new Error('Unknown rehearsal action');
+  }
   if (path === '/health') return { ok: true, name: 'MooBee Studio', version: appVersion, engine: 'in-house' }
   if (path === '/services/diagnostics') return await invoke('native_service_diagnostics')
   if (path === '/macos/open-screen-recording-settings') return await invoke('open_screen_recording_settings')

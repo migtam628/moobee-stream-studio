@@ -46,6 +46,7 @@ impl Sink{
         }
         self.finished=true;Ok(())
     }
+    pub(crate) fn stats(&self)->Result<crate::live_publish_worker::WorkerStats,String>{self.worker.stats()}
     pub(crate) fn sent_bytes(&self)->u64{self.worker.stats().map_or(0,|s|s.session.sent_payload_bytes)}
     pub(crate) fn sent_packets(&self)->u64{self.worker.stats().map_or(0,|s|s.session.sent_packets)}
 }

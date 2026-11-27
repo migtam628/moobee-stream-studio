@@ -11,6 +11,7 @@ import { version as appVersion } from '../../../package.json'
 import { buildIdentity } from './buildIdentity'
 import BrowserRecorder from './BrowserRecorder'
 import QuickCapture from './QuickCapture'
+import LiveLifecycle from './LiveLifecycle'
 import { TransformCanvas, TransformControls, geometry } from './SourceTransformEditor'
 import type { SourceTransform } from './programDisplay'
 import ServiceDiagnostics from './ServiceDiagnostics'
@@ -332,7 +333,7 @@ function Studio({ status, perform, pending, setTab, active }: { status: StudioSt
       sources={<SourcesPanel status={status} perform={perform} pending={pending} selectedSource={source?.id??null} selectSource={id=>{setSelectedSource(id);setEditTransforms(true)}} inspector={inspector}/>}
       otherAudio={status.inputs.length ? <MixerPanel status={status} perform={perform} pending={pending}/> : undefined}
       openClips={() => setTab('Clips')} openSettings={() => setTab('Settings')}
-      streamControl={<button className={`go-live dock-stream ${status.streaming ? 'stop-live' : ''}`} disabled={!status.broadcastAvailable || pending} title="Native RTMPS transport is not implemented" onClick={() => void perform('/studio/action', { action: 'stream' })}>{status.streaming ? <Square size={15}/> : <Radio size={16}/>} {status.streaming ? 'End Stream' : 'Go Live (unavailable)'}</button>}/>
+      streamControl={<><button className={`go-live dock-stream ${status.streaming ? 'stop-live' : ''}`} disabled={!status.broadcastAvailable || pending} title="Live output requires receiving-side acceptance and secure destination management" onClick={() => void perform('/studio/action', { action: 'stream' })}>{status.streaming ? <Square size={15}/> : <Radio size={16}/>} {status.streaming ? 'End Stream' : 'Go Live (unavailable)'}</button><LiveLifecycle/></>}/>
   </div>
 }
 

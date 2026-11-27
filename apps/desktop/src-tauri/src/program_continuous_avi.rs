@@ -453,6 +453,13 @@ impl FrameSink {
             Self::Avi(_) => Err("AVI does not support the composed AAC diagnostic".into()),
         }
     }
+    fn live_stats(&self)->Option<crate::live_publish_worker::WorkerStats>{
+        match self{
+            #[cfg(target_os="macos")]
+            Self::Live(w)=>w.stats().ok(),
+            _=>None,
+        }
+    }
     fn sent_bytes(&self)->u64{
         match self{
             #[cfg(target_os="macos")]
@@ -482,6 +489,7 @@ fn capture_to_dir(
     let live=matches!(format,ProgramFormat::Live);
     if live!=live_output.is_some(){return Err("Live output configuration mismatch".into())}
     let live_stop=live_output.as_ref().map(|o|o.stop.clone());
+    let lifecycle=live_output.as_ref().and_then(|o|o.lifecycle.clone());
     let live_connector=live_output.map(|o|o.connect);
     let clock = crate::media_clock::MediaClock::new(profile.fps)?;
     let graphic = overlay.map(|input| input.prepare(profile.width, profile.height)).transpose()?;
@@ -736,6 +744,7 @@ fn capture_to_dir(
                 audio_clipped_samples=audio_clipped_samples.saturating_add(mixed.clipped);
             }
             written_frames += 1;
+            if let (Some(run),Some(stats))=(&lifecycle,writer.live_stats()){run.telemetry(written_frames,late_frames,stats);}
             if finished_take {
                 transition=None;
                 transitions_completed+=1;
@@ -789,6 +798,7 @@ fn capture_to_dir(
     let finalizing = Instant::now();
     let result = writer.finish();
     let sent_bytes=writer.sent_bytes();
+    if let (Some(run),Some(stats))=(&lifecycle,writer.live_stats()){run.telemetry(written_frames,late_frames,stats);}
     drop(writer);
     if let Err((error, still_writing)) = result {
         // A timed-out AVFoundation writer may still own the private file.
@@ -890,12 +900,37 @@ pub(crate) fn capture_rtmps_program_test(
         })
 }
 
+// Internal only; no registered command can open an RTMPS destination.
+#[cfg(target_os="macos")]
+pub(crate) fn run_authorized_rtmps_session(
+    run:crate::live_lifecycle::Run,display_ids:Vec<usize>,video_device_id:Option<String>,
+    seconds:u32,profile:&str,bitrate_kbps:Option<u32>,layout:Option<&str>,
+    overlay:Option<crate::program_overlay::OverlayInput>,audio_inputs:Vec<crate::program_audio::AudioInput>,
+    transforms:Option<Vec<crate::source_transform::SourceTransform>>,server_url:String,stream_key:String,
+    explicitly_authorized:bool,
+)->Result<ContinuousProgramReport,String>{
+    let result=(||{
+        if !explicitly_authorized{return Err("Explicit destination authorization is required".into())}
+        crate::rtmp_session::tls::validate_destination(&server_url,&stream_key)?;
+        let stop=run.stop_flag();let cancel=stop.clone();
+        capture_authorized_live_program_with_lifecycle(display_ids,video_device_id,seconds,profile,bitrate_kbps,layout,
+            overlay,audio_inputs,transforms,stop,move||{
+                if cancel.load(Ordering::Acquire){return Err("Live Program cancelled before connection".into())}
+                let worker=crate::live_publish_worker::Worker::connect_tls(&server_url,&stream_key)?;
+                if cancel.load(Ordering::Acquire){worker.request_stop();return Err("Live Program cancelled during connection".into())}
+                Ok(worker)
+            },Some(run.clone()))
+    })();
+    run.finish(result.is_ok());result
+}
+
 // The connector is injected by an explicitly authorized native caller.
 // Neither the browser nor Tauri command dispatcher can invoke this path yet.
 #[cfg(any(target_os="macos",target_os="windows"))]
 struct LiveOutput{
     connect:Box<dyn FnOnce()->Result<crate::live_publish_worker::Worker,String>>,
     stop:std::sync::Arc<std::sync::atomic::AtomicBool>,
+    lifecycle:Option<crate::live_lifecycle::Run>,
 }
 
 #[cfg(target_os="macos")]
@@ -906,6 +941,19 @@ pub(crate) fn capture_authorized_live_program(
     transforms:Option<Vec<crate::source_transform::SourceTransform>>,
     stop:std::sync::Arc<std::sync::atomic::AtomicBool>,
     connect:impl FnOnce()->Result<crate::live_publish_worker::Worker,String>+'static,
+)->Result<ContinuousProgramReport,String>{
+    capture_authorized_live_program_with_lifecycle(display_ids,video_device_id,seconds,profile,bitrate_kbps,layout,overlay,audio_inputs,transforms,stop,connect,None)
+}
+
+#[cfg(target_os="macos")]
+fn capture_authorized_live_program_with_lifecycle(
+    display_ids:Vec<usize>,video_device_id:Option<String>,seconds:u32,profile:&str,
+    bitrate_kbps:Option<u32>,layout:Option<&str>,
+    overlay:Option<crate::program_overlay::OverlayInput>,audio_inputs:Vec<crate::program_audio::AudioInput>,
+    transforms:Option<Vec<crate::source_transform::SourceTransform>>,
+    stop:std::sync::Arc<std::sync::atomic::AtomicBool>,
+    connect:impl FnOnce()->Result<crate::live_publish_worker::Worker,String>+'static,
+    lifecycle:Option<crate::live_lifecycle::Run>,
 )->Result<ContinuousProgramReport,String>{
     if !(2..=60).contains(&seconds){return Err("Live integration test supports 2–60 seconds".into())}
     let mut p=encoding_profile(profile)?;
@@ -924,7 +972,7 @@ pub(crate) fn capture_authorized_live_program(
         .map_err(|_|"Another native capture is active")?;
     let _guard=CaptureLock;
     capture_to_dir(PathBuf::new(),display_ids,seconds,p,ProgramFormat::Live,layout,false,false,1.,overlay,
-        video_device_id,Some(audio_inputs),transforms,None,Some(LiveOutput{connect:Box::new(connect),stop}))
+        video_device_id,Some(audio_inputs),transforms,None,Some(LiveOutput{connect:Box::new(connect),stop,lifecycle}))
 }
 
 #[tauri::command]
