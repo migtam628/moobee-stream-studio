@@ -926,7 +926,7 @@ pub(crate) fn run_authorized_rtmps_session(
         crate::live_reconnect::recover(u64::from(seconds)*1000+30000,
             ||started.elapsed().as_millis() as u64,
             ||explicitly_authorized&&!stop.load(Ordering::Acquire),
-            |ms|std::thread::sleep(Duration::from_millis(ms)),
+            |ms|{run.recovery_wait();std::thread::sleep(Duration::from_millis(ms));},
             |attempt,remaining|{
                 run.begin_epoch(attempt);
                 let epoch_run=run.clone();let cancel=stop.clone();
