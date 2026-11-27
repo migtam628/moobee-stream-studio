@@ -402,6 +402,31 @@ mod tests{
         assert!(sink.sent_packets()>3);assert!(sink.sent_bytes()>0);
         assert!(sink.append(image::RgbaImage::new(640,360)).is_err());
     }
+    #[test]fn fanout_isolates_server_stop_and_drains_surviving_destination(){
+        use crate::{live_session::Session,live_publish_worker::Worker,live_fanout::Fanout};
+        use std::time::{Duration,Instant};
+        let open=||Worker::start(Session::new(Publisher::establish(fixture(true),"live","rtmps://example.invalid/live","fixture-key",7,&[9;1528]).unwrap()).unwrap()).unwrap();
+        let survivor=open();let failing=open();
+        let first=uuid::Uuid::new_v4().to_string();let second=uuid::Uuid::new_v4().to_string();
+        let mut fanout=Fanout::new(vec![(first.clone(),survivor),(second.clone(),failing)]).unwrap();
+        fanout.submit(vec![crate::stream_mux::avc_sequence(&[0x67,0x64,0,0x28],&[0x68,0xee]).unwrap(),crate::stream_mux::avc_access_unit(&[&[0x65,1]],0,0,true).unwrap()]).unwrap();
+        let deadline=Instant::now()+Duration::from_secs(2);
+        while fanout.destinations().iter().any(|d|d.sent_packets<2){assert!(Instant::now()<deadline);std::thread::sleep(Duration::from_millis(5));}
+        fanout.test_signal_inbound(&second).unwrap();
+        while fanout.destinations().iter().find(|d|d.id==second).unwrap().phase!="failed"{assert!(Instant::now()<deadline);std::thread::sleep(Duration::from_millis(5));}
+        fanout.submit(vec![crate::stream_mux::avc_access_unit(&[&[0x41,2]],100,0,false).unwrap()]).unwrap();
+        assert!(fanout.finish().is_err()); // never report partial success as complete
+        let rows=fanout.destinations();
+        assert_eq!((rows[0].phase,rows[0].sent_packets),("stopped",3));
+        assert_eq!((rows[1].phase,rows[1].sent_packets),("failed",2));
+        assert_eq!(fanout.retry_failure(),None);
+    }
+    #[test]fn fanout_rejects_duplicate_destination(){
+        use crate::{live_session::Session,live_publish_worker::Worker,live_fanout::Fanout};
+        let open=||Worker::start(Session::new(Publisher::establish(fixture(true),"live","rtmps://example.invalid/live","fixture-key",7,&[9;1528]).unwrap()).unwrap()).unwrap();
+        let id=uuid::Uuid::new_v4().to_string();
+        assert!(Fanout::new(vec![(id.clone(),open()),(id,open())]).is_err());
+    }
     #[test]fn rejects_publish_before_media(){
         let result=Publisher::establish(fixture(false),"live","rtmps://example.invalid/live","fixture-key",7,&[9;1528]);
         let Err(error)=result else{panic!("Rejected publish was accepted")};
