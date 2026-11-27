@@ -899,7 +899,9 @@ pub(crate) fn capture_rtmps_program_test(
     capture_authorized_live_program(display_ids,video_device_id,seconds,profile,bitrate_kbps,layout,overlay,
         audio_inputs,transforms,stop,move||{
             if cancel.load(Ordering::Acquire){return Err("Live Program cancelled before connection".into())}
-            let worker=crate::live_publish_worker::Worker::connect_tls(&server_url,&stream_key)?;
+            let check=cancel.clone();
+            let permit:crate::rtmp_session::ConnectionPermit=std::sync::Arc::new(move||!check.load(Ordering::Acquire));
+            let worker=crate::live_publish_worker::Worker::connect_tls_permitted(&server_url,&stream_key,&mut crate::live_reconnect::Failure::Unknown,permit,None)?;
             if cancel.load(Ordering::Acquire){worker.request_stop();return Err("Live Program cancelled during connection".into())}
             Ok(worker)
         })
