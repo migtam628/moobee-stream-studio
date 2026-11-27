@@ -173,6 +173,16 @@ try {
       if (cmd === 'macos_mp4_availability') return {supported:true,requiredMacos:'14.0',microphoneSupported:true};
       if (cmd === 'capture_scene_snapshot') { window.__snapshotCount++; return image; }
       if (cmd === 'list_test_clips') return window.__programRequests.length ? [clip] : [];
+      if(cmd==='live_acceptance_available')return true;
+      if(cmd==='start_live_acceptance'){
+        window.__acceptanceRequest=args.request;
+        window.__acceptanceState={sessionId:args.request.sessionId,mode:'native',phase:'streaming',mediaFrames:10,sentPackets:11,elapsedMs:1000};
+        return await new Promise(resolve=>{window.__acceptanceResolve=resolve;});
+      }
+      if(cmd==='stop_live_acceptance'){
+        if(window.__acceptanceState?.sessionId!==args.sessionId)return false;
+        window.__acceptanceState.phase='stopped';window.__acceptanceResolve?.(null);return true;
+      }
       if(cmd==='start_live_rehearsal'){
         window.__rehearsal={sessionId:args.sessionId,mode:'rehearsal',phase:'streaming',elapsedMs:100,mediaFrames:0,sentPackets:0,sentPayloadBytes:0,pendingPackets:0,pendingBytes:0,lateFrames:0,bitrateKbps:0};
         return null;
@@ -185,7 +195,7 @@ try {
       }
       if(cmd==='remove_stream_destination'){window.__destinationRows=[];return null;}
       if(cmd==='live_health_status')return window.__healthFixture??window.__rehearsal??null;
-      if(cmd==='live_session_status')return window.__rehearsal?.sessionId===args.sessionId?window.__rehearsal:null;
+      if(cmd==='live_session_status')return window.__acceptanceState?.sessionId===args.sessionId?window.__acceptanceState:window.__rehearsal?.sessionId===args.sessionId?window.__rehearsal:null;
       if(cmd==='stop_live_rehearsal'){if(window.__rehearsal?.sessionId!==args.sessionId)return false;window.__rehearsal.phase='stopped';return true;}
       if (cmd === 'capture_program_live_packet_test') {window.__flvRequest=args;return {...clip,format:'flv',path:'/test/clip.flv',webcamIncluded:false};}
       if (cmd === 'capture_continuous_program_mp4') {
@@ -391,6 +401,23 @@ try {
   if(flv.seconds!==4||flv.displayIds.join()!=='1'||flv.sessionId!==undefined||!Array.isArray(flv.audioInputs))throw new Error('Offline FLV capture routing failed');
   await macPage.getByRole('button',{name:'Close capture diagnostics',exact:true}).click();
   await macPage.getByRole('button',{name:'Saved FLV · View result',exact:true}).waitFor();
+  await macPage.evaluate(()=>{window.__destinationRows=[{id:'e9525c58-0e63-40b3-94b6-a9d0f0de4e99',name:'Private fixture',serverUrl:'rtmps://example.invalid/live',credentialAvailable:true}];});
+  const acceptance=macPage.getByRole('region',{name:'Real native streaming acceptance'});
+  await acceptance.getByRole('button',{name:'Load test destinations',exact:true}).click();
+  await acceptance.getByRole('checkbox').check();
+  await acceptance.getByLabel('Test stream duration',{exact:true}).selectOption('300');
+  await acceptance.getByRole('button',{name:'Review real stream test',exact:true}).click();
+  const startReal=acceptance.getByRole('button',{name:'Start real test stream',exact:true});
+  if(!await startReal.isDisabled())throw new Error('Real test must require explicit confirmation');
+  if(await macPage.evaluate(()=>!!window.__acceptanceRequest))throw new Error('Review must not start streaming');
+  await acceptance.getByLabel('Real stream confirmation').fill('START REAL TEST STREAM');
+  await startReal.click();
+  await acceptance.getByText(/Native test: streaming/).waitFor();
+  const accepted=await macPage.evaluate(()=>window.__acceptanceRequest);
+  if(accepted.displayIds.join()!=='1'||accepted.destinations[0].name!=='Private fixture'||accepted.seconds!==300||'streamKey' in accepted.destinations[0])throw new Error('Invalid acceptance source or destination handoff');
+  await acceptance.getByRole('button',{name:'Stop real test stream',exact:true}).click();
+  await acceptance.getByText(/Native test: stopped/).waitFor();
+  await macPage.evaluate(()=>{window.__destinationRows=[];});
   await macPage.getByRole('button',{name:'Rehearse Go Live',exact:true}).click();
   await macPage.getByText(/Rehearsal: running \(offline\)/).waitFor();
   if(!(await macPage.getByRole('button',{name:'Go Live (unavailable)',exact:true}).isDisabled()))throw new Error('Actual Go Live must remain disabled');
