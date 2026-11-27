@@ -138,6 +138,10 @@ impl Fanout{
         Ok(())
     }
     #[cfg(test)]
+    pub(crate) fn test_awaiting_key(&self,index:usize)->bool{
+        matches!(self.outputs[index].recovery,Some(Recovery::AwaitKey))
+    }
+    #[cfg(test)]
     pub(crate) fn test_signal_inbound(&self,id:&str)->Result<(),String>{
         self.outputs.iter().find(|o|o.id==id).ok_or("Unknown test destination")?.worker.signal_inbound()
     }
