@@ -8,6 +8,10 @@ edition = "2021"
 name = "moobee_live_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+# Developer acceptance builds only; never enabled by default or release CI.
+native-live-acceptance = []
+
 [build-dependencies]
 cc = "1"
 tauri-build = { version = "2", features = [] }
