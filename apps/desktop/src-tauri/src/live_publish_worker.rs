@@ -50,6 +50,12 @@ impl Worker{
         let session=Session::new(publisher)?;
         Self::start_with_poll(session,|s|s.poll_tls_inbound())
     }
+    #[cfg(any(target_os="macos",target_os="windows"))]
+    pub(crate) fn connect_tls_permitted(server_url:&str,stream_key:&str,failure:&mut crate::live_reconnect::Failure,permit:crate::rtmp_session::ConnectionPermit,lease:Option<std::sync::Arc<crate::stream_destinations::Lease>>)->Result<Self,String>{
+        let publisher=crate::rtmp_session::tls::connect_tls_permitted(server_url,stream_key,failure,Some(permit),lease)?;
+        let session=Session::new(publisher)?;
+        Self::start_with_poll(session,|s|s.poll_tls_inbound())
+    }
     pub(crate) fn submit(&self,packet:Packet)->Result<(),String>{self.submit_batch(vec![packet])}
     pub(crate) fn submit_batch(&self,packets:Vec<Packet>)->Result<(),String>{
         let mut m=self.shared.mail.lock().map_err(|_|"Publishing worker unavailable")?;
