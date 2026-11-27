@@ -603,7 +603,7 @@ mod tests{
         let open=||Worker::start(Session::new(Publisher::establish(fixture(true),"live","rtmps://example.invalid/live","fixture-key",7,&[9;1528]).unwrap()).unwrap()).unwrap();
         let flag=Arc::new(AtomicBool::new(false));
         let fault=Worker::start(Session::new(Publisher::establish(Fault{inner:fixture(true),fail:flag.clone()},"live","rtmps://example.invalid/live","fixture-key",7,&[9;1528]).unwrap()).unwrap()).unwrap();
-        let connector:Connector=Arc::new(move||Ok(open()));
+        let connector:Connector=Arc::new(move|permit|if permit(){Ok(open())}else{Err(Failure::Unknown)});
         let mut fanout=Fanout::with_recovery(vec![(uuid::Uuid::new_v4().to_string(),open(),None),(uuid::Uuid::new_v4().to_string(),fault,Some(connector))],None).unwrap();
         let video=|t,key|crate::stream_mux::avc_access_unit(&[&[if key{0x65}else{0x41},1]],t,0,key).unwrap();
         fanout.submit(vec![crate::stream_mux::avc_sequence(&[0x67,0x64,0,0x28],&[0x68,0xee]).unwrap(),video(0,true)]).unwrap();
