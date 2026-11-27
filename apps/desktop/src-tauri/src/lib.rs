@@ -47,6 +47,7 @@ mod live_reconnect;
 mod stream_destinations;
 mod live_publish_worker;
 mod live_fanout;
+mod live_rejoin;
 mod live_flv;
 #[cfg(target_os = "macos")]
 mod macos_avc;

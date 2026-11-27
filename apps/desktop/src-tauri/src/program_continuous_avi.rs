@@ -994,7 +994,7 @@ pub(crate) fn run_saved_multistream_session(
             if cancel.load(Ordering::Acquire){return Err("Multistream cancelled before connection".into())}
             let publishers=std::thread::scope(|scope|{
                 let handles=credentials.into_iter().map(|(id,url,key)|scope.spawn(move||{
-                    crate::rtmp_session::tls::connect_tls(&url,&key).map(|p|(id,p))
+                    crate::rtmp_session::tls::connect_tls(&url,&key).map(|p|(id,p,url,key))
                 })).collect::<Vec<_>>();
                 let mut publishers=Vec::new();
                 for h in handles{
@@ -1004,12 +1004,16 @@ pub(crate) fn run_saved_multistream_session(
             })?;
             if cancel.load(Ordering::Acquire){return Err("Multistream cancelled during connection".into())}
             let mut workers=Vec::new();
-            for (id,publisher) in publishers{
+            for (id,publisher,url,key) in publishers{
                 let session=crate::live_session::Session::new(publisher)?;
                 let worker=crate::live_publish_worker::Worker::start_with_poll(session,|s|s.poll_tls_inbound())?;
-                workers.push((id,worker));
+                let connector:crate::live_fanout::Connector=std::sync::Arc::new(move||{
+                    let mut cause=crate::live_reconnect::Failure::Unknown;
+                    crate::live_publish_worker::Worker::connect_tls_classified(&url,&key,&mut cause).map_err(|_|cause)
+                });
+                workers.push((id,worker,Some(connector)));
             }
-            crate::live_fanout::Fanout::new(workers)
+            crate::live_fanout::Fanout::with_recovery(workers,Some(cancel.clone()))
         },Some(run.clone()));
         drop(leases);result
     })();

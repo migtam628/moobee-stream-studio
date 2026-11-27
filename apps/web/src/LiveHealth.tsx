@@ -2,7 +2,7 @@ import {useEffect,useState} from 'react'
 import {request,runningInTauri} from './api'
 
 type Health='unavailable'|'warmingUp'|'normal'|'backpressure'|'stalled'|'stale'|'ended'
-type Destination={id:string;phase:string;sentPackets:number;sentPayloadBytes:number;queuedPackets:number;queuedBytes:number;admittedPackets:number;admittedBytes:number}
+type Destination={id:string;phase:string;sentPackets:number;sentPayloadBytes:number;queuedPackets:number;queuedBytes:number;admittedPackets:number;admittedBytes:number;reconnectAttempt?:number;interrupted?:boolean}
 type Snapshot={destinations?:Destination[];mode:'native'|'rehearsal';phase:string;elapsedMs:number;sentPackets:number;sentPayloadBytes:number;mediaFrames:number;reconnectAttempt?:number;health:{health:Health;payloadKbps:number|null;outputFpsTenths:number|null;queueBytes:number;queuePackets:number;lateFramesInWindow:number|null;sampleAgeMs:number|null}}
 const labels:Record<Health,string>={unavailable:'Unavailable',warmingUp:'Collecting samples',normal:'Sender normal',backpressure:'Queue pressure',stalled:'Sender stalled',stale:'Stale sample',ended:'Ended'}
 export default function LiveHealth(){
@@ -45,7 +45,7 @@ export default function LiveHealth(){
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))',gap:'12px'}}>
         {metrics.map(([label,value])=><div className="dock-note" key={label}><span>{label}</span><br/><strong>{value}</strong></div>)}
       </div>
-      {snapshot?.mode==='native'&&!!snapshot.destinations?.length&&<div aria-label="Per-destination publishing health" style={{marginBlock:'16px'}}><h3>Destination output</h3>{snapshot.destinations.map((d,i)=><div className="dock-note" key={d.id} style={{marginBlock:'8px'}}><strong>{d.id==='single'?'Single destination':`Destination ${i+1} · ${d.id.slice(0,8)}`}</strong> · {d.phase}<br/>{d.sentPackets} of {d.admittedPackets} admitted packets sent · {(d.sentPayloadBytes/1048576).toFixed(2)} MiB sent · {d.queuedPackets} queued</div>)}<p className="dock-note">A failed destination does not automatically stop the remaining workers. Aggregate bitrate is the sum of native sender payloads, not individual stream bitrate.</p></div>}
+      {snapshot?.mode==='native'&&!!snapshot.destinations?.length&&<div aria-label="Per-destination publishing health" style={{marginBlock:'16px'}}><h3>Destination output</h3>{snapshot.destinations.map((d,i)=><div className="dock-note" key={d.id} style={{marginBlock:'8px'}}><strong>{d.id==='single'?'Single destination':`Destination ${i+1} · ${d.id.slice(0,8)}`}</strong> · {d.phase} · Retry {d.reconnectAttempt??0}{d.interrupted?' · Delivery interrupted':''}<br/>{d.sentPackets} of {d.admittedPackets} admitted packets sent · {(d.sentPayloadBytes/1048576).toFixed(2)} MiB sent · {d.queuedPackets} queued</div>)}<p className="dock-note">A failed destination does not automatically stop the remaining workers. Aggregate bitrate is the sum of native sender payloads, not individual stream bitrate.</p></div>}
       <p className="dock-note">Actual Go Live and native recovery remain gated pending secure destination authorization and receiving-side acceptance. Counters reset for each new publishing epoch.</p>
     </div>
   </section>
