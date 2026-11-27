@@ -2,6 +2,11 @@
 use std::{sync::{atomic::{AtomicBool,Ordering},mpsc::{Receiver,TryRecvError,RecvTimeoutError}},time::{Duration,Instant}};
 pub(crate) const MAX_DISCARDED:usize=256;
 pub(crate) const STARTUP_REFRESH:Duration=Duration::from_millis(1500);
+pub(crate) const MAX_TICK_LAG:Duration=Duration::from_millis(500);
+pub(crate) fn check_tick_lag(lag:Duration)->Result<(),String>{
+    if lag>MAX_TICK_LAG{return Err("Live Program clock fell over 500 ms behind; refusing catch-up burst".into())}
+    Ok(())
+}
 pub(crate) fn check(stop:&AtomicBool,deadline:Instant)->Result<(),String>{
     if stop.load(Ordering::Acquire){return Err("Live Program cancelled during startup".into())}
     if Instant::now()>=deadline{return Err("Live Program startup refresh exceeded its deadline".into())}
@@ -36,6 +41,11 @@ pub(crate) fn fresh<T>(rx:&Receiver<T>,stop:&AtomicBool,deadline:Instant)->Resul
 mod tests{
     use super::*;
     use std::sync::mpsc::channel;
+    #[test]fn clock_lag_budget_is_explicit(){
+        assert!(check_tick_lag(Duration::ZERO).is_ok());
+        assert!(check_tick_lag(MAX_TICK_LAG).is_ok());
+        assert!(check_tick_lag(MAX_TICK_LAG+Duration::from_millis(1)).is_err());
+    }
     #[test]fn purge_discards_old_entries_and_fresh_accepts_next(){
         let (tx,rx)=channel();let stop=AtomicBool::new(false);let deadline=Instant::now()+Duration::from_secs(1);
         for n in 0..4{tx.send(n).unwrap();}
