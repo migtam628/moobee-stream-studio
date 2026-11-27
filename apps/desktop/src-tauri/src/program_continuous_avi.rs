@@ -1067,7 +1067,7 @@ mod tests {
     fn invalid_or_cancelled_live_request_never_connects(){
         use std::sync::{Arc,atomic::AtomicBool};
         for (seconds,stop) in [(0,false),(61,false),(2,true)]{
-            let result=capture_authorized_live_program(vec![0],None,seconds,"baseline",None,None,None,vec![],None,
+            let result=super::capture_authorized_live_program(vec![0],None,seconds,"baseline",None,None,None,vec![],None,
                 Arc::new(AtomicBool::new(stop)),||panic!("Invalid live request opened a destination"));
             assert!(result.is_err());
         }
