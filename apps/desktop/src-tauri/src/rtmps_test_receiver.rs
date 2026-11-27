@@ -92,7 +92,28 @@ impl Report{
         self.media_packets+=1;self.payload_bytes+=b.len()as u64;Ok(())
     }
 }
-pub(crate) fn serve(io:&mut (impl Read+Write),fixture_key:&str)->Result<Report>{
+// Optional bounded receiver-side FLV evidence; synthetic codec QA only.
+const MAX_CAPTURE:usize=16*1024*1024;
+struct Capture{bytes:Vec<u8>}
+impl Capture{
+    fn new()->Self{Self{bytes:b"FLV\x01\x05\x00\x00\x00\x09\x00\x00\x00\x00".to_vec()}}
+    fn append(&mut self,m:&Message)->Result<()>{
+        let n=m.body.len();if self.bytes.len()+15+n>MAX_CAPTURE{return Err("Receiver capture budget exceeded".into())}
+        let n=n as u32;
+        self.bytes.push(m.kind);
+        self.bytes.extend(&n.to_be_bytes()[1..]);
+        self.bytes.extend(&m.time.to_be_bytes()[1..]);self.bytes.push((m.time>>24)as u8);
+        self.bytes.extend([0,0,0]);self.bytes.extend(&m.body);self.bytes.extend((11+n).to_be_bytes());Ok(())
+    }
+    fn save(mut self,path:&std::path::Path,audio:bool)->Result<()>{
+        self.bytes[4]=if audio{5}else{1};
+        let mut file=std::fs::OpenOptions::new().create_new(true).write(true).open(path).map_err(|_|"Could not create receiver evidence file")?;
+        if file.write_all(&self.bytes).and_then(|_|file.sync_all()).is_err(){
+            drop(file);let _=std::fs::remove_file(path);return Err("Could not write receiver evidence file".into())
+        }Ok(())
+    }
+}
+pub(crate) fn serve(io:&mut (impl Read+Write),fixture_key:&str,capture_path:Option<&std::path::Path>)->Result<Report>{
     let c=read::<1537>(io)?;
     if c[0]!=3{return Err("Invalid RTMP client version".into())}
     let mut s=vec![3];let mut s1=[0u8;1536];getrandom::fill(&mut s1[8..]).map_err(|_|"Randomness unavailable")?;
@@ -110,17 +131,18 @@ pub(crate) fn serve(io:&mut (impl Read+Write),fixture_key:&str)->Result<Report>{
     // Exercise the actual sender's inbound TLS polling path.
     write(io,&[2,0,0,0,0,0,6,4,0,0,0,0,0,6,1,2,3,4])?;
     let mut close=command("deleteStream",0.);close.push(5);close.extend(number(f64::from(STREAM)));
-    let mut r=Report::default();
+    let mut r=Report::default();let mut capture=capture_path.map(|_|Capture::new());
     loop{
         let m=receive(io)?;
         match m.kind{
-            8|9=>r.media(m)?,
+            8|9=>{if let Some(c)=capture.as_mut(){c.append(&m)?;}r.media(m)?;},
             4 if m.stream==0&&m.body==[0,7,1,2,3,4]&&!r.pong_received=>r.pong_received=true,
             20=>{expect(&m,0,&close,false)?;r.orderly_close=true;break}
             _=>return Err("Unexpected receiver message".into())
         }
     }
     if r.video_frames<2||!r.pong_received||(r.audio_config&&r.audio_blocks==0){return Err("Incomplete receiver acceptance".into())}
+    if let (Some(c),Some(path))=(capture,capture_path){c.save(path,r.audio_config)?;}
     Ok(r)
 }
 #[test]fn receiver_rejects_missing_configuration_and_invalid_continuations(){
