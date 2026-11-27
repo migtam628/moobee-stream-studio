@@ -38,6 +38,12 @@ impl Controller{
         if !matches!(s.phase,Phase::Stopped|Phase::Failed){s.elapsed_ms=e.start.elapsed().as_millis() as u64;}
         Some(s)
     }
+    pub(crate) fn stop_rehearsal(&self,id:&str)->bool{
+        let Ok(mut e)=self.entry.lock()else{return false};
+        let Some(e)=e.as_mut().filter(|v|v.snapshot.session_id==id&&v.snapshot.mode==Mode::Rehearsal)else{return false};
+        if matches!(e.snapshot.phase,Phase::Stopped|Phase::Failed){return false}
+        e.stop.store(true,Ordering::Release);e.snapshot.phase=Phase::Stopping;true
+    }
     pub(crate) fn request_stop(&self,id:&str)->bool{
         let Ok(mut e)=self.entry.lock()else{return false};
         let Some(e)=e.as_mut().filter(|v|v.snapshot.session_id==id)else{return false};
@@ -102,7 +108,7 @@ mod tests{
         r.finish(true);assert_eq!(c.snapshot(&id).unwrap().phase,Phase::Stopped);
         assert!(!c.request_stop(&id));
         let next=uuid::Uuid::new_v4().to_string();let n=c.start(next.clone(),Mode::Native).unwrap();
-        r.finish(false);assert_eq!(c.snapshot(&next).unwrap().phase,Phase::Starting);
+        r.finish(false);assert_eq!(c.snapshot(&next).unwrap().phase,Phase::Starting);assert!(!c.stop_rehearsal(&next));
         n.finish(false);assert_eq!(c.snapshot(&next).unwrap().phase,Phase::Failed);
     }
 }
