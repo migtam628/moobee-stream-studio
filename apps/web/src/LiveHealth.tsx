@@ -6,7 +6,9 @@ type Destination={id:string;phase:string;sentPackets:number;sentPayloadBytes:num
 type Resources={samples:number;sampleElapsedMs:number;residentBytes:number|null;baselineResidentBytes:number|null;peakResidentBytes:number|null;cpuTenths:number|null;peakCpuTenths:number|null}
 type Timing={videoPackets:number;audioPackets:number;videoEndMs:number|null;audioEndMs:number|null;encodedVideoLeadMs:number|null;maxAbsEncodedGapMs:number|null;pendingAudioFrames:number|null;pcmFramesSupplied:number;windowsMissingSourceFrames:number|null;maxEncodeMs:number}
 type BitrateAdvice={initialKbps:number|null;currentKbps:number|null;fallbackEnabled:boolean;suggestedKbps:number|null;pressureMs:number;inplaceEnabled?:boolean;inplaceChanges?:number;inplaceUnsupported?:boolean;inplaceUncertain?:boolean}
-type Snapshot={bitrateAdvice?:BitrateAdvice;resources?:Resources;timing?:Timing|null;destinations?:Destination[];mode:'native'|'rehearsal';phase:string;elapsedMs:number;sentPackets:number;sentPayloadBytes:number;mediaFrames:number;reconnectAttempt?:number;health:{health:Health;payloadKbps:number|null;outputFpsTenths:number|null;queueBytes:number;queuePackets:number;lateFramesInWindow:number|null;sampleAgeMs:number|null}}
+type NativeOutcome='senderCompleted'|'stoppedEarly'|'failed'|'unverified'
+const outcomes:Record<NativeOutcome,string>={senderCompleted:'Sender completed requested duration — receiver evidence required',stoppedEarly:'Stopped early — not a full-duration acceptance pass',failed:'Sender failed or delivery was interrupted',unverified:'Sender ended — duration unverified'}
+type Snapshot={nativeOutcome?:NativeOutcome|null;bitrateAdvice?:BitrateAdvice;resources?:Resources;timing?:Timing|null;destinations?:Destination[];mode:'native'|'rehearsal';phase:string;elapsedMs:number;sentPackets:number;sentPayloadBytes:number;mediaFrames:number;reconnectAttempt?:number;health:{health:Health;payloadKbps:number|null;outputFpsTenths:number|null;queueBytes:number;queuePackets:number;lateFramesInWindow:number|null;sampleAgeMs:number|null}}
 const labels:Record<Health,string>={unavailable:'Unavailable',warmingUp:'Collecting samples',normal:'Sender normal',backpressure:'Queue pressure',stalled:'Sender stalled',stale:'Stale sample',ended:'Ended'}
 export default function LiveHealth(){
   const native=runningInTauri()
@@ -69,6 +71,7 @@ export default function LiveHealth(){
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))',gap:'12px'}}>
         {metrics.map(([label,value])=><div className="dock-note" key={label}><span>{label}</span><br/><strong>{value}</strong></div>)}
       </div>
+      {snapshot?.mode==='native'&&snapshot.nativeOutcome&&<p className="dock-note" role="status">{outcomes[snapshot.nativeOutcome]}</p>}
       <h3>Bitrate recovery</h3>
       <p className="dock-note">Initial target: {advice?.initialKbps??'—'} kbps · Current target: {advice?.currentKbps??'—'} kbps · Retry fallback: {advice==null?'—':advice.fallbackEnabled?'Enabled':'Disabled'}</p>
       <p className="dock-note">{advice?.suggestedKbps!=null&&snapshot?.phase==='streaming'? `Sustained sender queue pressure: consider ${advice.suggestedKbps} kbps for a future session.`:'No active bitrate recommendation.'} Recommendations do not measure network capacity. An explicitly enabled native downshift can apply at a GOP boundary.</p>
