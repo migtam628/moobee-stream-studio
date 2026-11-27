@@ -43,6 +43,12 @@ impl Encoder{
         if result.is_err(){self.failed=true;worker.request_failure();}
         result
     }
+    pub(crate) fn lower_bitrate(&mut self,kbps:u32)->Result<bool,String>{
+        if self.failed{return Err("Live encoder requires a new epoch".into())}
+        let result=self.video.lower_bitrate(kbps);
+        if result.is_err(){self.failed=true;}
+        result
+    }
     pub(crate) fn pending_audio_frames(&self)->u64{self.audio.as_ref().map_or(0,|a|a.pending_frames())}
 }
 #[cfg(test)]
