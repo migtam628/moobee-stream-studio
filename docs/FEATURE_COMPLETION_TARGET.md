@@ -74,3 +74,6 @@ PR #85 merged independent destination recovery. This increment samples native pr
 
 ## Workstream 9 — independent encrypted loopback receiver
 PR #86 merged sustained sender monitoring. This increment adds a test-only local Rustls receiver with independent bounded RTMP parsing, ephemeral localhost certificates, TLS trust/hostname rejection, ping/pong, configuration/IDR/timestamp checks, sender-versus-receiver totals and orderly termination. Credential-free JSON reports appear in test logs. An opt-in native synthetic encoder test uses the same receiver. See LOCAL_RTMPS_RECEIVER_ACCEPTANCE.md. CI must pass before claiming automated loopback acceptance; physical capture, decoded receiver playback, external platform interoperability, two-hour soak and production Go Live remain unverified. Formal completion remains 8/20.
+
+## Workstream 9 — native streaming security hardening
+PRs #87 and #88 merged encrypted loopback receiver and independent decoder harness. This increment addresses cancellation during negotiation, detached recovery lease lifetime and owned credential-buffer clearing. See NATIVE_STREAM_SECURITY_REVIEW.md for scope, tests and unresolved release blockers. Source review and CI do not constitute a penetration test, real native decode or physical two-hour acceptance. Default production Go Live remains disabled and formal completion remains 8/20.

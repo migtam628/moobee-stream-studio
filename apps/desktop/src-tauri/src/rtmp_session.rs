@@ -9,6 +9,7 @@ const MAX_NEGOTIATION_BYTES:u64=8*1024*1024;
 const OUT_CHUNK:usize=128;
 const MAX_INBOUND_BUFFER:usize=2*65_536+64;
 const INBOUND_BATCH:usize=16;
+pub(crate) type ConnectionPermit=std::sync::Arc<dyn Fn()->bool+Send+Sync>;
 pub(crate) struct Publisher<T>{io:T,reader:Reader,state:Negotiation,failed:bool,inbound:Vec<u8>,transport_failure:Option<Failure>}
 fn transient_io(kind:ErrorKind)->bool{matches!(kind,ErrorKind::ConnectionReset|ErrorKind::ConnectionAborted|ErrorKind::BrokenPipe|ErrorKind::TimedOut|ErrorKind::ConnectionRefused)}
 impl<T:Read+Write> Publisher<T>{
@@ -35,7 +36,7 @@ impl<T:Read+Write> Publisher<T>{
     pub(crate) fn establish(io:T,app:&str,tc_url:&str,stream_name:&str,time:u32,random:&[u8])->Result<Self>{
         // Validate and build credential-bearing commands before any write.
         let connect=rtmp::connect(app,tc_url,1)?;
-        let publish=rtmp::publish(stream_name)?;
+        let publish=zeroize::Zeroizing::new(rtmp::publish(stream_name)?);
         let hello=rtmp::client_hello(time,random)?;
         let mut s=Self{io,reader:Reader::default(),state:Negotiation::default(),failed:false,inbound:Vec::new(),transport_failure:None};
         s.send_raw(&hello)?;
@@ -50,7 +51,10 @@ impl<T:Read+Write> Publisher<T>{
             if let Some(ack)=s.state.acknowledge(s.reader.bytes()){s.respond(ack)?;}
             match action{
                 Some(Action::CreateStream)=>s.command(0,&rtmp::create_stream(2)?)?,
-                Some(Action::Publish(id))=>s.command(id,&publish)?,
+                Some(Action::Publish(id))=>{
+                    let wire=zeroize::Zeroizing::new(rtmp::chunks(3,id,20,0,&publish,OUT_CHUNK)?);
+                    s.send_raw(&wire)?;
+                },
                 Some(Action::Ready(_))=>return Ok(s),
                 Some(other)=>s.respond(other)?,
                 None=>{}
@@ -156,9 +160,10 @@ pub(crate) mod tls {
         let tc_url=format!("rtmps://{}:{}/{}",host,port,app);
         Ok(Endpoint{host,port,app:app.to_owned(),tc_url})
     }
-    pub(crate) struct DeadlineSocket{socket:TcpStream,deadline:Option<Instant>}
+    pub(crate) struct DeadlineSocket{socket:TcpStream,deadline:Option<Instant>,permit:Option<ConnectionPermit>,_lease:Option<std::sync::Arc<crate::stream_destinations::Lease>>}
     impl DeadlineSocket{
         fn timeout(&self)->io::Result<Duration>{
+            if self.permit.as_ref().is_some_and(|p|!p()){return Err(io::Error::new(io::ErrorKind::PermissionDenied,"RTMPS negotiation cancelled"))}
             match self.deadline{
                 Some(d)=>{let remaining=d.saturating_duration_since(Instant::now());if remaining.is_zero(){Err(io::Error::new(io::ErrorKind::TimedOut,"RTMPS negotiation deadline"))}else{Ok(remaining.min(IO_TIMEOUT))}},
                 None=>Ok(IO_TIMEOUT)
@@ -174,7 +179,7 @@ pub(crate) mod tls {
     }
     pub(crate) fn validate_destination(server_url:&str,stream_key:&str)->Result<()>{
         endpoint(server_url)?;
-        rtmp::publish(stream_key)?;
+        let _validated=zeroize::Zeroizing::new(rtmp::publish(stream_key)?);
         Ok(())
     }
     /// Explicit future caller only. DNS resolution is OS-blocking and must
@@ -183,28 +188,39 @@ pub(crate) mod tls {
         connect_tls_classified(server_url,stream_key,&mut Failure::Unknown)
     }
     pub(crate) fn connect_tls_classified(server_url:&str,stream_key:&str,failure:&mut Failure)->Result<Publisher<native_tls::TlsStream<DeadlineSocket>>>{
+        connect_tls_permitted(server_url,stream_key,failure,None,None)
+    }
+    pub(crate) fn connect_tls_permitted(server_url:&str,stream_key:&str,failure:&mut Failure,permit:Option<ConnectionPermit>,lease:Option<std::sync::Arc<crate::stream_destinations::Lease>>)->Result<Publisher<native_tls::TlsStream<DeadlineSocket>>>{
         *failure=Failure::Unknown;
+        let allowed=||if permit.as_ref().is_some_and(|p|!p()){Err("RTMPS negotiation cancelled".to_owned())}else{Ok(())};
+        allowed()?;
         let target=endpoint(server_url)?;
-        rtmp::publish(stream_key)?;
+        let _validated=zeroize::Zeroizing::new(rtmp::publish(stream_key)?);
         let addresses=(target.host.as_str(),target.port).to_socket_addrs().map_err(|_|"RTMPS DNS resolution failed")?;
+        allowed()?;
         let deadline=Instant::now()+CONNECT_TIMEOUT;
         let mut socket=None;
         let mut retryable=true;let mut attempted=false;
         for address in addresses.take(8){
+            allowed()?;
             let remaining=deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero(){break}
             attempted=true;
             match TcpStream::connect_timeout(&address,remaining){Ok(s)=>{socket=Some(s);break},Err(e)=>{retryable&=transient_io(e.kind());}}
         }
         let socket=match socket{Some(s)=>s,None=>{if attempted&&retryable{*failure=Failure::TransientTransport;}return Err("RTMPS TCP connection failed".into())}};
+        allowed()?;
         socket.set_nodelay(true).map_err(|_|"RTMPS socket configuration failed")?;
         let connector=native_tls::TlsConnector::builder().min_protocol_version(Some(native_tls::Protocol::Tlsv12)).build().map_err(|_|"RTMPS TLS initialization failed")?;
-        let tls=connector.connect(&target.host,DeadlineSocket{socket,deadline:Some(Instant::now()+NEGOTIATION_TIMEOUT)})
+        let tls=connector.connect(&target.host,DeadlineSocket{socket,deadline:Some(Instant::now()+NEGOTIATION_TIMEOUT),permit:permit.clone(),_lease:lease})
             .map_err(|_|"RTMPS TLS certificate validation or handshake failed")?;
+        allowed()?;
         let mut random=[0u8;1528];getrandom::fill(&mut random).map_err(|_|"RTMP handshake randomness unavailable")?;
         let now=SystemTime::now().duration_since(UNIX_EPOCH).map_err(|_|"System clock invalid")?.as_millis() as u32;
         let mut publisher=Publisher::establish(tls,&target.app,&target.tc_url,stream_key,now,&random)?;
+        allowed()?;
         publisher.io.get_mut().deadline=None;
+        publisher.io.get_mut().permit=None; // graceful media drain is independent of start cancellation
         Ok(publisher)
     }
     impl Publisher<native_tls::TlsStream<DeadlineSocket>>{
@@ -261,7 +277,7 @@ pub(crate) mod tls {
             socket.set_nodelay(true).unwrap();
             let mut builder=native_tls::TlsConnector::builder();
             builder.min_protocol_version(Some(native_tls::Protocol::Tlsv12)).add_root_certificate(root);
-            let tls=builder.build().unwrap().connect("localhost",DeadlineSocket{socket,deadline:Some(Instant::now()+NEGOTIATION_TIMEOUT)}).unwrap_or_else(|_|panic!("Loopback TLS handshake failed"));
+            let tls=builder.build().unwrap().connect("localhost",DeadlineSocket{socket,deadline:Some(Instant::now()+NEGOTIATION_TIMEOUT),permit:None,_lease:None}).unwrap_or_else(|_|panic!("Loopback TLS handshake failed"));
             let mut random=[0u8;1528];getrandom::fill(&mut random).unwrap();
             let mut publisher=Publisher::establish(tls,"live","rtmps://localhost/live",key,0,&random).unwrap();
             publisher.io.get_mut().deadline=None;
@@ -295,7 +311,7 @@ pub(crate) mod tls {
                 let mut builder=native_tls::TlsConnector::builder();
                 builder.min_protocol_version(Some(native_tls::Protocol::Tlsv12));
                 if trust{builder.add_root_certificate(root);}
-                let result=builder.build().unwrap().connect(host,DeadlineSocket{socket,deadline:Some(Instant::now()+Duration::from_secs(5))});
+                let result=builder.build().unwrap().connect(host,DeadlineSocket{socket,deadline:Some(Instant::now()+Duration::from_secs(5)),permit:None,_lease:None});
                 assert!(result.is_err());drop(result);server.join().unwrap();
             }
         }
@@ -333,6 +349,25 @@ pub(crate) mod tls {
                 }
                 assert_eq!(totals.2,20);assert!(totals.3>80);totals
             });
+        }
+        #[test]fn cancelled_negotiation_never_resolves_or_connects(){
+            let permit:ConnectionPermit=std::sync::Arc::new(||false);
+            let mut cause=Failure::TransientTransport;
+            let err=connect_tls_permitted("rtmps://example.invalid/live","fixture-key",&mut cause,Some(permit),None).err().unwrap();
+            assert_eq!(err,"RTMPS negotiation cancelled");assert_eq!(cause,Failure::Unknown);
+        }
+        #[test]fn revoked_socket_permit_blocks_io(){
+            use std::net::{TcpListener,Ipv4Addr};
+            use std::sync::{Arc,atomic::{AtomicBool,Ordering}};
+            let listener=TcpListener::bind((Ipv4Addr::LOCALHOST,0)).unwrap();
+            let socket=TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+            let (_peer,_)=listener.accept().unwrap();
+            let enabled=Arc::new(AtomicBool::new(true));let flag=enabled.clone();
+            let mut socket=DeadlineSocket{socket,deadline:Some(Instant::now()+Duration::from_secs(5)),permit:Some(Arc::new(move||flag.load(Ordering::Acquire))),_lease:None};
+            assert!(socket.timeout().is_ok());enabled.store(false,Ordering::Release);
+            assert_eq!(socket.write(&[1]).unwrap_err().kind(),io::ErrorKind::PermissionDenied);
+            assert_eq!(socket.read(&mut [0]).unwrap_err().kind(),io::ErrorKind::PermissionDenied);
+            assert!(socket.flush().is_err());
         }
         #[test]fn validates_secure_endpoint_without_leaking_credentials(){
             let a=endpoint("rtmps://ingest.example.invalid:443/live").unwrap();
@@ -571,7 +606,7 @@ mod tests{
         let open=||Worker::start(Session::new(Publisher::establish(fixture(true),"live","rtmps://example.invalid/live","fixture-key",7,&[9;1528]).unwrap()).unwrap()).unwrap();
         let flag=Arc::new(AtomicBool::new(false));
         let fault=Worker::start(Session::new(Publisher::establish(Fault{inner:fixture(true),fail:flag.clone()},"live","rtmps://example.invalid/live","fixture-key",7,&[9;1528]).unwrap()).unwrap()).unwrap();
-        let connector:Connector=Arc::new(move||Ok(open()));
+        let connector:Connector=Arc::new(move|permit|if permit(){Ok(open())}else{Err(Failure::Unknown)});
         let mut fanout=Fanout::with_recovery(vec![(uuid::Uuid::new_v4().to_string(),open(),None),(uuid::Uuid::new_v4().to_string(),fault,Some(connector))],None).unwrap();
         let video=|t,key|crate::stream_mux::avc_access_unit(&[&[if key{0x65}else{0x41},1]],t,0,key).unwrap();
         fanout.submit(vec![crate::stream_mux::avc_sequence(&[0x67,0x64,0,0x28],&[0x68,0xee]).unwrap(),video(0,true)]).unwrap();

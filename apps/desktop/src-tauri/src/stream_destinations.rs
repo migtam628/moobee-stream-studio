@@ -11,6 +11,7 @@ static ACTIVE:Mutex<Vec<String>>=Mutex::new(Vec::new());
 #[derive(Serialize,Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Record{version:u8,name:String,server_url:String,stream_key:String}
+impl Drop for Record{fn drop(&mut self){use zeroize::Zeroize;self.stream_key.zeroize();}}
 #[derive(Serialize)]
 #[serde(rename_all="camelCase")]
 pub(crate) struct View{id:String,name:String,server_url:Option<String>,credential_available:bool}
@@ -75,6 +76,7 @@ fn ids(dir:&Path)->Result<Vec<String>,String>{
 }
 fn load(vault:&impl Vault,id:&str)->Result<Option<Record>,String>{
     let Some(bytes)=vault.get(id)?else{return Ok(None)};
+    let bytes=zeroize::Zeroizing::new(bytes);
     if bytes.len()>MAX_RECORD{return Err("Invalid stored destination".into())}
     let r:Record=serde_json::from_slice(&bytes).map_err(|_|"Invalid stored destination")?;
     if r.version!=1{return Err("Unsupported destination version".into())}
@@ -85,16 +87,16 @@ fn views(dir:&Path,vault:&impl Vault)->Result<Vec<View>,String>{
     ids(dir)?.into_iter().map(|id|{
         let r=load(vault,&id)?;
         Ok(match r{
-            Some(r)=>View{id,name:r.name,server_url:Some(r.server_url),credential_available:true},
+            Some(r)=>View{id,name:r.name.clone(),server_url:Some(r.server_url.clone()),credential_available:true},
             None=>View{id,name:"Missing OS credential".into(),server_url:None,credential_available:false},
         })
     }).collect()
 }
 fn create(dir:&Path,vault:&impl Vault,name:String,server_url:String,stream_key:String)->Result<View,String>{
-    validate(&name,&server_url,&stream_key)?;
-    if ids(dir)?.len()>=MAX_DESTINATIONS{return Err("At most eight saved destinations are supported".into())}
     let record=Record{version:1,name,server_url,stream_key};
-    let bytes=serde_json::to_vec(&record).map_err(|_|"Could not encode destination")?;
+    validate(&record.name,&record.server_url,&record.stream_key)?;
+    if ids(dir)?.len()>=MAX_DESTINATIONS{return Err("At most eight saved destinations are supported".into())}
+    let bytes=zeroize::Zeroizing::new(serde_json::to_vec(&record).map_err(|_|"Could not encode destination")?);
     if bytes.len()>MAX_RECORD{return Err("Destination record exceeds credential store budget".into())}
     fs::create_dir_all(dir).map_err(|_|"Could not create destination index")?;
     let id=uuid::Uuid::new_v4().to_string();
@@ -108,7 +110,7 @@ fn create(dir:&Path,vault:&impl Vault,name:String,server_url:String,stream_key:S
         if vault.remove(&id).is_ok(){let _=fs::remove_file(&marker);}
         return Err(e)
     }
-    Ok(View{id,name:record.name,server_url:Some(record.server_url),credential_available:true})
+    Ok(View{id,name:record.name.clone(),server_url:Some(record.server_url.clone()),credential_available:true})
 }
 fn remove(dir:&Path,vault:&impl Vault,id:&str)->Result<(),String>{
     if !valid_id(id)||!ids(dir)?.iter().any(|v|v==id){return Err("Unknown destination".into())}
@@ -204,7 +206,9 @@ mod tests{
         assert_eq!(l.credentials(),(url,"fixture-secret"));
         assert!(lease(&dir.0,&vault,&v.id,"Test",url,true).is_err());
         assert!(remove(&dir.0,&vault,&v.id).is_err());
-        drop(l);remove(&dir.0,&vault,&v.id).unwrap();
+        let owner=std::sync::Arc::new(l);let transport=owner.clone();
+        drop(owner);assert!(remove(&dir.0,&vault,&v.id).is_err());
+        drop(transport);remove(&dir.0,&vault,&v.id).unwrap();
     }
     #[test]fn rejects_invalid_config_without_writing(){
         let dir=Temp(std::env::temp_dir().join(uuid::Uuid::new_v4().to_string()));let vault=Memory::default();
