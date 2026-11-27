@@ -460,6 +460,13 @@ impl FrameSink {
             _=>None,
         }
     }
+    fn retry_failure(&self)->Option<crate::live_reconnect::Failure>{
+        match self{
+            #[cfg(target_os="macos")]
+            Self::Live(w)=>w.retry_failure(),
+            _=>None,
+        }
+    }
     fn sent_bytes(&self)->u64{
         match self{
             #[cfg(target_os="macos")]
@@ -791,6 +798,7 @@ fn capture_to_dir(
     #[cfg(target_os = "windows")]
     drop(windows_mixer);
     if let Err(error) = recording {
+        if let (Some(run),Some(cause))=(&lifecycle,writer.retry_failure()){run.record_retry_failure(cause);}
         drop(writer);
         if !live{let _ = fs::remove_file(&temporary);}
         return Err(error);
@@ -911,15 +919,31 @@ pub(crate) fn run_authorized_rtmps_session(
 )->Result<ContinuousProgramReport,String>{
     let result=(||{
         if !explicitly_authorized{return Err("Explicit destination authorization is required".into())}
+        if !(2..=60).contains(&seconds){return Err("Live integration test supports 2–60 seconds".into())}
         crate::rtmp_session::tls::validate_destination(&server_url,&stream_key)?;
-        let stop=run.stop_flag();let cancel=stop.clone();
-        capture_authorized_live_program_with_lifecycle(display_ids,video_device_id,seconds,profile,bitrate_kbps,layout,
-            overlay,audio_inputs,transforms,stop,move||{
-                if cancel.load(Ordering::Acquire){return Err("Live Program cancelled before connection".into())}
-                let worker=crate::live_publish_worker::Worker::connect_tls(&server_url,&stream_key)?;
-                if cancel.load(Ordering::Acquire){worker.request_stop();return Err("Live Program cancelled during connection".into())}
-                Ok(worker)
-            },Some(run.clone()))
+        let started=Instant::now();
+        let stop=run.stop_flag();
+        crate::live_reconnect::recover(u64::from(seconds)*1000+30000,
+            ||started.elapsed().as_millis() as u64,
+            ||explicitly_authorized&&!stop.load(Ordering::Acquire),
+            |ms|std::thread::sleep(Duration::from_millis(ms)),
+            |attempt,remaining|{
+                run.begin_epoch(attempt);
+                let epoch_run=run.clone();let cancel=stop.clone();
+                let server_url=server_url.clone();let stream_key=stream_key.clone();
+                let duration=seconds.min((remaining/1000) as u32);
+                let result=capture_authorized_live_program_with_lifecycle(display_ids.clone(),video_device_id.clone(),duration,profile,bitrate_kbps,layout,
+                    overlay.clone(),audio_inputs.clone(),transforms.clone(),stop.clone(),move||{
+                        if cancel.load(Ordering::Acquire){return Err("Live Program cancelled before connection".into())}
+                        let mut cause=crate::live_reconnect::Failure::Unknown;
+                        let worker=match crate::live_publish_worker::Worker::connect_tls_classified(&server_url,&stream_key,&mut cause){
+                            Ok(w)=>w,Err(e)=>{epoch_run.record_retry_failure(cause);return Err(e)}
+                        };
+                        if cancel.load(Ordering::Acquire){worker.request_stop();return Err("Live Program cancelled during connection".into())}
+                        Ok(worker)
+                    },Some(run.clone()));
+                result.map_err(|e|(run.take_retry_failure(),e))
+            })
     })();
     run.finish(result.is_ok());result
 }
