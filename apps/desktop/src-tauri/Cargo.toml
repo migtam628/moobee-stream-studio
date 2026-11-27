@@ -41,3 +41,4 @@ keyring = { version = "=3.6.3", default-features = false, features = ["apple-nat
 
 [target.'cfg(any(target_os = "windows", target_os = "macos"))'.dev-dependencies]
 rcgen = "=0.13.2"
+rustls = { version = "0.23", default-features = false, features = ["std", "ring", "tls12"] }
