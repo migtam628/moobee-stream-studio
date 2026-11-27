@@ -15,27 +15,43 @@ private final class AACEncoder{
     let input:AVAudioPCMBuffer
     let output:AVAudioCompressedBuffer
     var failed=false
-    init?(){
-        guard let source=AVAudioFormat(commonFormat:.pcmFormatFloat32,sampleRate:48000,channels:2,interleaved:true),
-              let target=AVAudioFormat(settings:[
-                AVFormatIDKey:kAudioFormatMPEG4AAC,
-                AVSampleRateKey:48000,
-                AVNumberOfChannelsKey:2
-              ]),
-              let converter=AVAudioConverter(from:source,to:target),
-              let input=AVAudioPCMBuffer(pcmFormat:source,frameCapacity:1024)
-        else{return nil}
+    init?(_ error:UnsafeMutablePointer<CChar>?,_ capacity:Int32){
+        // Populate the compressed ASBD using Core Audio rather than assuming
+        // AVAudioFormat(settings:) already resolves AAC packet geometry.
+        var description=AudioStreamBasicDescription()
+        description.mSampleRate=48000
+        description.mFormatID=kAudioFormatMPEG4AAC
+        description.mFormatFlags=UInt32(kMPEG4Object_AAC_LC)
+        description.mChannelsPerFrame=2
+        var descriptionSize=UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        let formatStatus=AudioFormatGetProperty(kAudioFormatProperty_FormatInfo,0,nil,&descriptionSize,&description)
+        guard formatStatus==noErr else{
+            aacError(error,capacity,"AAC format resolution failed (OSStatus \(formatStatus))");return nil
+        }
+        guard let source=AVAudioFormat(commonFormat:.pcmFormatFloat32,sampleRate:48000,channels:2,interleaved:false),
+              let target=AVAudioFormat(streamDescription:&description) else{
+            aacError(error,capacity,"AAC PCM or compressed format unavailable");return nil
+        }
+        guard let converter=AVAudioConverter(from:source,to:target) else{
+            aacError(error,capacity,"AAC AudioConverter creation failed");return nil
+        }
+        guard let input=AVAudioPCMBuffer(pcmFormat:source,frameCapacity:1024) else{
+            aacError(error,capacity,"AAC PCM buffer allocation failed");return nil
+        }
         converter.bitRate=128000
         converter.primeMethod = .none
+        let actual=converter.outputFormat
+        let stream=actual.streamDescription.pointee
         let size=converter.maximumOutputPacketSize
         guard size>0,size<=16384,
-              target.streamDescription.pointee.mFormatID==kAudioFormatMPEG4AAC,
-              target.streamDescription.pointee.mSampleRate==48000,
-              target.streamDescription.pointee.mChannelsPerFrame==2,
-              target.streamDescription.pointee.mFramesPerPacket==1024 else{return nil}
+              stream.mFormatID==kAudioFormatMPEG4AAC,
+              stream.mSampleRate==48000,stream.mChannelsPerFrame==2,
+              stream.mFramesPerPacket==1024 else{
+            aacError(error,capacity,"AAC output geometry invalid (packet bytes \(size), frames \(stream.mFramesPerPacket), channels \(stream.mChannelsPerFrame))");return nil
+        }
         self.converter=converter
         self.input=input
-        self.output=AVAudioCompressedBuffer(format:target,packetCapacity:4,maximumPacketSize:size)
+        self.output=AVAudioCompressedBuffer(format:actual,packetCapacity:4,maximumPacketSize:size)
     }
     // All calls are serialized by the owner. Pack each raw AAC packet with
     // a four-byte big-endian length for safe cross-language copying.
@@ -43,11 +59,13 @@ private final class AACEncoder{
                 _ dst:UnsafeMutablePointer<UInt8>,_ capacity:Int)->Int{
         guard !failed,frames==1024,capacity>=4 else{return -1}
         input.frameLength=1024
-        let bytes=frames*2*MemoryLayout<Float>.size
-        let buffers=UnsafeMutableAudioBufferListPointer(input.mutableAudioBufferList)
-        guard buffers.count==1,let memory=buffers[0].mData,
-              Int(buffers[0].mDataByteSize)>=bytes else{failed=true;return -1}
-        memory.copyMemory(from:UnsafeRawPointer(pcm),byteCount:bytes)
+        // Rust supplies interleaved stereo; AVAudioConverter receives planar
+        // Float32, matching the standard AVAudio PCM format.
+        guard let channels=input.floatChannelData else{failed=true;return -1}
+        for i in 0..<frames{
+            channels[0][i]=pcm[i*2]
+            channels[1][i]=pcm[i*2+1]
+        }
         output.packetCount=0
         output.byteLength=0
         var supplied=false
@@ -81,7 +99,7 @@ private final class AACEncoder{
 }
 @_cdecl("moobee_aac_create")
 public func moobee_aac_create(_ error:UnsafeMutablePointer<CChar>?,_ capacity:Int32)->UnsafeMutableRawPointer?{
-    guard let e=AACEncoder() else{aacError(error,capacity,"Native AAC-LC initialization failed");return nil}
+    guard let e=AACEncoder(error,capacity) else{return nil}
     return Unmanaged.passRetained(e).toOpaque()
 }
 @_cdecl("moobee_aac_encode")
