@@ -444,6 +444,7 @@ impl FrameSink {
             Self::Avi(_) => Err("AVI does not support the composed AAC diagnostic".into()),
         }
     }
+    fn lower_bitrate(&mut self,kbps:u32)->Result<bool,String>{match self{Self::Live(w)=>w.lower_bitrate(kbps),_=>Err("Only live output can adjust bitrate".into())}}
     fn timing(&self)->Option<crate::live_soak::Timing>{match self{Self::Live(w)=>Some(w.timing()),_=>None}}
     fn destination_stats(&self)->Vec<crate::live_fanout::DestinationStats>{match self{Self::Live(w)=>w.destinations(),_=>vec![]}}
     fn live_stats(&self)->Option<crate::live_publish_worker::WorkerStats>{
@@ -785,6 +786,16 @@ fn capture_to_dir(
             }
             written_frames += 1;
             if let (Some(run),Some(stats))=(&lifecycle,writer.live_stats()){run.telemetry(written_frames,late_frames,stats);run.destination_telemetry(writer.destination_stats());if let Some(mut timing)=writer.timing(){timing.pcm_frames_supplied=audio_samples_written;timing.windows_missing_source_frames=if cfg!(target_os="windows")&&audio_input_count>0{Some(audio_missing_source_frames)}else{None};run.timing_sample(timing);}}
+            // Only at a complete GOP boundary, never in the middle of an A/V tick.
+            if live&&written_frames<total_frames&&written_frames%(profile.fps*2)==0{
+                if let Some(run)=&lifecycle{
+                    if let Some(target)=run.inplace_target(){
+                        let result=writer.lower_bitrate(target);
+                        run.inplace_result(target,result.as_ref().map(|v|*v).map_err(|_|()));
+                        result?;
+                    }
+                }
+            }
             if finished_take {
                 transition=None;
                 transitions_completed+=1;
