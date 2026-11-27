@@ -25,7 +25,16 @@ jobs:
           node-version: '24'
           cache: npm
       - name: Validate decoded receiver report logic (mocked metadata)
-        run: python3 scripts/test-verify-native-rtmps-decode.py
+        run: |
+          python3 scripts/test-verify-native-rtmps-decode.py
+          python3 scripts/test-verify-rtmps-soak-capture.py
+      - name: Verify independent receiver diagnostics on local generated media
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          ffmpeg -nostdin -v error -f lavfi -i "testsrc2=size=640x360:rate=10" -f lavfi -i "sine=frequency=440:sample_rate=48000" -t 15 -c:v libx264 -pix_fmt yuv420p -bf 0 -c:a aac -ac 2 -f flv "$RUNNER_TEMP/receiver-fixture.flv"
+          python3 scripts/verify-rtmps-soak-capture.py "$RUNNER_TEMP/receiver-fixture.flv" --seconds 15 --platform macos-arm64 --profile baseline --commit "$GITHUB_SHA"
+          rm -f "$RUNNER_TEMP/receiver-fixture.flv"
       - run: npm ci
       - run: npm run build
       - name: Install headless Chromium dependencies
