@@ -231,7 +231,7 @@ pub(crate) mod tls {
         use super::*;
         // Test-only trust anchor and loopback socket. Never installed into
         // system trust, never passed into a production connector.
-        fn certificates()->(native_tls::Identity,native_tls::Certificate){
+        fn certificates()->(std::sync::Arc<rustls::ServerConfig>,native_tls::Certificate){
             use rcgen::{CertificateParams,KeyPair,IsCa,BasicConstraints,ExtendedKeyUsagePurpose};
             let mut ca=CertificateParams::new(Vec::<String>::new()).unwrap();
             ca.is_ca=IsCa::Ca(BasicConstraints::Unconstrained);
@@ -239,22 +239,22 @@ pub(crate) mod tls {
             let mut leaf=CertificateParams::new(vec!["localhost".to_owned()]).unwrap();
             leaf.extended_key_usages=vec![ExtendedKeyUsagePurpose::ServerAuth];
             let key=KeyPair::generate().unwrap();let leaf=leaf.signed_by(&key,&ca,&ca_key).unwrap();
-            let chain=format!("{}{}",leaf.pem(),ca.pem());
-            (native_tls::Identity::from_pkcs8(chain.as_bytes(),key.serialize_pem().as_bytes()).unwrap(),
-             native_tls::Certificate::from_der(ca.der().as_ref()).unwrap())
+            let config=rustls::ServerConfig::builder_with_provider(std::sync::Arc::new(rustls::crypto::ring::default_provider()))
+                .with_safe_default_protocol_versions().unwrap().with_no_client_auth()
+                .with_single_cert(vec![leaf.der().clone(),ca.der().clone()],rustls::pki_types::PrivatePkcs8KeyDer::from(key.serialize_der()).into()).unwrap();
+            (std::sync::Arc::new(config),native_tls::Certificate::from_der(ca.der().as_ref()).unwrap())
         }
         fn loopback(f:impl FnOnce(&mut crate::live_publish_worker::Worker)->(u64,u64,u64,u64)){
             use std::net::{TcpListener,Ipv4Addr};
             use crate::{live_session::Session,live_publish_worker::Worker};
-            let (identity,root)=certificates();
-            let acceptor=native_tls::TlsAcceptor::builder(identity).min_protocol_version(Some(native_tls::Protocol::Tlsv12)).build().unwrap();
+            let (config,root)=certificates();
             let listener=TcpListener::bind((Ipv4Addr::LOCALHOST,0)).unwrap();
             let addr=listener.local_addr().unwrap();
             let key="loopback-fixture-only";
             let server=std::thread::spawn(move||{
                 let (socket,peer)=listener.accept().unwrap();assert!(peer.ip().is_loopback());
                 socket.set_read_timeout(Some(Duration::from_secs(5))).unwrap();socket.set_write_timeout(Some(Duration::from_secs(5))).unwrap();
-                let mut stream=acceptor.accept(socket).unwrap();
+                let mut stream=rustls::StreamOwned::new(rustls::ServerConnection::new(config).unwrap(),socket);
                 crate::rtmps_test_receiver::serve(&mut stream,key)
             });
             let socket=TcpStream::connect_timeout(&addr,Duration::from_secs(3)).unwrap();
