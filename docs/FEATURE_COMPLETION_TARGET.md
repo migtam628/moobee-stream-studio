@@ -83,3 +83,6 @@ This increment validates audio device open before live publish negotiation, purg
 
 ## Workstream 10 — bitrate recovery and sender pressure
 PR #90 merged startup refresh and overload protection. This increment adds explicit single-output lower-bitrate recovery epochs, per-destination sustained-queue advisory and interrupted acceptance enforcement. See LIVE_BITRATE_RELIABILITY.md. In-place adaptation, native fault injection, physical acceptance, capture-device recovery and persistent diagnostic history remain outstanding. Core completion stays 8/20.
+
+## Workstream 10 — experimental in-place bitrate downshift
+PR #91 merged recovery fallback and sustained sender pressure advice. This increment adds explicitly opted-in single-output native bitrate property updates at complete GOP boundaries, rate readback, cooldown, bounded reductions and unsupported/uncertain state reporting. See LIVE_INPLACE_BITRATE.md. Hardware driver support and independent receiver continuity after reconfiguration remain unverified; core completion stays 8/20. No production Go Live activation.
