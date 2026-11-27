@@ -289,6 +289,20 @@ mod tests{
         assert!(!p.authorized());assert!(p.close_stream().is_err());
         assert!(p.send_media(&crate::stream_mux::aac_sequence()).is_err());
     }
+    #[test]fn orderly_session_end_requires_empty_media_queue(){
+        use crate::live_session::{Session,Phase};
+        let p=Publisher::establish(fixture(true),"live","rtmps://example.invalid/live","fixture-key",7,&[9;1528]).unwrap();
+        let mut s=Session::new(p).unwrap();
+        s.submit(crate::stream_mux::avc_sequence(&[0x67,0x64,0,0x28],&[0x68,0xee]).unwrap()).unwrap();
+        s.submit(crate::stream_mux::avc_access_unit(&[&[0x65,1]],0,0,true).unwrap()).unwrap();
+        assert!(s.finish_drained().is_err());
+        assert_eq!(s.stats().queued_packets,2);
+        assert_eq!(s.tick(0).unwrap().sent,2);
+        s.finish_drained().unwrap();
+        assert_eq!(s.stats().phase,Phase::Stopped);
+        assert_eq!(s.stats().sent_packets,2);
+        assert!(s.finish_drained().is_err());
+    }
     #[test]fn session_owns_authorization_queue_stats_and_stop(){
         use crate::live_session::{Session,Phase};
         let publisher=Publisher::establish(fixture(true),"live","rtmps://example.invalid/live","fixture-key",7,&[9;1528]).unwrap();
