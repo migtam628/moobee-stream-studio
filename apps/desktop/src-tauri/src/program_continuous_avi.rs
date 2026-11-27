@@ -550,11 +550,18 @@ fn capture_to_dir(
     let final_path = directory.join(format!("clip-{id}.{extension}"));
     let temporary = directory.join(format!(".clip-{id}.part.{extension}"));
     let audio_input_count = audio_inputs.as_ref().map_or(usize::from(microphone), |inputs| inputs.len());
+    // Preserve the original local-file writer/audio startup order.
+    let preopened=if live{None}else{
+        match FrameSink::open(&temporary,format,profile,audio_input_count>0,None){
+            Ok(writer)=>Some(writer),
+            Err(error)=>{let _=fs::remove_file(&temporary);return Err(error)}
+        }
+    };
     #[cfg(target_os = "macos")]
     let mut mic = if microphone && audio_inputs.is_none() {
         match crate::program_microphone::ProgramMicrophone::start() {
             Ok(source) => Some(source),
-            Err(error) => return Err(error),
+            Err(error) => {drop(preopened);if !live{let _=fs::remove_file(&temporary);}return Err(error)},
         }
     } else { None };
     #[cfg(target_os = "macos")]
@@ -562,7 +569,7 @@ fn capture_to_dir(
         if inputs.is_empty() { None } else {
             match crate::program_audio::Mixer::open(inputs) {
                 Ok(mixer) => Some(mixer),
-                Err(error) => return Err(error),
+                Err(error) => {drop(preopened);if !live{let _=fs::remove_file(&temporary);}return Err(error)},
             }
         }
     } else { None };
@@ -572,14 +579,14 @@ fn capture_to_dir(
         if inputs.is_empty(){None}else{
             match crate::windows_audio::Mixer::open(inputs){
                 Ok(mixer)=>Some(mixer),
-                Err(error)=>return Err(error),
+                Err(error)=>{drop(preopened);if !live{let _=fs::remove_file(&temporary);}return Err(error)},
             }
         }
     };
     if live_stop.as_ref().is_some_and(|s|s.load(Ordering::Acquire)){return Err("Live Program cancelled before connection".into())}
-    let mut writer = match FrameSink::open(&temporary, format, profile, audio_input_count > 0,live_connector) {
-        Ok(writer) => writer,
-        Err(error) => { if !live{let _ = fs::remove_file(&temporary);} return Err(error); }
+    let mut writer = match preopened{
+        Some(writer)=>writer,
+        None=>FrameSink::open(&temporary,format,profile,audio_input_count>0,live_connector)?,
     };
 
     // A slow handshake must not turn pre-publish source buffers into
@@ -639,6 +646,7 @@ fn capture_to_dir(
             let paused = written_frames >= 2 && stop_guard.is_some_and(|guard| guard.paused());
             let tick = written_frames;
             let target = started + clock.time(wall_tick);
+            if live{crate::live_startup::check_tick_lag(Instant::now().saturating_duration_since(target))?;}
             wall_tick += 1;
             std::thread::sleep(target.saturating_duration_since(Instant::now()));
             if live_stop.as_ref().is_some_and(|s|s.load(Ordering::Acquire)){break;}
