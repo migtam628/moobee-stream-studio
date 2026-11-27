@@ -3,7 +3,7 @@
 use crate::{live_program_encoder::Encoder,live_publish_worker::Worker,live_fanout::Fanout};
 pub(crate) struct Sink{
     encoder:Encoder,fanout:Fanout,audio:bool,pending:Option<image::RgbaImage>,
-    frames:u32,finished:bool,
+    frames:u32,finished:bool,fps:u32,timing:crate::live_soak::Timing,
 }
 impl Sink{
     pub(crate) fn open(width:u32,height:u32,fps:u32,kbps:u32,audio:bool,
@@ -14,7 +14,7 @@ impl Sink{
         connect:impl FnOnce()->Result<Fanout,String>)->Result<Self,String>{
         let encoder=Encoder::new(width,height,fps,kbps,audio)?;
         let fanout=connect()?;
-        Ok(Self{encoder,fanout,audio,pending:None,frames:0,finished:false})
+        Ok(Self{encoder,fanout,audio,pending:None,frames:0,finished:false,fps,timing:crate::live_soak::Timing::default()})
     }
     pub(crate) fn append(&mut self,canvas:image::RgbaImage)->Result<(),String>{
         if self.finished||self.pending.is_some(){return Err("Live Program tick is incomplete or closed".into())}
@@ -25,10 +25,13 @@ impl Sink{
         self.encode(canvas,Some(pcm))
     }
     fn encode(&mut self,canvas:image::RgbaImage,pcm:Option<&[f32]>)->Result<(),String>{
+        let start=std::time::Instant::now();
         let packets=self.encoder.tick(canvas.as_raw(),pcm)?;
+        self.timing.observe(&packets,self.fps,self.audio,self.encoder.pending_audio_frames(),start.elapsed().as_millis() as u64);
         self.fanout.submit(packets)?;
         self.frames+=1;Ok(())
     }
+    pub(crate) fn timing(&self)->crate::live_soak::Timing{self.timing}
     pub(crate) fn retry_failure(&self)->Option<crate::live_reconnect::Failure>{self.fanout.retry_failure()}
     pub(crate) fn destinations(&self)->Vec<crate::live_fanout::DestinationStats>{self.fanout.destinations()}
     pub(crate) fn finish(&mut self)->Result<(),String>{
