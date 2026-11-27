@@ -47,7 +47,8 @@ pub(crate) fn recover<T>(
         let remaining=deadline_ms.saturating_sub(now());
         if !allowed()||remaining<2000{return Err("Live recovery cancelled or deadline exceeded".into())}
         let (failure,error)=match attempt(index,remaining){Ok(value)=>return Ok(value),Err(e)=>e};
-        let mut decision=policy.failed(now(),failure,allowed(),!allowed());
+        let authorized=allowed();
+        let mut decision=policy.failed(now(),failure,authorized,!authorized);
         loop{
             match decision{
                 Decision::Stop=>return Err(error),
