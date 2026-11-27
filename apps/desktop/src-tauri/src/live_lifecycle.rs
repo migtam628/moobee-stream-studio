@@ -32,6 +32,14 @@ impl Controller{
             sent_packets:0,sent_payload_bytes:0,pending_packets:0,pending_bytes:0,late_frames:0,bitrate_kbps:0,error:None,health:Reading::default()},start:Instant::now(),stop:stop.clone(),monitor:Monitor::default()});
         Ok(Run{controller:self.clone(),id,stop})
     }
+    pub(crate) fn current(&self)->Option<Snapshot>{
+        let e=self.entry.lock().ok()?;
+        let e=e.as_ref()?;
+        let mut s=e.snapshot.clone();
+        if !matches!(s.phase,Phase::Stopped|Phase::Failed){s.elapsed_ms=e.start.elapsed().as_millis() as u64;}
+        s.health=e.monitor.reading(s.elapsed_ms,matches!(s.phase,Phase::Stopped|Phase::Failed));
+        Some(s)
+    }
     pub(crate) fn snapshot(&self,id:&str)->Option<Snapshot>{
         let e=self.entry.lock().ok()?;
         let e=e.as_ref().filter(|v|v.snapshot.session_id==id)?;
