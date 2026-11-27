@@ -67,8 +67,10 @@ impl Fanout{
                     o.attempt=attempt;
                     let connector=o.connector.as_ref().unwrap().clone();
                     let cancel=cancel.clone();let stop=session_stop.clone();
+                    let remaining=30000u64.saturating_sub(now.saturating_sub(o.first_failure.unwrap_or(now)));
+                    let deadline=Instant::now()+Duration::from_millis(remaining);
                     let h=std::thread::Builder::new().name("moobee-destination-recovery".into()).spawn(move||{
-                        let allowed=||!cancel.load(Ordering::Acquire)&&!stop.as_ref().is_some_and(|s|s.load(Ordering::Acquire));
+                        let allowed=||Instant::now()<deadline&&!cancel.load(Ordering::Acquire)&&!stop.as_ref().is_some_and(|s|s.load(Ordering::Acquire));
                         if !allowed(){return Err(Failure::Unknown)}
                         let worker=connector()?;
                         if !allowed(){worker.request_stop();return Err(Failure::Unknown)}
@@ -117,7 +119,7 @@ impl Fanout{
             if o.failed{continue}
             if o.worker.is_finished()||o.worker.stats().is_ok_and(|s|s.session.phase==Phase::Failed){
                 Self::fail(o);o.recovery=None;
-                if o.connector.is_some(){Self::schedule(o,now,allowed,o.failure.unwrap_or(Failure::Unknown));}
+                if o.connector.is_some(){let cause=o.failure.unwrap_or(Failure::Unknown);Self::schedule(o,now,allowed,cause);}
                 if o.recovery.is_some(){viable+=1;}continue
             }
             let batch=if matches!(o.recovery,Some(Recovery::AwaitKey)){
@@ -127,7 +129,7 @@ impl Fanout{
             else{packets.iter().map(|p|Packet{kind:p.kind,timestamp_ms:p.timestamp_ms,payload:p.payload.clone()}).collect()};
             if Self::submit_to(o,batch).is_err(){
                 Self::fail(o);
-                if o.connector.is_some(){Self::schedule(o,now,allowed,o.failure.unwrap_or(Failure::Unknown));}
+                if o.connector.is_some(){let cause=o.failure.unwrap_or(Failure::Unknown);Self::schedule(o,now,allowed,cause);}
                 if o.recovery.is_some(){viable+=1;}continue
             }
             viable+=1;
