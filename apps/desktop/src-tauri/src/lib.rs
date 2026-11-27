@@ -13,6 +13,8 @@ mod program_mp4_storage;
 mod windows_mp4_sink;
 #[cfg(target_os="windows")]
 mod windows_avc;
+#[cfg(target_os="windows")]
+mod windows_aac;
 #[cfg(target_os = "windows")]
 mod windows_audio;
 #[cfg(target_os = "macos")]
@@ -44,7 +46,7 @@ mod live_flv;
 mod macos_avc;
 #[cfg(target_os = "macos")]
 mod macos_aac;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos",target_os = "windows"))]
 mod live_program_encoder;
 #[cfg(target_os="macos")]
 mod live_program_sink;
