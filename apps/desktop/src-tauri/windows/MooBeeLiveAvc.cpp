@@ -86,7 +86,7 @@ HRESULT copy_config(Encoder& e,uint8_t* config,DWORD capacity,DWORD* length){
     UINT32 copied=0;hr=type->GetBlob(MF_MT_MPEG_SEQUENCE_HEADER,config,capacity,&copied);*length=copied;return hr;
 }
 HRESULT encode(Encoder& e,const uint8_t* nv12,size_t length,bool key,uint8_t* out,DWORD capacity,DWORD* size,uint8_t* config,DWORD config_cap,DWORD* config_len){
-    if(e.failed||!nv12||!out||!config||length!=static_cast<size_t>(e.width)*e.height*3/2||e.index>=e.fps*3600)return E_INVALIDARG;
+    if(e.failed||!nv12||!out||!config||length!=static_cast<size_t>(e.width)*e.height*3/2||e.index>=e.fps*7200)return E_INVALIDARG;
     if(key){HRESULT hr=set_u32(e.codec.Get(),CODECAPI_AVEncVideoForceKeyFrame,1);if(FAILED(hr))return hr;}
     ComPtr<IMFMediaBuffer> input_buffer;HRESULT hr=MFCreateMemoryBuffer(static_cast<DWORD>(length),&input_buffer);if(FAILED(hr))return hr;
     BYTE* data=nullptr;if(FAILED(hr=input_buffer->Lock(&data,nullptr,nullptr)))return hr;
