@@ -62,6 +62,12 @@ impl Controller{
     }
 }
 impl Run{
+    pub(crate) fn native_active(&self)->bool{
+        self.controller.entry.lock().ok().and_then(|entry|{
+            entry.as_ref().filter(|e|e.snapshot.session_id==self.id&&Arc::ptr_eq(&e.stop,&self.stop))
+                .map(|e|e.snapshot.mode==Mode::Native&&!matches!(e.snapshot.phase,Phase::Stopped|Phase::Failed|Phase::Stopping)&&!self.cancelled())
+        }).unwrap_or(false)
+    }
     pub(crate) fn stop_flag(&self)->Arc<AtomicBool>{self.stop.clone()}
     pub(crate) fn cancelled(&self)->bool{self.stop.load(Ordering::Acquire)}
     fn update(&self,f:impl FnOnce(&mut Snapshot)){
@@ -135,11 +141,11 @@ mod tests{
         let r=c.start(id.clone(),Mode::Rehearsal).unwrap();r.running();
         assert!(c.start(uuid::Uuid::new_v4().to_string(),Mode::Native).is_err());
         assert!(!c.request_stop("other"));assert!(c.request_stop(&id));assert!(r.cancelled());
-        r.running();assert_eq!(c.snapshot(&id).unwrap().phase,Phase::Stopping);
+        r.running();assert_eq!(c.snapshot(&id).unwrap().phase,Phase::Stopping);assert!(!r.native_active());
         r.finish(true);assert_eq!(c.snapshot(&id).unwrap().phase,Phase::Stopped);
         assert!(!c.request_stop(&id));
         let next=uuid::Uuid::new_v4().to_string();let n=c.start(next.clone(),Mode::Native).unwrap();
-        r.finish(false);assert_eq!(c.snapshot(&next).unwrap().phase,Phase::Starting);assert!(!c.stop_rehearsal(&next));
+        r.finish(false);assert_eq!(c.snapshot(&next).unwrap().phase,Phase::Starting);assert!(n.native_active());assert!(!c.stop_rehearsal(&next));
         n.finish(false);assert_eq!(c.snapshot(&next).unwrap().phase,Phase::Failed);
         let reused=c.start(next.clone(),Mode::Rehearsal).unwrap();n.finish(false);
         assert_eq!(c.snapshot(&next).unwrap().phase,Phase::Starting);reused.finish(true);
