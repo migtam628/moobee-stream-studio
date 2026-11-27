@@ -11,7 +11,7 @@ pub(crate) struct DestinationStats{
     pub queued_packets:usize,pub queued_bytes:usize,pub admitted_packets:u64,pub admitted_bytes:u64,
     pub reconnect_attempt:u8,pub interrupted:bool,
 }
-pub(crate) type Connector=Arc<dyn Fn()->Result<Worker,Failure>+Send+Sync>;
+pub(crate) type Connector=Arc<dyn Fn(crate::rtmp_session::ConnectionPermit)->Result<Worker,Failure>+Send+Sync>;
 enum Recovery{Waiting,Connecting(JoinHandle<Result<Worker,Failure>>),AwaitKey}
 struct Output{
     id:String,worker:Worker,failed:bool,completed:bool,admitted_packets:u64,admitted_bytes:u64,failure:Option<Failure>,
@@ -70,9 +70,9 @@ impl Fanout{
                     let remaining=30000u64.saturating_sub(now.saturating_sub(o.first_failure.unwrap_or(now)));
                     let deadline=Instant::now()+Duration::from_millis(remaining);
                     let h=std::thread::Builder::new().name("moobee-destination-recovery".into()).spawn(move||{
-                        let allowed=||Instant::now()<deadline&&!cancel.load(Ordering::Acquire)&&!stop.as_ref().is_some_and(|s|s.load(Ordering::Acquire));
+                        let allowed:crate::rtmp_session::ConnectionPermit=Arc::new(move||Instant::now()<deadline&&!cancel.load(Ordering::Acquire)&&!stop.as_ref().is_some_and(|s|s.load(Ordering::Acquire)));
                         if !allowed(){return Err(Failure::Unknown)}
-                        let worker=connector()?;
+                        let worker=connector(allowed.clone())?;
                         if !allowed(){worker.request_stop();return Err(Failure::Unknown)}
                         Ok(worker)
                     });
