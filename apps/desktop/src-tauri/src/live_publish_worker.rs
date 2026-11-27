@@ -42,7 +42,11 @@ impl Worker{
     /// inbound control servicing after successful publish authorization.
     #[cfg(any(target_os="macos",target_os="windows"))]
     pub(crate) fn connect_tls(server_url:&str,stream_key:&str)->Result<Self,String>{
-        let publisher=crate::rtmp_session::tls::connect_tls(server_url,stream_key)?;
+        Self::connect_tls_classified(server_url,stream_key,&mut crate::live_reconnect::Failure::Unknown)
+    }
+    #[cfg(any(target_os="macos",target_os="windows"))]
+    pub(crate) fn connect_tls_classified(server_url:&str,stream_key:&str,failure:&mut crate::live_reconnect::Failure)->Result<Self,String>{
+        let publisher=crate::rtmp_session::tls::connect_tls_classified(server_url,stream_key,failure)?;
         let session=Session::new(publisher)?;
         Self::start_with_poll(session,|s|s.poll_tls_inbound())
     }

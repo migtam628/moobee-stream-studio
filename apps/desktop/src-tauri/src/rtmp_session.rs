@@ -1,6 +1,7 @@
 //! Publishing session over an already-connected, authenticated byte transport.
 //! No media can be sent until the explicit server publish confirmation.
-use std::io::{Read,Write};
+use std::io::{Read,Write,ErrorKind};
+use crate::live_reconnect::Failure;
 use crate::{rtmp_receive::{Action,Negotiation,Phase,Reader},stream_mux::{Packet,rtmp}};
 type Result<T>=std::result::Result<T,String>;
 const MAX_NEGOTIATION_CHUNKS:usize=8192;
@@ -8,11 +9,16 @@ const MAX_NEGOTIATION_BYTES:u64=8*1024*1024;
 const OUT_CHUNK:usize=128;
 const MAX_INBOUND_BUFFER:usize=2*65_536+64;
 const INBOUND_BATCH:usize=16;
-pub(crate) struct Publisher<T>{io:T,reader:Reader,state:Negotiation,failed:bool,inbound:Vec<u8>}
+pub(crate) struct Publisher<T>{io:T,reader:Reader,state:Negotiation,failed:bool,inbound:Vec<u8>,transport_failure:Option<Failure>}
+fn transient_io(kind:ErrorKind)->bool{matches!(kind,ErrorKind::ConnectionReset|ErrorKind::ConnectionAborted|ErrorKind::BrokenPipe|ErrorKind::TimedOut|ErrorKind::ConnectionRefused)}
 impl<T:Read+Write> Publisher<T>{
     fn send_raw(&mut self,bytes:&[u8])->Result<()>{
         if self.failed{return Err("RTMP session is closed".into())}
-        if self.io.write_all(bytes).and_then(|_|self.io.flush()).is_err(){self.failed=true;return Err("RTMP transport write failed".into())}
+        if let Err(e)=self.io.write_all(bytes).and_then(|_|self.io.flush()){
+            self.failed=true;
+            if transient_io(e.kind()){self.transport_failure=Some(Failure::TransientTransport);}
+            return Err("RTMP transport write failed".into())
+        }
         Ok(())
     }
     fn command(&mut self,stream:u32,payload:&[u8])->Result<()>{self.send_raw(&rtmp::chunks(3,stream,20,0,payload,OUT_CHUNK)?)}
@@ -31,7 +37,7 @@ impl<T:Read+Write> Publisher<T>{
         let connect=rtmp::connect(app,tc_url,1)?;
         let publish=rtmp::publish(stream_name)?;
         let hello=rtmp::client_hello(time,random)?;
-        let mut s=Self{io,reader:Reader::default(),state:Negotiation::default(),failed:false,inbound:Vec::new()};
+        let mut s=Self{io,reader:Reader::default(),state:Negotiation::default(),failed:false,inbound:Vec::new(),transport_failure:None};
         s.send_raw(&hello)?;
         let mut response=[0u8;3073];
         s.io.read_exact(&mut response).map_err(|_|"RTMP handshake read failed")?;
@@ -52,6 +58,7 @@ impl<T:Read+Write> Publisher<T>{
         }
         Err("RTMP negotiation exceeded chunk limit".into())
     }
+    pub(crate) fn transport_failure(&self)->Option<Failure>{self.transport_failure}
     pub(crate) fn authorized(&self)->bool{!self.failed&&matches!(self.state.phase(),Phase::Live(_))}
     pub(crate) fn send_media(&mut self,packet:&Packet)->Result<()>{
         let Phase::Live(id)=self.state.phase() else{return Err("RTMP publish is not authorized".into())};
@@ -164,17 +171,23 @@ pub(crate) mod tls {
     /// Explicit future caller only. DNS resolution is OS-blocking and must
     /// be isolated from the UI; socket I/O and negotiation are bounded.
     pub(crate) fn connect_tls(server_url:&str,stream_key:&str)->Result<Publisher<native_tls::TlsStream<DeadlineSocket>>>{
+        connect_tls_classified(server_url,stream_key,&mut Failure::Unknown)
+    }
+    pub(crate) fn connect_tls_classified(server_url:&str,stream_key:&str,failure:&mut Failure)->Result<Publisher<native_tls::TlsStream<DeadlineSocket>>>{
+        *failure=Failure::Unknown;
         let target=endpoint(server_url)?;
         rtmp::publish(stream_key)?;
         let addresses=(target.host.as_str(),target.port).to_socket_addrs().map_err(|_|"RTMPS DNS resolution failed")?;
         let deadline=Instant::now()+CONNECT_TIMEOUT;
         let mut socket=None;
+        let mut retryable=true;let mut attempted=false;
         for address in addresses.take(8){
             let remaining=deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero(){break}
-            if let Ok(s)=TcpStream::connect_timeout(&address,remaining){socket=Some(s);break}
+            attempted=true;
+            match TcpStream::connect_timeout(&address,remaining){Ok(s)=>{socket=Some(s);break},Err(e)=>{retryable&=transient_io(e.kind());}}
         }
-        let socket=socket.ok_or("RTMPS TCP connection failed")?;
+        let socket=match socket{Some(s)=>s,None=>{if attempted&&retryable{*failure=Failure::TransientTransport;}return Err("RTMPS TCP connection failed".into())}};
         socket.set_nodelay(true).map_err(|_|"RTMPS socket configuration failed")?;
         let connector=native_tls::TlsConnector::builder().min_protocol_version(Some(native_tls::Protocol::Tlsv12)).build().map_err(|_|"RTMPS TLS initialization failed")?;
         let tls=connector.connect(&target.host,DeadlineSocket{socket,deadline:Some(Instant::now()+NEGOTIATION_TIMEOUT)})
@@ -200,7 +213,7 @@ pub(crate) mod tls {
                 Ok(0)=>Err("RTMPS server closed connection".into()),
                 Ok(n)=>{self.ingest_inbound(&bytes[..n])?;Ok(())},
                 Err(e) if matches!(e.kind(),io::ErrorKind::WouldBlock|io::ErrorKind::TimedOut|io::ErrorKind::Interrupted)=>Ok(()),
-                Err(_)=>Err("RTMPS inbound transport failed".into()),
+                Err(e)=>{if transient_io(e.kind()){self.transport_failure=Some(Failure::TransientTransport);}Err("RTMPS inbound transport failed".into())},
             }
         }
     }
@@ -276,6 +289,27 @@ mod tests{
         assert_eq!(s.stats().queued_packets,0);
         assert!(s.tick(100).is_err());
     }
+    #[test]fn only_classified_socket_write_failure_is_retryable(){
+        use crate::live_session::{Session,Phase};
+        use std::sync::{Arc,atomic::{AtomicBool,Ordering}};
+        struct Failing{inner:Fixture,fail:Arc<AtomicBool>,kind:ErrorKind}
+        impl Read for Failing{fn read(&mut self,b:&mut[u8])->io::Result<usize>{self.inner.read(b)}}
+        impl Write for Failing{
+            fn write(&mut self,b:&[u8])->io::Result<usize>{
+                if self.fail.load(Ordering::Acquire){Err(io::Error::from(self.kind))}else{self.inner.write(b)}
+            }
+            fn flush(&mut self)->io::Result<()>{Ok(())}
+        }
+        for (kind,expected) in [(ErrorKind::ConnectionReset,Some(Failure::TransientTransport)),(ErrorKind::InvalidData,None)]{
+            let fail=Arc::new(AtomicBool::new(false));
+            let p=Publisher::establish(Failing{inner:fixture(true),fail:fail.clone(),kind},"live","rtmps://example.invalid/live","fixture-key",7,&[9;1528]).unwrap();
+            let mut s=Session::new(p).unwrap();
+            s.submit(crate::stream_mux::avc_sequence(&[0x67,0x64,0,0x28],&[0x68,0xee]).unwrap()).unwrap();
+            fail.store(true,Ordering::Release);
+            assert!(s.tick(0).is_err());
+            assert_eq!(s.stats().phase,Phase::Failed);assert_eq!(s.stats().failure,expected);
+        }
+    }
     #[test]fn session_server_stop_is_terminal(){
         use crate::live_session::{Session,Phase};
         let publisher=Publisher::establish(fixture(true),"live","rtmps://example.invalid/live","fixture-key",7,&[9;1528]).unwrap();
@@ -283,6 +317,7 @@ mod tests{
         assert!(s.service_inbound().is_err());
         assert_eq!(s.stats().phase,Phase::Failed);
         assert!(s.stats().restart_required);
+        assert_eq!(s.stats().failure,None);
         assert!(s.submit(crate::stream_mux::aac_sequence()).is_err());
     }
     #[test]fn worker_delivers_and_stops_without_producer_socket_io(){
