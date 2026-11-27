@@ -963,11 +963,13 @@ pub(crate) fn run_authorized_rtmps_session(
         let initial=validate_bitrate(bitrate_kbps,encoding_profile(profile)?.bitrate_kbps)?;
         let started=Instant::now();
         let stop=run.stop_flag();
-        crate::live_reconnect::recover(u64::from(seconds)*1000+30000,
+        let mut retried=false;
+        let outcome=crate::live_reconnect::recover(u64::from(seconds)*1000+30000,
             ||started.elapsed().as_millis() as u64,
             ||explicitly_authorized&&!stop.load(Ordering::Acquire),
             |ms|{run.recovery_wait();std::thread::sleep(Duration::from_millis(ms));},
             |attempt,remaining|{
+                retried|=attempt>0;
                 run.begin_epoch(attempt);
                 let target=crate::live_bitrate::epoch_bitrate(initial,attempt,fallback_on_reconnect);
                 run.bitrate_config(initial,target,fallback_on_reconnect);
@@ -986,7 +988,9 @@ pub(crate) fn run_authorized_rtmps_session(
                         Ok(worker)
                     },Some(run.clone()));
                 result.map_err(|e|(run.take_retry_failure(),e))
-            })
+            });
+        if retried&&outcome.is_ok(){return Err("Recovered stream was interrupted; not an uninterrupted acceptance pass".into())}
+        outcome
     })();
     run.finish(result.is_ok());result
 }
