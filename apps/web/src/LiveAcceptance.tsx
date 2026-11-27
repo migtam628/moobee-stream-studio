@@ -1,4 +1,5 @@
 import {useEffect,useRef,useState} from 'react'
+import {createPortal} from 'react-dom'
 import {request,runningInTauri} from './api'
 type Destination={id:string;name:string;serverUrl:string|null;credentialAvailable:boolean}
 type Prepared={scene:string;sources:string[];audio:string[];config:Record<string,unknown>}
@@ -19,6 +20,8 @@ export default function LiveAcceptance({active,disabled,prepare,onBusy}:{active:
   const [loading,setLoading]=useState(false)
   const current=useRef<string|null>(null)
   const busy=useRef(false)
+  const reviewGeneration=useRef(0)
+  const [stopping,setStopping]=useState(false)
   useEffect(()=>{
     if(!runningInTauri())return
     let alive=true
@@ -50,18 +53,20 @@ export default function LiveAcceptance({active,disabled,prepare,onBusy}:{active:
   },[session])
   useEffect(()=>{
     if(!active){
+      // Navigation discards unconfirmed intent, not an authorized native run.
+      reviewGeneration.current++
       setReview(null);setPhrase('')
-      const id=current.current
-      if(id)void request('/studio/live-acceptance/stop',{sessionId:id}).catch(()=>{})
     }
   },[active])
   async function reviewSelection(){
     if(disabled||busy.current||!active||selected.length===0||selected.length>3)return
+    const generation=++reviewGeneration.current
     setLoading(true);setError('');setPhrase('')
     try{
       const targets=destinations.filter(d=>selected.includes(d.id)&&d.credentialAvailable&&d.serverUrl)
       if(targets.length!==selected.length)throw new Error('Refresh and reselect available destinations')
-      setReview({prepared:await prepare(duration),targets,fallback:targets.length===1&&fallback,adaptive:targets.length===1&&adaptive})
+      const prepared=await prepare(duration)
+      if(generation===reviewGeneration.current)setReview({prepared,targets,fallback:targets.length===1&&fallback,adaptive:targets.length===1&&adaptive})
     }catch(e){setError((e as Error).message);setReview(null)}
     finally{setLoading(false)}
   }
@@ -70,7 +75,7 @@ export default function LiveAcceptance({active,disabled,prepare,onBusy}:{active:
     const snapshot=review
     const sessionId=crypto.randomUUID()
     busy.current=true;current.current=sessionId;onBusy(true)
-    setSession(sessionId);setStatus(null);setError('');setPhrase('');setReview(null)
+    setSession(sessionId);setStatus(null);setError('');setPhrase('');setReview(null);setStopping(false)
     try{
       await request('/studio/live-acceptance/start',{
         ...snapshot.prepared.config,sessionId,confirmation,fallbackOnReconnect:snapshot.fallback,adaptiveBitrate:snapshot.adaptive,
@@ -78,18 +83,25 @@ export default function LiveAcceptance({active,disabled,prepare,onBusy}:{active:
       })
     }catch{setError('Native test stream did not complete successfully. Review sender health and the saved destination.')}
     finally{
-      current.current=null;busy.current=false;onBusy(false)
+      current.current=null;busy.current=false;onBusy(false);setStopping(false)
       // Fetch final state without claiming a successful receiver-side result.
       try{const s=await request<Snapshot|null>('/studio/live-rehearsal/status',{sessionId});if(!current.current&&s?.sessionId===sessionId)setStatus(s)}catch{}
     }
   }
   async function stop(){
     const sessionId=current.current
-    if(!sessionId)return
-    try{if(!await request<boolean>('/studio/live-acceptance/stop',{sessionId}))setError('Stop not acknowledged yet; retry if the test is still starting.')}
-    catch{setError('Stop request failed; retry.')}
+    if(!sessionId||stopping)return
+    setStopping(true);setError('')
+    try{if(!await request<boolean>('/studio/live-acceptance/stop',{sessionId})){if(current.current===sessionId)setError('Stop not acknowledged yet; retry if the test is still starting.');setStopping(false)}}
+    catch{if(current.current===sessionId)setError('Stop request failed; retry.');setStopping(false)}
   }
   if(!available)return null
+  const dock=document.getElementById('native-live-session-dock')
+  const controls=<>
+    {busy.current&&<button className="secondary-button" disabled={stopping} onClick={()=>void stop()}>{stopping?'Stop requested — draining':'Stop real test stream'}</button>}
+    {session&&<p role="status">Native test: {status?.phase??(busy.current?'starting':'status unavailable')} · {status?.mediaFrames??0} submitted frames · {status?.sentPackets??0} sent packets. Receiver verification required.</p>}
+    {error&&<p role="alert" className="preview-error">{error}</p>}
+  </>
   return <section className="dock-note" aria-label="Real native streaming acceptance">
     <strong>Developer-only real stream test</strong>
     <p>Actual capture and network transmission. Use a private test destination. This is not production Go Live.</p>
@@ -111,8 +123,7 @@ export default function LiveAcceptance({active,disabled,prepare,onBusy}:{active:
       <button className="secondary-button" disabled={disabled||phrase!==confirmation} onClick={()=>void start()}>Start real test stream</button>
       <button className="secondary-button" onClick={()=>{setReview(null);setPhrase('')}}>Cancel review</button>
     </div>}
-    {busy.current&&<button className="secondary-button" onClick={()=>void stop()}>Stop real test stream</button>}
-    {session&&<p role="status">Native test: {status?.phase??'starting'} · {status?.mediaFrames??0} submitted frames · {status?.sentPackets??0} sent packets. Receiver verification required.</p>}
-    {error&&<p role="alert" className="preview-error">{error}</p>}
+    {active&&controls}
+    {!active&&dock&&session&&createPortal(<section className="dock-note" aria-label="Active native stream controls"><strong>Native stream test</strong><p>Workspace navigation does not end an authorized test. Use Stop to end it.</p>{controls}</section>,dock)}
   </section>
 }
