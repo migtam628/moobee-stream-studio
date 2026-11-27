@@ -11,7 +11,7 @@ struct Destination{id:String,name:String,server_url:String}
 pub(crate) struct Request{
     session_id:String,confirmation:String,destinations:Vec<Destination>,
     display_ids:Vec<usize>,video_device_id:Option<String>,seconds:u32,profile:String,
-    bitrate_kbps:Option<u32>,fallback_on_reconnect:Option<bool>,layout:Option<String>,overlay:Option<crate::program_overlay::OverlayInput>,
+    bitrate_kbps:Option<u32>,fallback_on_reconnect:Option<bool>,adaptive_bitrate:Option<bool>,layout:Option<String>,overlay:Option<crate::program_overlay::OverlayInput>,
     audio_inputs:Vec<crate::program_audio::AudioInput>,transforms:Option<Vec<crate::source_transform::SourceTransform>>,
 }
 fn supported()->bool{cfg!(all(feature="native-live-acceptance",any(target_os="macos",target_os="windows")))}
@@ -29,7 +29,7 @@ pub(crate) fn live_acceptance_available()->bool{supported()}
 pub(crate) async fn start_live_acceptance(app:tauri::AppHandle,state:tauri::State<'_,Arc<Controller>>,request:Request)->Result<(),String>{
     if !supported(){return Err("Real streaming acceptance is disabled in this build".into())}
     validate_intent(&request.session_id,&request.confirmation,request.destinations.len(),request.seconds)?;
-    if request.fallback_on_reconnect==Some(true)&&request.destinations.len()!=1{return Err("Bitrate fallback requires one destination".into())}
+    if (request.fallback_on_reconnect==Some(true)||request.adaptive_bitrate==Some(true))&&request.destinations.len()!=1{return Err("Bitrate fallback requires one destination".into())}
     #[cfg(all(feature="native-live-acceptance",any(target_os="macos",target_os="windows")))]
     {
         use std::collections::HashSet;
@@ -39,6 +39,7 @@ pub(crate) async fn start_live_acceptance(app:tauri::AppHandle,state:tauri::Stat
                 d.name.is_empty()||d.name.len()>80||d.server_url.len()>768{return Err("Invalid confirmed destination preview".into())}
         }
         let run=state.inner().start(request.session_id.clone(),Mode::Native)?;
+        run.enable_inplace_bitrate(request.adaptive_bitrate.unwrap_or(false));
         let guard=run.clone();
         let result=tauri::async_runtime::spawn_blocking(move||{
             let _sampler=crate::live_soak::Sampler::start(run.clone());
