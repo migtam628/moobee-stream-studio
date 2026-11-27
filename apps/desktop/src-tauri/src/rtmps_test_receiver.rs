@@ -145,6 +145,16 @@ pub(crate) fn serve(io:&mut (impl Read+Write),fixture_key:&str,capture_path:Opti
     if let (Some(c),Some(path))=(capture,capture_path){c.save(path,r.audio_config)?;}
     Ok(r)
 }
+#[test]fn independent_capture_flv_tag_framing_and_budget(){
+    let mut c=Capture::new();
+    let m=Message{kind:9,stream:STREAM,time:0x01020304,body:vec![0x17,1,0,0,0,0,0,0,1,0x65]};
+    c.append(&m).unwrap();
+    assert_eq!(&c.bytes[..13],b"FLV\x01\x05\x00\x00\x00\x09\x00\x00\x00\x00");
+    assert_eq!(&c.bytes[13..24],&[9,0,0,10,2,3,4,1,0,0,0]);
+    assert_eq!(&c.bytes[24..34],m.body.as_slice());
+    assert_eq!(&c.bytes[34..],&21u32.to_be_bytes());
+    c.bytes.resize(MAX_CAPTURE,0);assert!(c.append(&m).is_err());
+}
 #[test]fn receiver_rejects_missing_configuration_and_invalid_continuations(){
     let mut r=Report::default();assert!(r.media(Message{kind:9,stream:STREAM,time:0,body:vec![0x17,1,0,0,0,0,0,0,1,0x65]}).is_err());
     let mut wire=vec![6,0,0,0,0,0,129,9,5,0,0,0];wire.extend([1;128]);wire.extend([0xc4,1]);
