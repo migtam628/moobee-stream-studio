@@ -16,6 +16,7 @@ pub(crate) struct Snapshot{
     session_id:String,mode:Mode,phase:Phase,elapsed_ms:u64,media_frames:u32,
     sent_packets:u64,sent_payload_bytes:u64,pending_packets:usize,pending_bytes:usize,
     late_frames:u32,bitrate_kbps:u64,error:Option<&'static str>,health:Reading,reconnect_attempt:u8,destinations:Vec<crate::live_fanout::DestinationStats>,
+    resources:crate::live_soak::Resources,timing:Option<crate::live_soak::Timing>,
 }
 struct Entry{snapshot:Snapshot,start:Instant,stop:Arc<AtomicBool>,monitor:Monitor,epoch_started_ms:u64}
 #[derive(Default)]
@@ -29,7 +30,7 @@ impl Controller{
         if e.as_ref().is_some_and(|v|!matches!(v.snapshot.phase,Phase::Stopped|Phase::Failed)){return Err("Another streaming session is active".into())}
         let stop=Arc::new(AtomicBool::new(false));
         *e=Some(Entry{snapshot:Snapshot{session_id:id.clone(),mode,phase:Phase::Starting,elapsed_ms:0,media_frames:0,
-            sent_packets:0,sent_payload_bytes:0,pending_packets:0,pending_bytes:0,late_frames:0,bitrate_kbps:0,error:None,health:Reading::default(),reconnect_attempt:0,destinations:vec![]},start:Instant::now(),stop:stop.clone(),monitor:Monitor::default(),epoch_started_ms:0});
+            sent_packets:0,sent_payload_bytes:0,pending_packets:0,pending_bytes:0,late_frames:0,bitrate_kbps:0,error:None,health:Reading::default(),reconnect_attempt:0,destinations:vec![],resources:crate::live_soak::Resources::default(),timing:None},start:Instant::now(),stop:stop.clone(),monitor:Monitor::default(),epoch_started_ms:0});
         Ok(Run{controller:self.clone(),id,stop,retry_failure:Arc::new(Mutex::new(None))})
     }
     pub(crate) fn current(&self)->Option<Snapshot>{
@@ -93,7 +94,7 @@ impl Run{
             if let Some(e)=entry.as_mut().filter(|v|v.snapshot.session_id==self.id&&Arc::ptr_eq(&v.stop,&self.stop)){
                 let s=&mut e.snapshot;
                 if self.cancelled()||matches!(s.phase,Phase::Stopped|Phase::Failed){return}
-                s.phase=Phase::Starting;s.reconnect_attempt=attempt;s.destinations.clear();s.media_frames=0;s.sent_packets=0;s.sent_payload_bytes=0;
+                s.phase=Phase::Starting;s.reconnect_attempt=attempt;s.destinations.clear();s.timing=None;s.media_frames=0;s.sent_packets=0;s.sent_payload_bytes=0;
                 s.pending_packets=0;s.pending_bytes=0;s.late_frames=0;s.bitrate_kbps=0;s.health=Reading::default();
                 e.monitor=Monitor::default();e.epoch_started_ms=e.start.elapsed().as_millis() as u64;
             }
@@ -101,6 +102,8 @@ impl Run{
     }
     pub(crate) fn running(&self){self.update(|s|{if s.phase==Phase::Starting&&!self.cancelled(){s.phase=Phase::Streaming;}})}
     pub(crate) fn destination_telemetry(&self,destinations:Vec<crate::live_fanout::DestinationStats>){self.update(|s|{if s.mode==Mode::Native{s.destinations=destinations;}})}
+    pub(crate) fn resource_sample(&self,memory:u64,cpu:Option<f32>){self.update(|s|{if s.mode==Mode::Native{s.resources.observe(s.elapsed_ms,memory,cpu);}})}
+    pub(crate) fn timing_sample(&self,timing:crate::live_soak::Timing){self.update(|s|{if s.mode==Mode::Native{s.timing=Some(timing);}})}
     pub(crate) fn telemetry(&self,frames:u32,late:u32,worker:crate::live_publish_worker::WorkerStats){
         let Ok(mut entry)=self.controller.entry.lock()else{return};
         let Some(e)=entry.as_mut().filter(|v|v.snapshot.session_id==self.id&&Arc::ptr_eq(&v.stop,&self.stop))else{return};
