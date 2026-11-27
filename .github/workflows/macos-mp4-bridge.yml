@@ -82,6 +82,7 @@ jobs:
           cargo test --lib live_lifecycle::tests
           cargo test --lib live_health::tests
           cargo test --lib live_reconnect::tests
+          cargo test --lib replay_buffer::tests
           cargo test --lib stream_destinations::tests
           cargo test --lib program_mp4_sink::tests
           cargo test --lib program_mp4_storage::tests
