@@ -6,7 +6,7 @@ use crate::live_health::{Monitor,Reading,Sample};
 use std::{sync::{Arc,Mutex,atomic::{AtomicBool,Ordering}},time::{Duration,Instant}};
 #[derive(Clone,Copy,Debug,PartialEq,Eq,Serialize)]
 #[serde(rename_all="camelCase")]
-pub(crate) enum Phase{Starting,Streaming,Stopping,Stopped,Failed}
+pub(crate) enum Phase{Starting,Streaming,Reconnecting,Stopping,Stopped,Failed}
 #[derive(Clone,Copy,Debug,PartialEq,Eq,Serialize)]
 #[serde(rename_all="camelCase")]
 pub(crate) enum Mode{Rehearsal,Native}
@@ -74,6 +74,7 @@ impl Run{
     }
     pub(crate) fn record_retry_failure(&self,cause:crate::live_reconnect::Failure){if let Ok(mut f)=self.retry_failure.lock(){*f=Some(cause);}}
     pub(crate) fn take_retry_failure(&self)->crate::live_reconnect::Failure{self.retry_failure.lock().ok().and_then(|mut f|f.take()).unwrap_or(crate::live_reconnect::Failure::Unknown)}
+    pub(crate) fn recovery_wait(&self){self.update(|s|{if !self.cancelled()&&s.mode==Mode::Native{s.phase=Phase::Reconnecting;}})}
     pub(crate) fn begin_epoch(&self,attempt:u8){
         let _=self.take_retry_failure();
         if let Ok(mut entry)=self.controller.entry.lock(){
