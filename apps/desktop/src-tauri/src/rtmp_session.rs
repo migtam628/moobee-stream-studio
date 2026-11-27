@@ -289,6 +289,27 @@ mod tests{
         assert_eq!(s.stats().queued_packets,0);
         assert!(s.tick(100).is_err());
     }
+    #[test]fn only_classified_socket_write_failure_is_retryable(){
+        use crate::live_session::{Session,Phase};
+        use std::sync::{Arc,atomic::{AtomicBool,Ordering}};
+        struct Failing{inner:Fixture,fail:Arc<AtomicBool>,kind:ErrorKind}
+        impl Read for Failing{fn read(&mut self,b:&mut[u8])->io::Result<usize>{self.inner.read(b)}}
+        impl Write for Failing{
+            fn write(&mut self,b:&[u8])->io::Result<usize>{
+                if self.fail.load(Ordering::Acquire){Err(io::Error::from(self.kind))}else{self.inner.write(b)}
+            }
+            fn flush(&mut self)->io::Result<()>{Ok(())}
+        }
+        for (kind,expected) in [(ErrorKind::ConnectionReset,Some(Failure::TransientTransport)),(ErrorKind::InvalidData,None)]{
+            let fail=Arc::new(AtomicBool::new(false));
+            let p=Publisher::establish(Failing{inner:fixture(true),fail:fail.clone(),kind},"live","rtmps://example.invalid/live","fixture-key",7,&[9;1528]).unwrap();
+            let mut s=Session::new(p).unwrap();
+            s.submit(crate::stream_mux::avc_sequence(&[0x67,0x64,0,0x28],&[0x68,0xee]).unwrap()).unwrap();
+            fail.store(true,Ordering::Release);
+            assert!(s.tick(0).is_err());
+            assert_eq!(s.stats().phase,Phase::Failed);assert_eq!(s.stats().failure,expected);
+        }
+    }
     #[test]fn session_server_stop_is_terminal(){
         use crate::live_session::{Session,Phase};
         let publisher=Publisher::establish(fixture(true),"live","rtmps://example.invalid/live","fixture-key",7,&[9;1528]).unwrap();
@@ -296,6 +317,7 @@ mod tests{
         assert!(s.service_inbound().is_err());
         assert_eq!(s.stats().phase,Phase::Failed);
         assert!(s.stats().restart_required);
+        assert_eq!(s.stats().failure,None);
         assert!(s.submit(crate::stream_mux::aac_sequence()).is_err());
     }
     #[test]fn worker_delivers_and_stops_without_producer_socket_io(){
