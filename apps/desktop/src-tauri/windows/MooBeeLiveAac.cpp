@@ -68,7 +68,7 @@ HRESULT configure(Encoder& e){
     return e.transform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM,0);
 }
 HRESULT push(Encoder& e,const int16_t* pcm,size_t frames){
-    if(e.failed||!pcm||frames!=FRAMES||e.frames+frames>48000ULL*3600)return E_INVALIDARG;
+    if(e.failed||!pcm||frames!=FRAMES||e.frames+frames>48000ULL*7200)return E_INVALIDARG;
     ComPtr<IMFMediaBuffer> buffer;HRESULT hr=MFCreateMemoryBuffer(FRAMES*4,&buffer);if(FAILED(hr))return hr;
     BYTE* data=nullptr;if(FAILED(hr=buffer->Lock(&data,nullptr,nullptr)))return hr;
     CopyMemory(data,pcm,FRAMES*4);if(FAILED(hr=buffer->Unlock()))return hr;
