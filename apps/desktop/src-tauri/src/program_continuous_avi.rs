@@ -292,6 +292,9 @@ pub struct ContinuousProgramReport {
     audio_peak: f32,
     audio_clipped_samples: usize,
     overlay_included: bool,
+    test_alerts_enabled: bool,
+    test_alert_events: u32,
+    test_alert_frames: u32,
     elapsed_ms: u64,
     finalization_ms: u64,
     audio_track_verified: bool,
@@ -485,6 +488,7 @@ fn capture_to_dir(
     directory: PathBuf, ids: Vec<usize>, seconds: u32, profile: EncodingProfile, format: ProgramFormat, layout: crate::scene_compositor::SceneLayout, webcam: bool,
     microphone: bool, mic_gain: f32, overlay: Option<crate::program_overlay::OverlayInput>, video_device_id: Option<String>, audio_inputs: Option<Vec<crate::program_audio::AudioInput>>, transforms: Option<Vec<crate::source_transform::SourceTransform>>, stop_guard: Option<&ProgramStopGuard>,
     live_output:Option<LiveOutput>,
+    alerts:Option<tokio::sync::broadcast::Receiver<crate::AlertEvent>>,
 ) -> Result<ContinuousProgramReport, String> {
     let live=matches!(format,ProgramFormat::Live);
     if live!=live_output.is_some(){return Err("Live output configuration mismatch".into())}
@@ -493,6 +497,7 @@ fn capture_to_dir(
     let live_connector=live_output.map(|o|o.connect);
     let clock = crate::media_clock::MediaClock::new(profile.fps)?;
     let graphic = overlay.map(|input| input.prepare(profile.width, profile.height)).transpose()?;
+    let mut alert_layer=alerts.map(|rx|crate::program_alert_layer::Layer::new(rx,profile.width,profile.height,profile.fps));
     #[cfg(target_os = "macos")]
     if microphone || audio_inputs.as_ref().is_some_and(|inputs| inputs.iter().any(|i| i.kind == "device")) { crate::program_microphone::ProgramMicrophone::authorize()?; }
     // Explicit opt-in; permission is resolved before starting the display receivers.
@@ -711,6 +716,10 @@ fn capture_to_dir(
                 finished_take=*step>=*total;
             }
             if let Some(ref overlay) = graphic { crate::program_overlay::apply(&mut composed, overlay); }
+            if let Some(layer)=alert_layer.as_mut(){
+                let now=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d|d.as_millis() as u64).unwrap_or(0);
+                layer.apply(&mut composed,tick,now);
+            }
             writer.append(composed)?;
             #[cfg(target_os = "macos")]
             if let Some(ref mut source) = mic {
@@ -868,6 +877,9 @@ fn capture_to_dir(
         planned_audio_samples_48khz: clock.audio_range(written_frames - 1, 48_000)?.end,
         microphone_included: microphone, audio_input_count, audio_samples_written, audio_missing_source_frames, audio_peak, audio_clipped_samples,
         overlay_included: graphic.is_some(),
+        test_alerts_enabled:alert_layer.is_some(),
+        test_alert_events:alert_layer.as_ref().map_or(0,|l|l.counts().0),
+        test_alert_frames:alert_layer.as_ref().map_or(0,|l|l.counts().1),
         measured_sampling_fps: if elapsed_ms <= paused_ms { 0.0 }
             else { f64::from(written_frames) * 1000.0 / (elapsed_ms - paused_ms) as f64 },
         source_frames_received: received,
@@ -989,24 +1001,24 @@ fn capture_authorized_live_program_with_lifecycle(
         .map_err(|_|"Another native capture is active")?;
     let _guard=CaptureLock;
     capture_to_dir(PathBuf::new(),display_ids,seconds,p,ProgramFormat::Live,layout,false,false,1.,overlay,
-        video_device_id,Some(audio_inputs),transforms,None,Some(LiveOutput{connect:Box::new(connect),stop,lifecycle}))
+        video_device_id,Some(audio_inputs),transforms,None,Some(LiveOutput{connect:Box::new(connect),stop,lifecycle}),None)
 }
 
 #[tauri::command]
 pub async fn capture_continuous_program_avi(
     app: tauri::AppHandle, display_ids: Vec<usize>, seconds: u32, profile: String, layout: Option<String>,
-    overlay: Option<crate::program_overlay::OverlayInput>, transforms: Option<Vec<crate::source_transform::SourceTransform>>,
+    overlay: Option<crate::program_overlay::OverlayInput>, transforms: Option<Vec<crate::source_transform::SourceTransform>>, test_alerts:Option<bool>,
 ) -> Result<ContinuousProgramReport, String> {
-    capture_continuous_program(app, display_ids, seconds, profile, ProgramFormat::Avi, layout, false, false, 1.0, overlay, None, None, transforms, None, None).await
+    capture_continuous_program(app, display_ids, seconds, profile, ProgramFormat::Avi, layout, false, false, 1.0, overlay, None, None, transforms, None, None,test_alerts.unwrap_or(false)).await
 }
 
 #[tauri::command]
 pub async fn capture_continuous_program_mp4(
     app: tauri::AppHandle, display_ids: Vec<usize>, seconds: u32, profile: String, layout: Option<String>, webcam: Option<bool>, microphone: Option<bool>, mic_gain: Option<f32>,
-    overlay: Option<crate::program_overlay::OverlayInput>, video_device_id: Option<String>, audio_inputs: Option<Vec<crate::program_audio::AudioInput>>, transforms: Option<Vec<crate::source_transform::SourceTransform>>, session_id: Option<String>, bitrate_kbps: Option<u32>,
+    overlay: Option<crate::program_overlay::OverlayInput>, video_device_id: Option<String>, audio_inputs: Option<Vec<crate::program_audio::AudioInput>>, transforms: Option<Vec<crate::source_transform::SourceTransform>>, session_id: Option<String>, bitrate_kbps: Option<u32>,test_alerts:Option<bool>,
 ) -> Result<ContinuousProgramReport, String> {
     #[cfg(any(target_os = "macos", target_os = "windows"))]
-    { capture_continuous_program(app, display_ids, seconds, profile, ProgramFormat::Mp4, layout, webcam.unwrap_or(false), microphone.unwrap_or(false), mic_gain.unwrap_or(1.0), overlay, video_device_id, audio_inputs, transforms, session_id, bitrate_kbps).await }
+    { capture_continuous_program(app, display_ids, seconds, profile, ProgramFormat::Mp4, layout, webcam.unwrap_or(false), microphone.unwrap_or(false), mic_gain.unwrap_or(1.0), overlay, video_device_id, audio_inputs, transforms, session_id, bitrate_kbps,test_alerts.unwrap_or(false)).await }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     { let _ = (app, display_ids, seconds, profile, layout, webcam, microphone, mic_gain, overlay, video_device_id, audio_inputs, transforms, session_id, bitrate_kbps); Err("Composed H.264 MP4 requires Mac or Windows".into()) }
 }
@@ -1015,16 +1027,17 @@ pub async fn capture_continuous_program_mp4(
 pub async fn capture_program_live_packet_test(
     app:tauri::AppHandle,display_ids:Vec<usize>,seconds:u32,profile:String,layout:Option<String>,
     overlay:Option<crate::program_overlay::OverlayInput>,video_device_id:Option<String>,
-    audio_inputs:Option<Vec<crate::program_audio::AudioInput>>,transforms:Option<Vec<crate::source_transform::SourceTransform>>,bitrate_kbps:Option<u32>,
+    audio_inputs:Option<Vec<crate::program_audio::AudioInput>>,transforms:Option<Vec<crate::source_transform::SourceTransform>>,bitrate_kbps:Option<u32>,test_alerts:Option<bool>,
 )->Result<ContinuousProgramReport,String>{
     if !cfg!(any(target_os="macos",target_os="windows"))||!(2..=8).contains(&seconds){return Err("Offline streaming packet test requires Mac or Windows and 2–8 seconds".into())}
-    capture_continuous_program(app,display_ids,seconds,profile,ProgramFormat::Flv,layout,false,false,1.,overlay,video_device_id,audio_inputs,transforms,None,bitrate_kbps).await
+    capture_continuous_program(app,display_ids,seconds,profile,ProgramFormat::Flv,layout,false,false,1.,overlay,video_device_id,audio_inputs,transforms,None,bitrate_kbps,test_alerts.unwrap_or(false)).await
 }
 
 async fn capture_continuous_program(
     app: tauri::AppHandle, display_ids: Vec<usize>, seconds: u32, profile: String, format: ProgramFormat, layout: Option<String>, webcam: bool, microphone: bool, mic_gain: f32,
-    overlay: Option<crate::program_overlay::OverlayInput>, video_device_id: Option<String>, audio_inputs: Option<Vec<crate::program_audio::AudioInput>>, transforms: Option<Vec<crate::source_transform::SourceTransform>>, session_id: Option<String>, bitrate_kbps: Option<u32>,
+    overlay: Option<crate::program_overlay::OverlayInput>, video_device_id: Option<String>, audio_inputs: Option<Vec<crate::program_audio::AudioInput>>, transforms: Option<Vec<crate::source_transform::SourceTransform>>, session_id: Option<String>, bitrate_kbps: Option<u32>,test_alerts:bool,
 ) -> Result<ContinuousProgramReport, String> {
+    if test_alerts&&seconds>60{return Err("Encoded test alerts require a single capture of 60 seconds or less".into())}
     if session_id.as_ref().is_some_and(|id| uuid::Uuid::parse_str(id).is_err()) { return Err("Invalid Program recording session ID".into()); }
     if cfg!(target_os = "windows") && matches!(format, ProgramFormat::Mp4) && (webcam || seconds > MAX_MP4_SECONDS) { return Err("Windows MP4 supports one video device or displays up to 60 seconds; separate webcam inset is Mac-only".into()); }
     let validate_duration = if matches!(format, ProgramFormat::Mp4|ProgramFormat::Flv) { validate_mp4_request } else { validate_request };
@@ -1064,6 +1077,7 @@ async fn capture_continuous_program(
                 return Err(format!("Unable to locate MooBee clips directory: {error}"));
             }
         };
+        let alerts=if test_alerts{Some(app.state::<crate::OverlayState>().sender.subscribe())}else{None};
         tauri::async_runtime::spawn_blocking(move || {
             let _guard = CaptureLock;
             let stop_guard = if matches!(format, ProgramFormat::Mp4) { Some(ProgramStopGuard::begin(session_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()))) } else { None };
@@ -1071,7 +1085,7 @@ async fn capture_continuous_program(
                 if let Some(g)=stop_guard.as_ref(){g.allow_takes(display_ids.clone(),video_device_id.clone());}
             }
             if !matches!(format, ProgramFormat::Mp4) || seconds <= MAX_MP4_SECONDS {
-                return capture_to_dir(directory, display_ids, seconds, selected_profile, format, layout, webcam, microphone, mic_gain, overlay, video_device_id, audio_inputs, transforms, stop_guard.as_ref(),None);
+                return capture_to_dir(directory, display_ids, seconds, selected_profile, format, layout, webcam, microphone, mic_gain, overlay, video_device_id, audio_inputs, transforms, stop_guard.as_ref(),None,alerts);
             }
             let plan = segment_plan(seconds)?;
             let mut segments = Vec::with_capacity(plan.len());
@@ -1088,7 +1102,7 @@ async fn capture_continuous_program(
                 // promise a seamless continuous recording or gapless audio.
                 match capture_to_dir(directory.clone(), display_ids.clone(), length, selected_profile, format,
                     layout, webcam, microphone, mic_gain, overlay.clone(), video_device_id.clone(),
-                    audio_inputs.clone(), transforms.clone(), stop_guard.as_ref(),None) {
+                    audio_inputs.clone(), transforms.clone(), stop_guard.as_ref(),None,None) {
                     Ok(report) => {
                         segments.push(RecordingSegment {
                             id: report.id.clone(), path: report.path.clone(), bytes: report.bytes,
