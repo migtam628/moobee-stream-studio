@@ -187,7 +187,7 @@ try {
       if(cmd==='live_health_status')return window.__healthFixture??window.__rehearsal??null;
       if(cmd==='live_session_status')return window.__rehearsal?.sessionId===args.sessionId?window.__rehearsal:null;
       if(cmd==='stop_live_rehearsal'){if(window.__rehearsal?.sessionId!==args.sessionId)return false;window.__rehearsal.phase='stopped';return true;}
-      if (cmd === 'capture_program_live_packet_test') {window.__flvRequest=args;return {...clip,format:'flv',path:'/test/clip.flv',webcamIncluded:false};}
+      if (cmd === 'capture_program_live_packet_test') {window.__flvRequest=args;return {...clip,format:'flv',path:'/test/clip.flv',webcamIncluded:false,...(args.replaySeconds?{replayWindowSeconds:args.replaySeconds,replayCaptureFrames:150,frameCount:50,durationSeconds:5}: {})};}
       if (cmd === 'capture_continuous_program_mp4') {
         window.__captureOrder.push('record'); window.__programRequests.push(args);
         if (args.seconds === 120) return {...clip, durationSeconds:60, requestedMaxSeconds:60, segmentedSession:{requestedSeconds:120,completedSeconds:60,totalBytes:clip.bytes,stoppedEarly:true,warning:'Segment 2 failed: simulated device disconnect. Previously finalized clips were retained.',segments:[{id:clip.id,path:clip.path,bytes:clip.bytes,durationSeconds:60,frameCount:1800}]}};
@@ -389,6 +389,15 @@ try {
   if(flv.seconds!==4||flv.displayIds.join()!=='1'||flv.sessionId!==undefined||!Array.isArray(flv.audioInputs))throw new Error('Offline FLV capture routing failed');
   await macPage.getByRole('button',{name:'Close capture diagnostics',exact:true}).click();
   await macPage.getByRole('button',{name:'Saved FLV · View result',exact:true}).waitFor();
+  await macPage.getByLabel('Composed Program video test duration',{exact:true}).selectOption('15');
+  await macPage.getByRole('button',{name:'Capture diagnostics',exact:true}).click();
+  await macPage.getByLabel('Replay window',{exact:true}).selectOption('5');
+  await macPage.getByRole('button',{name:'Capture and save rolling replay',exact:true}).click();
+  await macPage.waitForFunction(()=>window.__flvRequest?.replaySeconds===5);
+  const replay=await macPage.evaluate(()=>window.__flvRequest);
+  if(replay.seconds!==15||replay.sessionId!==undefined||replay.displayIds.join()!=='1')throw new Error('Rolling replay routing failed');
+  await macPage.getByText(/Replay window: 5s requested/).waitFor();
+  await macPage.getByRole('button',{name:'Close capture diagnostics',exact:true}).click();
   await macPage.getByRole('button',{name:'Rehearse Go Live',exact:true}).click();
   await macPage.getByText(/Rehearsal: running \(offline\)/).waitFor();
   if(!(await macPage.getByRole('button',{name:'Go Live (unavailable)',exact:true}).isDisabled()))throw new Error('Actual Go Live must remain disabled');
