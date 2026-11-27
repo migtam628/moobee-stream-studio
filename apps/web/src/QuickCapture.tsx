@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { CheckCircle2, Copy, Film, FolderOpen, Monitor, Square, Video, AudioLines, Settings2, X, Volume2, Image as ImageIcon } from 'lucide-react'
 import { request, runningInTauri } from './api'
+import LiveAcceptance from './LiveAcceptance'
 import { isScreenCapturePermissionDenied } from './capturePermission'
 import { singleProgramDisplayId, programTestDisplayIds, programTestLayout, programTransforms, programVideoInput, type MinimalSceneCollection, validateSceneLayout } from './programDisplay'
 
@@ -301,6 +302,21 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
     finally { setGraphicLoading(false) }
   }
 
+  async function prepareLiveAcceptance(seconds:number){
+    if(!supportedDesktop||busy||loading||graphicLoading||audioSelectionError||programWebcam||!Number.isInteger(seconds)||seconds<2||seconds>1800)throw new Error('Select a valid 2–1800 second native Program capture with webcam inset off.')
+    const collection=await request<unknown>('/studio/collection')
+    const state=collection as MinimalSceneCollection
+    const videoDeviceId=programVideoInput(collection)
+    const displayIds=videoDeviceId?[]:programTestDisplayIds(collection)
+    if(displayIds.some(id=>!displays.some(d=>d.id===id)))throw new Error('Refresh disconnected displays before testing.')
+    const scene=state.scenes.find(s=>s.name===state.currentScene)
+    const layout=videoDeviceId?validateSceneLayout(scene?.layout):programTestLayout(collection)
+    return {scene:state.currentScene,sources:videoDeviceId?[ 'Selected capture device: '+videoDeviceId ]:displayIds.map(id=>displays.find(d=>d.id===id)?.name??String(id)),
+      audio:audioRows.map(row=>row.name+' · '+(row.input.muted?'muted':Math.round(row.input.gain*100)+'% gain')),
+      config:{displayIds,videoDeviceId:videoDeviceId??null,seconds,profile:continuousProfile,layout,transforms:programTransforms(collection)??null,
+        overlay:graphic?{...graphic,placement}:null,audioInputs:audioRows.map(row=>row.input),bitrateKbps:programBitrate==='auto'?null:Number(programBitrate)}}
+  }
+
   async function captureProgramVideoTest(mode: 'sampled' | 'continuous' | 'mp4' | 'flv' = 'sampled') {
     if (!supportedDesktop || loading || busy || graphicLoading || (mode === 'mp4' && !supportedDesktop)) return
     if (mode!=='sampled'&&testAlerts&&programAviDuration>60){setError('Encoded test alerts require one capture up to 60 seconds.');return}
@@ -540,6 +556,7 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
           {programStopError && <small className="preview-error" role="status">{programStopError}</small>}
           <small className="dock-note">{mac ? 'H.264 MP4 · optional AAC' : supportedDesktop ? 'Windows H.264 MP4 · optional AAC'  : 'Requires Mac/Windows app'} · bounded diagnostic</small>
           {streamControl}
+          <LiveAcceptance active={active} disabled={!canProgram||programWebcam} prepare={prepareLiveAcceptance} onBusy={setBusy}/>
           <div className="dock-action-row"><button className="secondary-button" onClick={openClips}><Film size={14}/>Clips</button><button className="secondary-button" onClick={openSettings}><Settings2 size={14}/>Settings</button></div>
           <button className="secondary-button diagnostics-button" onClick={openDiagnostics}><Monitor size={14}/>Capture diagnostics</button>
           {saved?.segmentedSession?.warning && <small className="preview-error" role="status">{saved.segmentedSession.warning}</small>}
