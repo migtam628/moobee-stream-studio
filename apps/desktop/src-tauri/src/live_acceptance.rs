@@ -15,10 +15,11 @@ pub(crate) struct Request{
     audio_inputs:Vec<crate::program_audio::AudioInput>,transforms:Option<Vec<crate::source_transform::SourceTransform>>,
 }
 fn supported()->bool{cfg!(all(feature="native-live-acceptance",any(target_os="macos",target_os="windows")))}
+pub(crate) const MAX_LIVE_SECONDS:u32=1800;
 fn validate_intent(id:&str,confirmation:&str,count:usize,seconds:u32)->Result<(),String>{
     if confirmation!="START REAL TEST STREAM"{return Err("Explicit test stream confirmation required".into())}
-    if !uuid::Uuid::parse_str(id).is_ok_and(|u|u.to_string()==id)||!(1..=3).contains(&count)||!(2..=60).contains(&seconds){
-        return Err("Choose a valid session, one to three destinations and a 2–60 second test".into())
+    if !uuid::Uuid::parse_str(id).is_ok_and(|u|u.to_string()==id)||!(1..=3).contains(&count)||!(2..=MAX_LIVE_SECONDS).contains(&seconds){
+        return Err("Choose a valid session, one to three destinations and a 2–1800 second test".into())
     }
     Ok(())
 }
@@ -70,7 +71,8 @@ mod tests{
     #[test]fn requires_explicit_phrase_and_bounded_test(){
         let id=uuid::Uuid::new_v4().to_string();
         assert!(validate_intent(&id,"START REAL TEST STREAM",1,10).is_ok());
-        for (phrase,n,d) in [("start",1,10),("START REAL TEST STREAM",0,10),("START REAL TEST STREAM",4,10),("START REAL TEST STREAM",1,61)]{
+        assert!(validate_intent(&id,"START REAL TEST STREAM",1,1800).is_ok());
+        for (phrase,n,d) in [("start",1,10),("START REAL TEST STREAM",0,10),("START REAL TEST STREAM",4,10),("START REAL TEST STREAM",1,1801)]{
             assert!(validate_intent(&id,phrase,n,d).is_err());
         }
     }
