@@ -256,6 +256,7 @@ function collection() {
   return JSON.parse(JSON.stringify(draft)) as Saved
 }
 export async function nativeRequest(path: string, body: Body = {}): Promise<unknown> {
+  if(path==='/studio/live-health')return invoke('live_health_status');
   if (path.startsWith('/studio/live-rehearsal/')) {
     if (typeof body.sessionId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(body.sessionId)) throw new Error('Invalid rehearsal session');
     const sessionId=body.sessionId;
