@@ -65,7 +65,7 @@ impl Report{
                 self.video_config=true;
             }
             (8,Some([0xaf,0]))=>{
-                if self.audio_config||m.time!=0||b!=&[0xaf,0,0x11,0x90]{return Err("Invalid AAC config".into())}self.audio_config=true;
+                if self.audio_config||m.time!=0||b.as_slice()!=[0xaf,0,0x11,0x90]{return Err("Invalid AAC config".into())}self.audio_config=true;
             }
             (9,Some([0x17|0x27,1]))=>{
                 if !self.video_config||b.len()<10||self.last_video_ms.is_some_and(|t|m.time<=t)||b[2..5]!=[0,0,0]{return Err("Invalid video timing or format".into())}
@@ -80,7 +80,7 @@ impl Report{
                     if count>128{return Err("Too many NALs".into())}
                 }
                 if !picture||idr!=(b[0]==0x17)||(self.video_frames==0&&(!idr||m.time!=0)){return Err("Missing or invalid IDR".into())}
-                self.video_frames+=1;self.idr_frames+=u64::from(idr);self.last_video_ms=Some(m.time);
+                self.video_frames+=1;self.idr_frames+=if idr{1}else{0};self.last_video_ms=Some(m.time);
             }
             (8,Some([0xaf,1]))=>{
                 if !self.audio_config||self.video_frames==0||b.len()<3||self.last_audio_ms.is_some_and(|t|m.time<=t){return Err("Invalid AAC timeline".into())}
