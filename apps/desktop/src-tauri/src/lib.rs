@@ -43,6 +43,7 @@ mod live_reconnect;
 #[cfg(any(target_os="macos",target_os="windows"))]
 mod stream_destinations;
 mod live_publish_worker;
+mod live_fanout;
 mod live_flv;
 #[cfg(target_os = "macos")]
 mod macos_avc;
