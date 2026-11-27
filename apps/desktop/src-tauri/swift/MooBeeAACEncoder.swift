@@ -21,7 +21,8 @@ private final class AACEncoder{
         var description=AudioStreamBasicDescription()
         description.mSampleRate=48000
         description.mFormatID=kAudioFormatMPEG4AAC
-        description.mFormatFlags=UInt32(kMPEG4Object_AAC_LC)
+        // MPEG-4 Audio Object Type 2 = AAC Low Complexity (ISO/IEC 14496-3).
+        description.mFormatFlags=2
         description.mChannelsPerFrame=2
         var descriptionSize=UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
         let formatStatus=AudioFormatGetProperty(kAudioFormatProperty_FormatInfo,0,nil,&descriptionSize,&description)
