@@ -7,6 +7,7 @@ const CONFIG:usize=8192;
 unsafe extern "C"{
     fn moobee_win_avc_create(w:u32,h:u32,fps:u32,kbps:u32,error:*mut c_char,capacity:i32)->*mut c_void;
     fn moobee_win_avc_encode(handle:*mut c_void,nv12:*const u8,length:usize,force_key:i32,out:*mut u8,capacity:u32,size:*mut u32,config:*mut u8,config_cap:u32,config_len:*mut u32,error:*mut c_char,error_capacity:i32)->i32;
+    fn moobee_win_avc_lower_bitrate(handle:*mut c_void,kbps:u32)->i32;
     fn moobee_win_avc_destroy(handle:*mut c_void);
 }
 fn message(error:&[c_char;512])->String{
@@ -76,6 +77,12 @@ impl Encoder{
         let handle=unsafe{moobee_win_avc_create(w,h,fps,kbps,error.as_mut_ptr(),512)};
         if handle.is_null(){return Err(message(&error))}
         Ok(Self{handle,width:w,height:h,fps,nv12:vec![0;(w*h*3/2)as usize],output:vec![0;MAX],packetizer:Packetizer::default(),failed:false})
+    }
+    pub(crate) fn lower_bitrate(&mut self,kbps:u32)->Result<bool,String>{
+        if self.failed||!matches!(kbps,1500|3000){return Err("Invalid live bitrate change".into())}
+        match unsafe{moobee_win_avc_lower_bitrate(self.handle,kbps as u32)}{
+            0=>Ok(true),1=>Ok(false),_=>{self.failed=true;Err("Native bitrate update left encoder state unverified".into())}
+        }
     }
     pub(crate) fn encode(&mut self,rgba:&[u8],force_key:bool)->Result<Vec<Packet>,String>{
         if self.failed{return Err("Windows AVC encoder requires fresh epoch".into())}

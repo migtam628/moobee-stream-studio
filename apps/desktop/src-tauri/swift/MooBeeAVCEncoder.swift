@@ -65,6 +65,18 @@ private final class AVCEncoder {
             VTCompressionSessionInvalidate(created);session=nil;return nil
         }
     }
+    // Same owner thread, between completed access units. Return 1 when the
+    // property is unsupported, -1 when the resulting state is uncertain.
+    func lowerBitrate(_ kbps:Int32)->Int32 {
+        guard !failed, let session, [Int32(1500),3000].contains(kbps) else {return -1}
+        let rc=VTSessionSetProperty(session,key:kVTCompressionPropertyKey_AverageBitRate,value:NSNumber(value:kbps*1000))
+        if rc==kVTPropertyNotSupportedErr || rc==kVTPropertyReadOnlyErr {return 1}
+        guard rc==noErr else {failed=true;return -1}
+        var value:CFTypeRef?
+        guard VTSessionCopyProperty(session,key:kVTCompressionPropertyKey_AverageBitRate,allocator:kCFAllocatorDefault,valueOut:&value)==noErr,
+              let number=value as? NSNumber,number.intValue==Int(kbps)*1000 else {failed=true;return -1}
+        return 0
+    }
     deinit { if let session { VTCompressionSessionInvalidate(session) } }
     func encode(_ rgba:UnsafePointer<UInt8>,_ length:Int,_ forceKey:Bool,
                 _ out:UnsafeMutablePointer<UInt8>,_ capacity:Int,
@@ -152,6 +164,11 @@ public func moobee_avc_encode(_ handle:UnsafeMutableRawPointer?,_ rgba:UnsafePoi
         output,capacity,sps,pps,configCapacity,spsLength,ppsLength,key)
     if n<0 {avcError(error,errorCapacity,"VideoToolbox access unit missing, stalled or unsupported")}
     return n
+}
+@_cdecl("moobee_avc_lower_bitrate")
+public func moobee_avc_lower_bitrate(_ handle:UnsafeMutableRawPointer?,_ kbps:Int32)->Int32 {
+    guard let handle else{return -1}
+    return Unmanaged<AVCEncoder>.fromOpaque(handle).takeUnretainedValue().lowerBitrate(kbps)
 }
 @_cdecl("moobee_avc_destroy")
 public func moobee_avc_destroy(_ handle:UnsafeMutableRawPointer?) {

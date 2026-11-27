@@ -31,6 +31,10 @@ impl Sink{
         self.fanout.submit(packets)?;
         self.frames+=1;Ok(())
     }
+    pub(crate) fn lower_bitrate(&mut self,kbps:u32)->Result<bool,String>{
+        if self.finished||self.pending.is_some(){return Err("Bitrate change requires complete live tick".into())}
+        self.encoder.lower_bitrate(kbps)
+    }
     pub(crate) fn timing(&self)->crate::live_soak::Timing{self.timing}
     pub(crate) fn retry_failure(&self)->Option<crate::live_reconnect::Failure>{self.fanout.retry_failure()}
     pub(crate) fn destinations(&self)->Vec<crate::live_fanout::DestinationStats>{self.fanout.destinations()}

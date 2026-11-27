@@ -5,7 +5,7 @@ type Health='unavailable'|'warmingUp'|'normal'|'backpressure'|'stalled'|'stale'|
 type Destination={id:string;phase:string;sentPackets:number;sentPayloadBytes:number;queuedPackets:number;queuedBytes:number;admittedPackets:number;admittedBytes:number;reconnectAttempt?:number;interrupted?:boolean}
 type Resources={samples:number;sampleElapsedMs:number;residentBytes:number|null;baselineResidentBytes:number|null;peakResidentBytes:number|null;cpuTenths:number|null;peakCpuTenths:number|null}
 type Timing={videoPackets:number;audioPackets:number;videoEndMs:number|null;audioEndMs:number|null;encodedVideoLeadMs:number|null;maxAbsEncodedGapMs:number|null;pendingAudioFrames:number|null;pcmFramesSupplied:number;windowsMissingSourceFrames:number|null;maxEncodeMs:number}
-type BitrateAdvice={initialKbps:number|null;currentKbps:number|null;fallbackEnabled:boolean;suggestedKbps:number|null;pressureMs:number}
+type BitrateAdvice={initialKbps:number|null;currentKbps:number|null;fallbackEnabled:boolean;suggestedKbps:number|null;pressureMs:number;inplaceEnabled?:boolean;inplaceChanges?:number;inplaceUnsupported?:boolean;inplaceUncertain?:boolean}
 type Snapshot={bitrateAdvice?:BitrateAdvice;resources?:Resources;timing?:Timing|null;destinations?:Destination[];mode:'native'|'rehearsal';phase:string;elapsedMs:number;sentPackets:number;sentPayloadBytes:number;mediaFrames:number;reconnectAttempt?:number;health:{health:Health;payloadKbps:number|null;outputFpsTenths:number|null;queueBytes:number;queuePackets:number;lateFramesInWindow:number|null;sampleAgeMs:number|null}}
 const labels:Record<Health,string>={unavailable:'Unavailable',warmingUp:'Collecting samples',normal:'Sender normal',backpressure:'Queue pressure',stalled:'Sender stalled',stale:'Stale sample',ended:'Ended'}
 export default function LiveHealth(){
@@ -71,7 +71,8 @@ export default function LiveHealth(){
       </div>
       <h3>Bitrate recovery</h3>
       <p className="dock-note">Initial target: {advice?.initialKbps??'—'} kbps · Current target: {advice?.currentKbps??'—'} kbps · Retry fallback: {advice==null?'—':advice.fallbackEnabled?'Enabled':'Disabled'}</p>
-      <p className="dock-note">{advice?.suggestedKbps!=null&&snapshot?.phase==='streaming'? `Sustained sender queue pressure: consider ${advice.suggestedKbps} kbps for a future session.`:'No active bitrate recommendation.'} A recommendation does not change a running encoder or measure network capacity.</p>
+      <p className="dock-note">{advice?.suggestedKbps!=null&&snapshot?.phase==='streaming'? `Sustained sender queue pressure: consider ${advice.suggestedKbps} kbps for a future session.`:'No active bitrate recommendation.'} Recommendations do not measure network capacity. An explicitly enabled native downshift can apply at a GOP boundary.</p>
+      <p className="dock-note">In-place bitrate: {advice?.inplaceUncertain?'Encoder state unverified':advice?.inplaceUnsupported?'Unsupported this epoch':advice?.inplaceEnabled?'Enabled':'Disabled'} · Applied changes this epoch: {advice?.inplaceChanges??'—'}</p>
       <h3>Process resources</h3>
       <p className="dock-note">Native process only, sampled about once per second. CPU uses 100% per logical core; browser/WebView helper processes, GPU usage and unsampled peaks are not included. Ended sessions show their last sample.</p>
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))',gap:'12px'}}>{resourceMetrics.map(([label,value])=><div className="dock-note" key={label}><span>{label}</span><br/><strong>{value}</strong></div>)}</div>

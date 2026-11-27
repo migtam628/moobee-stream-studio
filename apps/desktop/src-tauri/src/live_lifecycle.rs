@@ -101,6 +101,25 @@ impl Run{
         }
     }
     pub(crate) fn running(&self){self.update(|s|{if s.phase==Phase::Starting&&!self.cancelled(){s.phase=Phase::Streaming;}})}
+    pub(crate) fn enable_inplace_bitrate(&self,enabled:bool){
+        if let Ok(mut entry)=self.controller.entry.lock(){
+            if let Some(e)=entry.as_mut().filter(|v|v.snapshot.session_id==self.id&&Arc::ptr_eq(&v.stop,&self.stop)&&v.snapshot.mode==Mode::Native&&v.snapshot.phase==Phase::Starting){
+                e.advisor.enable_inplace(enabled);e.snapshot.bitrate_advice=e.advisor.reading();
+            }
+        }
+    }
+    pub(crate) fn inplace_target(&self)->Option<u32>{
+        let mut entry=self.controller.entry.lock().ok()?;
+        let e=entry.as_mut().filter(|v|v.snapshot.session_id==self.id&&Arc::ptr_eq(&v.stop,&self.stop)&&v.snapshot.mode==Mode::Native&&v.snapshot.phase==Phase::Streaming&&!self.cancelled())?;
+        e.advisor.inplace_target(e.start.elapsed().as_millis()as u64,e.snapshot.destinations.len())
+    }
+    pub(crate) fn inplace_result(&self,target:u32,result:Result<bool,()>){
+        if let Ok(mut entry)=self.controller.entry.lock(){
+            if let Some(e)=entry.as_mut().filter(|v|v.snapshot.session_id==self.id&&Arc::ptr_eq(&v.stop,&self.stop)&&!matches!(v.snapshot.phase,Phase::Stopped|Phase::Failed)){
+                e.advisor.inplace_result(target,result);e.snapshot.bitrate_advice=e.advisor.reading();
+            }
+        }
+    }
     pub(crate) fn bitrate_config(&self,initial:u32,current:u32,enabled:bool){
         if let Ok(mut entry)=self.controller.entry.lock(){
             if let Some(e)=entry.as_mut().filter(|v|v.snapshot.session_id==self.id&&Arc::ptr_eq(&v.stop,&self.stop)&&v.snapshot.mode==Mode::Native&&!matches!(v.snapshot.phase,Phase::Stopped|Phase::Failed)){

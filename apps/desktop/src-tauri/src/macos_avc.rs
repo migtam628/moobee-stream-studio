@@ -6,6 +6,7 @@ const CONFIG:usize=4096;
 unsafe extern "C"{
     fn moobee_avc_create(w:i32,h:i32,fps:i32,kbps:i32,error:*mut c_char,capacity:i32)->*mut c_void;
     fn moobee_avc_encode(handle:*mut c_void,rgba:*const u8,length:usize,force_key:i32,out:*mut u8,capacity:usize,sps:*mut u8,pps:*mut u8,config_capacity:usize,sps_len:*mut usize,pps_len:*mut usize,key:*mut i32,error:*mut c_char,error_capacity:i32)->isize;
+    fn moobee_avc_lower_bitrate(handle:*mut c_void,kbps:i32)->i32;
     fn moobee_avc_destroy(handle:*mut c_void);
 }
 fn message(error:&[c_char;512])->String{
@@ -31,6 +32,12 @@ impl Encoder{
         let handle=unsafe{moobee_avc_create(width as i32,height as i32,fps as i32,kbps as i32,error.as_mut_ptr(),512)};
         if handle.is_null(){return Err(message(&error))}
         Ok(Self{handle,width,height,fps,index:0,output:vec![0;CAPACITY],config:None,failed:false})
+    }
+    pub(crate) fn lower_bitrate(&mut self,kbps:u32)->Result<bool,String>{
+        if self.failed||!matches!(kbps,1500|3000){return Err("Invalid live bitrate change".into())}
+        match unsafe{moobee_avc_lower_bitrate(self.handle,kbps as i32)}{
+            0=>Ok(true),1=>Ok(false),_=>{self.failed=true;Err("Native bitrate update left encoder state unverified".into())}
+        }
     }
     pub(crate) fn encode(&mut self,rgba:&[u8],force_key:bool)->Result<Vec<Packet>,String>{
         if self.failed{return Err("AVC encoder requires a new session".into())}
