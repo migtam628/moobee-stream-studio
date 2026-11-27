@@ -46,6 +46,7 @@ jobs:
           cargo test --lib live_rejoin::tests
           cargo test --lib live_soak::tests
           cargo test --lib live_startup::tests
+          cargo test --lib live_bitrate::tests
           cargo test --lib program_alert_layer::tests
           cargo test --lib live_acceptance::tests
           cargo check --features native-live-acceptance
