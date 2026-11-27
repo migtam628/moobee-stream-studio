@@ -13,6 +13,7 @@ import BrowserRecorder from './BrowserRecorder'
 import QuickCapture from './QuickCapture'
 import LiveLifecycle from './LiveLifecycle'
 import LiveHealth from './LiveHealth'
+import StreamDestinations from './StreamDestinations'
 import { TransformCanvas, TransformControls, geometry } from './SourceTransformEditor'
 import type { SourceTransform } from './programDisplay'
 import ServiceDiagnostics from './ServiceDiagnostics'
@@ -706,6 +707,7 @@ export default function App() {
       {tab === 'Overlays' && <Overlays setTab={go}/>}
       {tab === 'Clips' && <ClipLab/>}
       {tab === 'Analytics' && <LiveHealth/>}
+      {tab === 'Multistream' && <StreamDestinations/>}
       {(tab === 'Multistream' || tab === 'AI Sidekick' || tab === 'Chatbot' || tab === 'Analytics') && <PlannedModule tab={tab}/>}
     </main>
     <aside className="right-rail" aria-label="Activity dock"><div className="rail-tabs"><span><Activity size={16}/> Activity</span><button className="icon-button" aria-label="Close activity" onClick={() => setActivityOpen(false)}><X size={15}/></button></div><div className="assistant-summary"><div><Sparkles size={21}/><strong>AI Sidekick</strong><span className="small-tag">Coming soon</span></div><p>Scene automations and an optional local AI co-host are planned for a later milestone.</p></div>

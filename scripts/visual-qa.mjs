@@ -177,6 +177,13 @@ try {
         window.__rehearsal={sessionId:args.sessionId,mode:'rehearsal',phase:'streaming',elapsedMs:100,mediaFrames:0,sentPackets:0,sentPayloadBytes:0,pendingPackets:0,pendingBytes:0,lateFrames:0,bitrateKbps:0};
         return null;
       }
+      if(cmd==='list_stream_destinations')return window.__destinationRows??[];
+      if(cmd==='add_stream_destination'){
+        if(args.streamKey!=='fixture-not-a-real-key')throw new Error('Unexpected fixture key');
+        const row={id:'e9525c58-0e63-40b3-94b6-a9d0f0de4e99',name:args.name,serverUrl:args.serverUrl,credentialAvailable:true};
+        window.__destinationRows=[row];return row;
+      }
+      if(cmd==='remove_stream_destination'){window.__destinationRows=[];return null;}
       if(cmd==='live_health_status')return window.__healthFixture??window.__rehearsal??null;
       if(cmd==='live_session_status')return window.__rehearsal?.sessionId===args.sessionId?window.__rehearsal:null;
       if(cmd==='stop_live_rehearsal'){if(window.__rehearsal?.sessionId!==args.sessionId)return false;window.__rehearsal.phase='stopped';return true;}
@@ -393,6 +400,18 @@ try {
   const health=macPage.getByRole('region',{name:'Native streaming health'});
   await health.getByText('3000 kbps',{exact:true}).waitFor();
   await health.getByText('Sender normal',{exact:true}).waitFor();
+  await macPage.getByRole('button',{name:'Multistream',exact:true}).click();
+  const dest=macPage.getByRole('region',{name:'Secure stream destinations'});
+  await dest.getByText('No saved destinations.',{exact:true}).waitFor();
+  await dest.getByLabel('Destination name').fill('Fixture destination');
+  await dest.getByLabel('RTMPS server URL').fill('rtmps://example.invalid/live');
+  await dest.getByLabel('Stream key').fill('fixture-not-a-real-key');
+  await dest.getByRole('button',{name:'Save destination',exact:true}).click();
+  await dest.getByText('Fixture destination',{exact:true}).waitFor();
+  if(await dest.getByLabel('Stream key').inputValue()!=='')throw new Error('Stream key field not cleared');
+  await dest.getByRole('button',{name:'Remove Fixture destination',exact:true}).click();
+  await dest.getByRole('button',{name:'Confirm removal',exact:true}).click();
+  await dest.getByText('No saved destinations.',{exact:true}).waitFor();
   await macPage.close();
   const winPage = await browser.newPage({viewport:{width:1440,height:900},userAgent:'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36'});
   winPage.on('pageerror',error=>errors.push(error.message));

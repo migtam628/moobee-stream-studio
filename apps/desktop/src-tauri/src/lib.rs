@@ -36,6 +36,8 @@ mod live_session;
 mod live_lifecycle;
 mod live_health;
 mod live_reconnect;
+#[cfg(any(target_os="macos",target_os="windows"))]
+mod stream_destinations;
 mod live_publish_worker;
 mod live_flv;
 #[cfg(target_os = "macos")]
@@ -366,6 +368,27 @@ fn stop_live_rehearsal(state:tauri::State<'_,std::sync::Arc<live_lifecycle::Cont
     state.stop_rehearsal(&session_id)
 }
 
+#[tauri::command]
+async fn list_stream_destinations(app:tauri::AppHandle)->Result<serde_json::Value,String>{
+    #[cfg(any(target_os="macos",target_os="windows"))]
+    {serde_json::to_value(stream_destinations::list_stream_destinations(app).await?).map_err(|_|"Could not serialize destinations".into())}
+    #[cfg(not(any(target_os="macos",target_os="windows")))]
+    {let _=app;Err("OS credential storage is not supported on this platform".into())}
+}
+#[tauri::command]
+async fn add_stream_destination(app:tauri::AppHandle,name:String,server_url:String,stream_key:String)->Result<serde_json::Value,String>{
+    #[cfg(any(target_os="macos",target_os="windows"))]
+    {serde_json::to_value(stream_destinations::add_stream_destination(app,name,server_url,stream_key).await?).map_err(|_|"Could not serialize destination".into())}
+    #[cfg(not(any(target_os="macos",target_os="windows")))]
+    {let _=(app,name,server_url,stream_key);Err("OS credential storage is not supported on this platform".into())}
+}
+#[tauri::command]
+async fn remove_stream_destination(app:tauri::AppHandle,id:String)->Result<(),String>{
+    #[cfg(any(target_os="macos",target_os="windows"))]
+    {stream_destinations::remove_stream_destination(app,id).await}
+    #[cfg(not(any(target_os="macos",target_os="windows")))]
+    {let _=(app,id);Err("OS credential storage is not supported on this platform".into())}
+}
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let (sender, _) = broadcast::channel(100);
@@ -378,7 +401,7 @@ pub fn run() {
             tauri::async_runtime::spawn(serve_overlays(runner_state));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![start_live_rehearsal, live_session_status, live_health_status, stop_live_rehearsal, emit_test_alert, list_displays, list_video_inputs, list_audio_inputs, program_audio_levels, stop_program_audio_levels, test_video_input, live_video_preview_frame, stop_video_previews, capture_display, scene_compositor::capture_scene_snapshot, clip::capture_test_clip, clip::list_test_clips, clip::read_test_clip, clip::reveal_test_clip, capture_probe::probe_native_capture, native_avi::capture_silent_avi, program_test_avi::capture_program_test_avi, program_continuous_avi::capture_continuous_program_avi, program_continuous_avi::capture_continuous_program_mp4, program_continuous_avi::capture_program_live_packet_test, program_continuous_avi::stop_continuous_program_mp4, program_continuous_avi::pause_continuous_program_mp4, program_continuous_avi::continuous_program_stats, program_continuous_avi::queue_program_scene_take, program_continuous_avi::recover_finalized_program_recordings, macos_mp4::capture_macos_mp4, macos_mp4::stop_macos_mp4, macos_mp4::macos_mp4_availability, native_service_diagnostics, open_screen_recording_settings])
+        .invoke_handler(tauri::generate_handler![list_stream_destinations, add_stream_destination, remove_stream_destination, start_live_rehearsal, live_session_status, live_health_status, stop_live_rehearsal, emit_test_alert, list_displays, list_video_inputs, list_audio_inputs, program_audio_levels, stop_program_audio_levels, test_video_input, live_video_preview_frame, stop_video_previews, capture_display, scene_compositor::capture_scene_snapshot, clip::capture_test_clip, clip::list_test_clips, clip::read_test_clip, clip::reveal_test_clip, capture_probe::probe_native_capture, native_avi::capture_silent_avi, program_test_avi::capture_program_test_avi, program_continuous_avi::capture_continuous_program_avi, program_continuous_avi::capture_continuous_program_mp4, program_continuous_avi::capture_program_live_packet_test, program_continuous_avi::stop_continuous_program_mp4, program_continuous_avi::pause_continuous_program_mp4, program_continuous_avi::continuous_program_stats, program_continuous_avi::queue_program_scene_take, program_continuous_avi::recover_finalized_program_recordings, macos_mp4::capture_macos_mp4, macos_mp4::stop_macos_mp4, macos_mp4::macos_mp4_availability, native_service_diagnostics, open_screen_recording_settings])
         .run(tauri::generate_context!())
         .expect("failed to run MooBee Live desktop");
 }

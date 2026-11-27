@@ -256,6 +256,16 @@ function collection() {
   return JSON.parse(JSON.stringify(draft)) as Saved
 }
 export async function nativeRequest(path: string, body: Body = {}): Promise<unknown> {
+  if(path==='/studio/destinations')return invoke('list_stream_destinations');
+  if(path==='/studio/destinations/add'){
+    if(!macHost()&&!windowsHost())throw new Error('Native credential storage requires Mac or Windows');
+    if(typeof body.name!=='string'||typeof body.serverUrl!=='string'||typeof body.streamKey!=='string')throw new Error('Invalid destination');
+    return invoke('add_stream_destination',{name:body.name,serverUrl:body.serverUrl,streamKey:body.streamKey});
+  }
+  if(path==='/studio/destinations/remove'){
+    if(typeof body.id!=='string')throw new Error('Invalid destination ID');
+    return invoke('remove_stream_destination',{id:body.id});
+  }
   if(path==='/studio/live-health')return invoke('live_health_status');
   if (path.startsWith('/studio/live-rehearsal/')) {
     if (typeof body.sessionId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(body.sessionId)) throw new Error('Invalid rehearsal session');
