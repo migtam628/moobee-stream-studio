@@ -4,10 +4,11 @@ type Destination={id:string;name:string;serverUrl:string|null;credentialAvailabl
 type Prepared={scene:string;sources:string[];audio:string[];config:Record<string,unknown>}
 type Snapshot={sessionId:string;mode:string;phase:string;mediaFrames:number;sentPackets:number;elapsedMs:number;error?:string|null}
 const confirmation='START REAL TEST STREAM'
-export default function LiveAcceptance({active,disabled,prepare,onBusy}:{active:boolean;disabled:boolean;prepare:()=>Promise<Prepared>;onBusy:(busy:boolean)=>void}){
+export default function LiveAcceptance({active,disabled,prepare,onBusy}:{active:boolean;disabled:boolean;prepare:(seconds:number)=>Promise<Prepared>;onBusy:(busy:boolean)=>void}){
   const [available,setAvailable]=useState(false)
   const [destinations,setDestinations]=useState<Destination[]>([])
   const [selected,setSelected]=useState<string[]>([])
+  const [duration,setDuration]=useState(4)
   const [review,setReview]=useState<{prepared:Prepared;targets:Destination[]}|null>(null)
   const [phrase,setPhrase]=useState('')
   const [session,setSession]=useState<string|null>(null)
@@ -58,7 +59,7 @@ export default function LiveAcceptance({active,disabled,prepare,onBusy}:{active:
     try{
       const targets=destinations.filter(d=>selected.includes(d.id)&&d.credentialAvailable&&d.serverUrl)
       if(targets.length!==selected.length)throw new Error('Refresh and reselect available destinations')
-      setReview({prepared:await prepare(),targets})
+      setReview({prepared:await prepare(duration),targets})
     }catch(e){setError((e as Error).message);setReview(null)}
     finally{setLoading(false)}
   }
@@ -92,6 +93,7 @@ export default function LiveAcceptance({active,disabled,prepare,onBusy}:{active:
     <p>Actual capture and network transmission. Use a private test destination. This is not production Go Live.</p>
     <button className="secondary-button" disabled={disabled||loading||busy.current} onClick={()=>void refresh()}>Load test destinations</button>
     {destinations.map(d=><label key={d.id} className="layer-switch"><span>{d.name}<small>{d.serverUrl??'Missing credential'}</small></span><input type="checkbox" checked={selected.includes(d.id)} disabled={disabled||loading||busy.current||!d.credentialAvailable||(!selected.includes(d.id)&&selected.length>=3)} onChange={e=>{setReview(null);setSelected(old=>e.target.checked?[...old,d.id]:old.filter(id=>id!==d.id))}}/></label>)}
+    <label>Test stream duration <select aria-label="Test stream duration" value={duration} disabled={disabled||loading||busy.current} onChange={e=>{setDuration(Number(e.target.value));setReview(null);setPhrase('')}}>{[4,15,30,60,300,900,1800].map(s=><option key={s} value={s}>{s>=60?s/60+' min':s+' sec'}</option>)}</select></label>
     <button className="secondary-button" disabled={disabled||loading||busy.current||selected.length===0} onClick={()=>void reviewSelection()}>Review real stream test</button>
     {review&&<div>
       <b>Confirm the exact capture and destinations</b>

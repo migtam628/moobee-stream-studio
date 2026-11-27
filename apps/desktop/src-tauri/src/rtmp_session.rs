@@ -60,6 +60,15 @@ impl<T:Read+Write> Publisher<T>{
     }
     pub(crate) fn transport_failure(&self)->Option<Failure>{self.transport_failure}
     pub(crate) fn authorized(&self)->bool{!self.failed&&matches!(self.state.phase(),Phase::Live(_))}
+    /// Send a protocol-level end command after draining all admitted media.
+    /// Successful local write is not a server acknowledgement.
+    pub(crate) fn close_stream(&mut self)->Result<()>{
+        if !self.authorized(){return Err("RTMP publish is not authorized".into())}
+        let Phase::Live(id)=self.state.phase()else{return Err("No RTMP stream".into())};
+        let result=self.command(0,&rtmp::delete_stream(id)?);
+        self.failed=true;
+        result
+    }
     pub(crate) fn send_media(&mut self,packet:&Packet)->Result<()>{
         let Phase::Live(id)=self.state.phase() else{return Err("RTMP publish is not authorized".into())};
         self.send_raw(&rtmp::media(packet,id,OUT_CHUNK)?)
@@ -271,6 +280,28 @@ mod tests{
         }}
         assert_eq!(commands,vec![0,0,5]);assert!(pong&&media);
         assert!(p.service_inbound().is_err());assert!(p.send_media(&crate::stream_mux::aac_sequence()).is_err());
+    }
+    #[test]fn orderly_close_sends_delete_stream_and_disables_media(){
+        let mut p=Publisher::establish(fixture(true),"live","rtmps://example.invalid/live","fixture-key",7,&[9;1528]).unwrap();
+        let before=p.io.output.len();
+        p.close_stream().unwrap();
+        assert_eq!(&p.io.output[before..],&rtmp::chunks(3,0,20,0,&rtmp::delete_stream(5).unwrap(),128).unwrap());
+        assert!(!p.authorized());assert!(p.close_stream().is_err());
+        assert!(p.send_media(&crate::stream_mux::aac_sequence()).is_err());
+    }
+    #[test]fn orderly_session_end_requires_empty_media_queue(){
+        use crate::live_session::{Session,Phase};
+        let p=Publisher::establish(fixture(true),"live","rtmps://example.invalid/live","fixture-key",7,&[9;1528]).unwrap();
+        let mut s=Session::new(p).unwrap();
+        s.submit(crate::stream_mux::avc_sequence(&[0x67,0x64,0,0x28],&[0x68,0xee]).unwrap()).unwrap();
+        s.submit(crate::stream_mux::avc_access_unit(&[&[0x65,1]],0,0,true).unwrap()).unwrap();
+        assert!(s.finish_drained().is_err());
+        assert_eq!(s.stats().queued_packets,2);
+        assert_eq!(s.tick(0).unwrap().sent,2);
+        s.finish_drained().unwrap();
+        assert_eq!(s.stats().phase,Phase::Stopped);
+        assert_eq!(s.stats().sent_packets,2);
+        assert!(s.finish_drained().is_err());
     }
     #[test]fn session_owns_authorization_queue_stats_and_stop(){
         use crate::live_session::{Session,Phase};
