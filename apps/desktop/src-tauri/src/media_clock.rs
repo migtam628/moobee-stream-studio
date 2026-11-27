@@ -36,6 +36,16 @@ mod tests {
         }
     }
     #[test]
+    fn two_hour_clock_boundaries_remain_exact(){
+        for fps in [10,15,30]{
+            let c=MediaClock::new(fps).unwrap();
+            let ticks=fps*7200;
+            assert_eq!(c.time(ticks),Duration::from_secs(7200));
+            assert_eq!(c.audio_range(ticks-1,48000).unwrap().end,345600000);
+            assert_eq!(c.audio_range(ticks,48000).unwrap().start,345600000);
+        }
+    }
+    #[test]
     fn invalid_rates_are_rejected() {
         assert!(MediaClock::new(0).is_err());
         assert!(MediaClock::new(121).is_err());
