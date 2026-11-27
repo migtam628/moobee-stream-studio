@@ -80,6 +80,8 @@ jobs:
           cargo test --lib program_continuous_avi::tests
           cargo test --lib live_flv::tests
           cargo test --lib live_lifecycle::tests
+          cargo test --lib live_health::tests
+          cargo test --lib live_reconnect::tests
           cargo test --lib program_mp4_sink::tests
           cargo test --lib program_mp4_storage::tests
           cargo test --lib program_camera::tests
