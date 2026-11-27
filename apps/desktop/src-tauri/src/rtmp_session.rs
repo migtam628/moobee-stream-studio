@@ -278,6 +278,27 @@ pub(crate) mod tls {
             assert!(report.orderly_close&&report.pong_received);
             println!("LOOPBACK_RECEIVER_REPORT {}",serde_json::to_string(&report).unwrap());
         }
+        #[test]fn loopback_tls_rejects_untrusted_root_and_wrong_hostname(){
+            use std::net::{TcpListener,Ipv4Addr};
+            for (trust,host) in [(false,"localhost"),(true,"wrong.invalid")]{
+                let (config,root)=certificates();
+                let listener=TcpListener::bind((Ipv4Addr::LOCALHOST,0)).unwrap();
+                let addr=listener.local_addr().unwrap();
+                let socket=TcpStream::connect_timeout(&addr,Duration::from_secs(3)).unwrap();
+                let server=std::thread::spawn(move||{
+                    let (mut socket,_)=listener.accept().unwrap();
+                    socket.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+                    socket.set_write_timeout(Some(Duration::from_secs(5))).unwrap();
+                    let mut conn=rustls::ServerConnection::new(config).unwrap();
+                    while conn.is_handshaking(){if conn.complete_io(&mut socket).is_err(){break}}
+                });
+                let mut builder=native_tls::TlsConnector::builder();
+                builder.min_protocol_version(Some(native_tls::Protocol::Tlsv12));
+                if trust{builder.add_root_certificate(root);}
+                let result=builder.build().unwrap().connect(host,DeadlineSocket{socket,deadline:Some(Instant::now()+Duration::from_secs(5))});
+                assert!(result.is_err());drop(result);server.join().unwrap();
+            }
+        }
         #[test]fn loopback_tls_independent_receiver_accepts_drained_synthetic_packets(){
             use crate::stream_mux::{avc_sequence,avc_access_unit,aac_sequence,aac_access_unit};
             loopback(|worker|{
