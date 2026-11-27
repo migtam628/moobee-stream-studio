@@ -382,10 +382,12 @@ try {
   await macPage.getByRole('button',{name:'Stop and save Program MP4',exact:true}).click();
   await macPage.getByRole('button',{name:'Saved MP4 · View result',exact:true}).waitFor();
   await macPage.getByLabel('Composed Program video test duration',{exact:true}).selectOption('4');
+  await macPage.getByRole('checkbox',{name:'Encoded test alerts',exact:true}).check();
   await macPage.getByRole('button',{name:'Capture diagnostics',exact:true}).click();
   await macPage.getByRole('button',{name:'Offline streaming packet FLV test',exact:true}).click();
   await macPage.waitForFunction(()=>!!window.__flvRequest);
   const flv=await macPage.evaluate(()=>window.__flvRequest);
+  if(flv.testAlerts!==true)throw new Error('Encoded alert opt-in was not forwarded');
   if(flv.seconds!==4||flv.displayIds.join()!=='1'||flv.sessionId!==undefined||!Array.isArray(flv.audioInputs))throw new Error('Offline FLV capture routing failed');
   await macPage.getByRole('button',{name:'Close capture diagnostics',exact:true}).click();
   await macPage.getByRole('button',{name:'Saved FLV · View result',exact:true}).waitFor();

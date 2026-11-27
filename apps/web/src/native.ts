@@ -334,6 +334,8 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
     const flv = path.endsWith('-packets')
     const mp4 = path.endsWith('-mp4')
     const compressed = mp4 || flv
+    if(body.testAlerts!==undefined&&typeof body.testAlerts!=='boolean')throw new Error('Invalid test alert setting');
+    if(body.testAlerts===true&&typeof body.seconds==='number'&&body.seconds>60)throw new Error('Encoded test alerts require one capture up to 60 seconds');
     if(flv && ((!macHost()&&!windowsHost()) || typeof body.seconds!=='number' || body.seconds>8 || body.webcam || body.sessionId!==undefined || body.microphone===true)) throw new Error('Offline packet test requires Mac or Windows, 2–8 seconds, named audio settings, and webcam inset off')
     const hasVideo = videoDeviceId !== undefined && videoDeviceId !== null
     if (hasVideo && (!compressed || (!macHost() && !windowsHost()) || !validVideoInputId(videoDeviceId) || body.webcam)) throw new Error('Select one native video input with webcam inset off')
@@ -375,7 +377,7 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
     if(captureActive)throw new Error('Another native capture is active')
     activeProgramSession=mp4 && typeof body.sessionId==='string'?body.sessionId:null
     try { return await captureWithPreviewReleased(flv ? 'capture_program_live_packet_test' : mp4 ? 'capture_continuous_program_mp4' : 'capture_continuous_program_avi', {
-      displayIds: ids, seconds: body.seconds, profile: body.profile, layout: validateSceneLayout(body.layout), transforms:transforms??null, overlay: body.overlay ?? null, ...(mp4 ? { sessionId: body.sessionId ?? null, bitrateKbps: body.bitrateKbps ?? null, webcam: body.webcam === true, microphone: body.microphone === true, micGain, ...(body.audioInputs !== undefined ? { audioInputs: body.audioInputs } : {}), ...(hasVideo ? { videoDeviceId } : {}) } : flv ? {bitrateKbps:body.bitrateKbps??null,audioInputs:body.audioInputs??[],videoDeviceId:videoDeviceId??null} : {})
+      displayIds: ids, seconds: body.seconds, profile: body.profile, layout: validateSceneLayout(body.layout), transforms:transforms??null, overlay: body.overlay ?? null, testAlerts:body.testAlerts===true, ...(mp4 ? { sessionId: body.sessionId ?? null, bitrateKbps: body.bitrateKbps ?? null, webcam: body.webcam === true, microphone: body.microphone === true, micGain, ...(body.audioInputs !== undefined ? { audioInputs: body.audioInputs } : {}), ...(hasVideo ? { videoDeviceId } : {}) } : flv ? {bitrateKbps:body.bitrateKbps??null,audioInputs:body.audioInputs??[],videoDeviceId:videoDeviceId??null} : {})
     }) } finally { activeProgramSession=null }
   }
   if (path === '/clips/capture-program-test-avi') {

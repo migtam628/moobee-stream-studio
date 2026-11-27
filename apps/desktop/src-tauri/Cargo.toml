@@ -26,6 +26,7 @@ base64 = "0.22"
 [target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
 xcap = "0.9.10"
 image = { version = "0.25", default-features = false, features = ["png", "gif", "jpeg"] }
+font8x8 = "0.3.1"
 
 native-tls = "0.2"
 url = "2"

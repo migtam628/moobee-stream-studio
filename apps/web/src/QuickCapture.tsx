@@ -40,6 +40,9 @@ type CapturedFile = {
   audioPeak?: number
   audioClippedSamples?: number
   overlayIncluded?: boolean
+  testAlertsEnabled?: boolean
+  testAlertEvents?: number
+  testAlertFrames?: number
   measuredSamplingFps?: number
   sourceFramesReceived?: number[]
   repeatedSourceSlots?: number[]
@@ -75,6 +78,9 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
   const [programBitrate, setProgramBitrate] = useState<'auto'|'1500'|'3000'|'6000'>('auto')
   const [continuousProfile, setContinuousProfile] = useState<'baseline' | '720p15' | '1080p30'>('baseline')
   const [programWebcam, setProgramWebcam] = useState(false)
+  const [testAlerts,setTestAlerts]=useState(false)
+  const [testAlertPending,setTestAlertPending]=useState(false)
+  const [testAlertNote,setTestAlertNote]=useState('')
   const [programMic, setProgramMic] = useState(false)
   const [micGain, setMicGain] = useState(1)
   const [audioDevices, setAudioDevices] = useState<AudioDevice[]>([])
@@ -297,6 +303,8 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
 
   async function captureProgramVideoTest(mode: 'sampled' | 'continuous' | 'mp4' | 'flv' = 'sampled') {
     if (!supportedDesktop || loading || busy || graphicLoading || (mode === 'mp4' && !supportedDesktop)) return
+    if (mode!=='sampled'&&testAlerts&&programAviDuration>60){setError('Encoded test alerts require one capture up to 60 seconds.');return}
+    setTestAlertNote('');
     if (mode === 'flv' && (!supportedDesktop || programWebcam || programAviDuration>8)) return
     if (mode !== 'mp4' && mode !== 'flv' && (programAviDuration > 8 || continuousProfile === '1080p30')) return
     const sessionId = mode === 'mp4' ? crypto.randomUUID() : null
@@ -326,7 +334,7 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
         : mode === 'flv' ? '/clips/capture-program-live-packets' : mode === 'continuous' ? '/clips/capture-program-continuous-avi' : '/clips/capture-program-test-avi', {
         displayIds, seconds: programAviDuration, layout, transforms,
         ...(videoDeviceId ? { videoDeviceId } : {}),
-        ...(mode !== 'sampled' ? { profile: continuousProfile, overlay: graphic ? { ...graphic, placement } : null } : {}),
+        ...(mode !== 'sampled' ? { profile: continuousProfile, overlay: graphic ? { ...graphic, placement } : null, testAlerts } : {}),
         ...(mode === 'mp4' ? { sessionId, ...(programBitrate === 'auto' ? {} : {bitrateKbps:Number(programBitrate)}), webcam: programWebcam, microphone: programMic, micGain, audioInputs: audioRows.map(row=>row.input) } : mode === 'flv' ? { ...(programBitrate === 'auto' ? {} : {bitrateKbps:Number(programBitrate)}),audioInputs:audioRows.map(row=>row.input) } : {})
       })
       setSaved(result)
@@ -439,6 +447,8 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
         {sources}
         <div className="dock-extra">
           <div className="dock-subtitle">Recording layers <small>Program tests</small></div>
+          <label className="layer-switch"><span>Encoded test alerts <small>Local test events · continuous AVI, MP4, FLV</small></span><input type="checkbox" aria-label="Encoded test alerts" checked={testAlerts} disabled={!supportedDesktop||busy||programAviDuration>60} onChange={e=>setTestAlerts(e.target.checked)}/></label>
+          {testAlerts&&<><button className="secondary-button" disabled={!busy||captureMode!=='program'||testAlertPending} onClick={async()=>{setTestAlertPending(true);setTestAlertNote('');try{await request('/alerts/test',{type:'follow',name:'MooBee QA',message:'Local encoded alert test'});setTestAlertNote('Test alert emitted; check saved frames to verify.') }catch{setTestAlertNote('Could not emit test alert.')}finally{setTestAlertPending(false)}}}>Emit local test alert</button>{testAlertNote&&<small role="status">{testAlertNote}</small>}</>}
           <label className="layer-switch"><Video size={15}/><span>Webcam inset <small>{mac ? 'Default camera · Mac MP4' : 'Mac MP4 only'}</small></span><input type="checkbox" aria-label="Webcam inset" checked={programWebcam} disabled={!mac || busy} onChange={e => setProgramWebcam(e.target.checked)}/></label>
           <label className="layer-switch"><ImageIcon size={15}/><span>PNG graphic <small>{graphicName || 'Static overlay · continuous recording'}</small></span><input type="file" aria-label="Import PNG overlay" accept="image/png" disabled={!supportedDesktop || busy || graphicLoading} onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; void loadProgramGraphic(file) }}/></label>
           {graphic && <div className="graphic-placement-editor">
@@ -644,6 +654,7 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
         {typeof saved.pausedMs === 'number' && saved.pausedMs > 0 && <p className="help-text">{(saved.pausedMs/1000).toFixed(2)}s paused input omitted from the nominal recording timeline.</p>}
         {saved.stoppedEarly && <p className="help-text" role="status">Program recording stopped early and finalized.</p>}
         {saved.overlayIncluded && <p className="help-text">Static graphic overlay included in output.</p>}
+         {saved.testAlertsEnabled&&<p className="help-text">Encoded test alerts: {saved.testAlertEvents??0} events · {saved.testAlertFrames??0} frames. Verify the actual video playback.</p>}
         {(saved.microphoneIncluded || (saved.audioInputCount??0)>0) && <p className="help-text" role="status">AAC requested · {saved.audioSamplesWritten ?? 0} PCM frames supplied at 48 kHz · peak {Math.round((saved.audioPeak ?? 0)*100)}% · {saved.audioClippedSamples ?? 0} clipped samples. {typeof saved.audioMissingSourceFrames==='number'&&saved.audioMissingSourceFrames>0 ? ` Windows source shortfall: ${saved.audioMissingSourceFrames} source frames filled with silence.` : ''} Confirm the AAC track and audible audio independently; capture timestamps and drift are not verified.</p>}
         {saved.webcamIncluded && <p className="help-text" role="status">Webcam inset included · {saved.webcamFrames ?? 0} received frames · {saved.webcamRepeatedSlots ?? 0} repeated slots. Verify the actual clip.</p>}
         {saved.sourceFramesReceived && <p className="help-text" role="status">

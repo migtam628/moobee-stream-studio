@@ -27,6 +27,8 @@ mod video_preview;
 #[cfg(target_os = "macos")]
 mod program_microphone;
 mod program_overlay;
+#[cfg(any(target_os="macos",target_os="windows"))]
+mod program_alert_layer;
 mod media_clock;
 mod audio_mix;
 mod program_audio;
