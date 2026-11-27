@@ -79,11 +79,11 @@ HRESULT configure(Encoder& e,UINT32 w,UINT32 h,UINT32 fps,UINT32 kbps){
 HRESULT copy_config(Encoder& e,uint8_t* config,DWORD capacity,DWORD* length){
     *length=0;ComPtr<IMFMediaType> type;
     HRESULT hr=e.transform->GetOutputCurrentType(0,&type);if(FAILED(hr))return hr;
-    DWORD size=0;hr=type->GetBlobSize(MF_MT_MPEG_SEQUENCE_HEADER,&size);
+    UINT32 size=0;hr=type->GetBlobSize(MF_MT_MPEG_SEQUENCE_HEADER,&size);
     if(hr==MF_E_ATTRIBUTENOTFOUND)return S_OK;
     if(FAILED(hr))return hr;
     if(size>capacity)return E_INVALIDARG;
-    return type->GetBlob(MF_MT_MPEG_SEQUENCE_HEADER,config,capacity,length);
+    UINT32 copied=0;hr=type->GetBlob(MF_MT_MPEG_SEQUENCE_HEADER,config,capacity,&copied);*length=copied;return hr;
 }
 HRESULT encode(Encoder& e,const uint8_t* nv12,size_t length,bool key,uint8_t* out,DWORD capacity,DWORD* size,uint8_t* config,DWORD config_cap,DWORD* config_len){
     if(e.failed||!nv12||!out||!config||length!=static_cast<size_t>(e.width)*e.height*3/2||e.index>=e.fps*3600)return E_INVALIDARG;
