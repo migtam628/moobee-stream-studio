@@ -6,9 +6,9 @@ spec = importlib.util.spec_from_file_location("soak", Path(__file__).with_name("
 soak = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(soak)
 
-def fixture(seconds=15, offset=0, drop=None):
+def fixture(seconds=15, offset=0, drop=None, fps=30):
     lines=[]
-    for index, cadence in [(0, 1/30), (1, 1024/48000)]:
+    for index, cadence in [(0, 1/fps), (1, 1024/48000)]:
         for i in range(round(seconds/cadence)):
             if drop and index==0 and i in drop:
                 continue
@@ -20,6 +20,12 @@ class SoakTests(unittest.TestCase):
     def test_nominal_timing(self):
         result=soak.evaluate(*soak.scan_packets(fixture(),0,1),15,30)
         self.assertTrue(result["packetTimingPass"])
+    def test_wrong_profile_cadence(self):
+        for fps in (24, 60):
+            result=soak.evaluate(*soak.scan_packets(fixture(fps=fps),0,1),15,30)
+            self.assertFalse(result["packetTimingPass"])
+            self.assertTrue(any("observed packet rate" in x for x in result["issues"]))
+        self.assertTrue(soak.evaluate(*soak.scan_packets(fixture(fps=30),0,1),15,30)["packetTimingPass"])
     def test_long_gap(self):
         result=soak.evaluate(*soak.scan_packets(fixture(drop=range(20,30)),0,1),15,30)
         self.assertFalse(result["packetTimingPass"])
