@@ -393,10 +393,10 @@ enum FrameSink {
 
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 impl FrameSink {
-    fn open(path: &std::path::Path, format: ProgramFormat, profile: EncodingProfile, microphone: bool, live_connector:Option<Box<dyn FnOnce()->Result<crate::live_publish_worker::Worker,String>>>) -> Result<Self, String> {
+    fn open(path: &std::path::Path, format: ProgramFormat, profile: EncodingProfile, microphone: bool, live_connector:Option<Box<dyn FnOnce()->Result<crate::live_fanout::Fanout,String>>>) -> Result<Self, String> {
         match format {
             ProgramFormat::Live => {
-                Ok(Self::Live(crate::live_program_sink::Sink::open(profile.width,profile.height,profile.fps,profile.bitrate_kbps,microphone,live_connector.ok_or("Missing authorized publisher connector")?)?))
+                Ok(Self::Live(crate::live_program_sink::Sink::open_fanout(profile.width,profile.height,profile.fps,profile.bitrate_kbps,microphone,live_connector.ok_or("Missing authorized publisher connector")?)?))
             }
             ProgramFormat::Flv => {
                 Ok(Self::Flv(crate::live_flv::NativeSink::open(path,profile.width,profile.height,profile.fps,profile.bitrate_kbps,microphone)?))
@@ -441,6 +441,7 @@ impl FrameSink {
             Self::Avi(_) => Err("AVI does not support the composed AAC diagnostic".into()),
         }
     }
+    fn destination_stats(&self)->Vec<crate::live_fanout::DestinationStats>{match self{Self::Live(w)=>w.destinations(),_=>vec![]}}
     fn live_stats(&self)->Option<crate::live_publish_worker::WorkerStats>{
         match self{
             Self::Live(w)=>w.stats().ok(),
@@ -734,7 +735,7 @@ fn capture_to_dir(
                 audio_clipped_samples=audio_clipped_samples.saturating_add(mixed.clipped);
             }
             written_frames += 1;
-            if let (Some(run),Some(stats))=(&lifecycle,writer.live_stats()){run.telemetry(written_frames,late_frames,stats);}
+            if let (Some(run),Some(stats))=(&lifecycle,writer.live_stats()){run.telemetry(written_frames,late_frames,stats);run.destination_telemetry(writer.destination_stats());}
             if finished_take {
                 transition=None;
                 transitions_completed+=1;
@@ -781,7 +782,7 @@ fn capture_to_dir(
     #[cfg(target_os = "windows")]
     drop(windows_mixer);
     if let Err(error) = recording {
-        if let (Some(run),Some(cause))=(&lifecycle,writer.retry_failure()){run.record_retry_failure(cause);}
+        if let Some(run)=&lifecycle{run.destination_telemetry(writer.destination_stats());if let Some(cause)=writer.retry_failure(){run.record_retry_failure(cause);}}
         drop(writer);
         if !live{let _ = fs::remove_file(&temporary);}
         return Err(error);
@@ -789,7 +790,7 @@ fn capture_to_dir(
     let finalizing = Instant::now();
     let result = writer.finish();
     let sent_bytes=writer.sent_bytes();
-    if let (Some(run),Some(stats))=(&lifecycle,writer.live_stats()){run.telemetry(written_frames,late_frames,stats);}
+    if let (Some(run),Some(stats))=(&lifecycle,writer.live_stats()){run.telemetry(written_frames,late_frames,stats);run.destination_telemetry(writer.destination_stats());}
     drop(writer);
     if let Err((error, still_writing)) = result {
         // A timed-out AVFoundation writer may still own the private file.
@@ -954,11 +955,60 @@ pub(crate) fn run_saved_destination_session(
     drop(lease);result
 }
 
+// All destinations must have explicit, independently confirmed previews.
+// Parallel negotiation occurs before any media is submitted. Keep leases
+// outside the connector until the entire capture and drain have finished.
+#[cfg(any(target_os="macos",target_os="windows"))]
+pub(crate) fn run_saved_multistream_session(
+    app:&tauri::AppHandle,run:crate::live_lifecycle::Run,
+    destinations:Vec<(String,String,String)>,explicitly_authorized:bool,
+    display_ids:Vec<usize>,video_device_id:Option<String>,seconds:u32,profile:&str,
+    bitrate_kbps:Option<u32>,layout:Option<&str>,
+    overlay:Option<crate::program_overlay::OverlayInput>,audio_inputs:Vec<crate::program_audio::AudioInput>,
+    transforms:Option<Vec<crate::source_transform::SourceTransform>>,
+)->Result<ContinuousProgramReport,String>{
+    if !run.native_active(){return Err("An active native streaming session is required".into())}
+    let result=(||{
+        if !explicitly_authorized||!(2..=crate::live_fanout::MAX_DESTINATIONS).contains(&destinations.len()){return Err("Confirm two or three destinations".into())}
+        let mut leases=Vec::new();let mut ids=std::collections::HashSet::new();
+        for (id,name,url) in destinations{
+            if !ids.insert(id.clone()){return Err("Duplicate destination".into())}
+            let lease=crate::stream_destinations::authorized_destination(app,&id,&name,&url,true)?;
+            leases.push((id,lease));
+        }
+        let credentials=leases.iter().map(|(id,l)|{let (url,key)=l.credentials();(id.clone(),url.to_owned(),key.to_owned())}).collect::<Vec<_>>();
+        let stop=run.stop_flag();let cancel=stop.clone();
+        let result=capture_live_fanout(display_ids,video_device_id,seconds,profile,bitrate_kbps,layout,overlay,audio_inputs,transforms,stop,move||{
+            if cancel.load(Ordering::Acquire){return Err("Multistream cancelled before connection".into())}
+            let publishers=std::thread::scope(|scope|{
+                let handles=credentials.into_iter().map(|(id,url,key)|scope.spawn(move||{
+                    crate::rtmp_session::tls::connect_tls(&url,&key).map(|p|(id,p))
+                })).collect::<Vec<_>>();
+                let mut publishers=Vec::new();
+                for h in handles{
+                    publishers.push(h.join().map_err(|_|"Destination negotiation worker stopped")??);
+                }
+                Ok::<_,String>(publishers)
+            })?;
+            if cancel.load(Ordering::Acquire){return Err("Multistream cancelled during connection".into())}
+            let mut workers=Vec::new();
+            for (id,publisher) in publishers{
+                let session=crate::live_session::Session::new(publisher)?;
+                let worker=crate::live_publish_worker::Worker::start_with_poll(session,|s|s.poll_tls_inbound())?;
+                workers.push((id,worker));
+            }
+            crate::live_fanout::Fanout::new(workers)
+        },Some(run.clone()));
+        drop(leases);result
+    })();
+    run.finish(result.is_ok());result
+}
+
 // The connector is injected by an explicitly authorized native caller.
 // Neither the browser nor Tauri command dispatcher can invoke this path yet.
 #[cfg(any(target_os="macos",target_os="windows"))]
 struct LiveOutput{
-    connect:Box<dyn FnOnce()->Result<crate::live_publish_worker::Worker,String>>,
+    connect:Box<dyn FnOnce()->Result<crate::live_fanout::Fanout,String>>,
     stop:std::sync::Arc<std::sync::atomic::AtomicBool>,
     lifecycle:Option<crate::live_lifecycle::Run>,
 }
@@ -983,6 +1033,19 @@ fn capture_authorized_live_program_with_lifecycle(
     transforms:Option<Vec<crate::source_transform::SourceTransform>>,
     stop:std::sync::Arc<std::sync::atomic::AtomicBool>,
     connect:impl FnOnce()->Result<crate::live_publish_worker::Worker,String>+'static,
+    lifecycle:Option<crate::live_lifecycle::Run>,
+)->Result<ContinuousProgramReport,String>{
+    capture_live_fanout(display_ids,video_device_id,seconds,profile,bitrate_kbps,layout,overlay,audio_inputs,transforms,stop,move||crate::live_fanout::Fanout::single(connect()?),lifecycle)
+}
+
+#[cfg(any(target_os="macos",target_os="windows"))]
+fn capture_live_fanout(
+    display_ids:Vec<usize>,video_device_id:Option<String>,seconds:u32,profile:&str,
+    bitrate_kbps:Option<u32>,layout:Option<&str>,
+    overlay:Option<crate::program_overlay::OverlayInput>,audio_inputs:Vec<crate::program_audio::AudioInput>,
+    transforms:Option<Vec<crate::source_transform::SourceTransform>>,
+    stop:std::sync::Arc<std::sync::atomic::AtomicBool>,
+    connect:impl FnOnce()->Result<crate::live_fanout::Fanout,String>+'static,
     lifecycle:Option<crate::live_lifecycle::Run>,
 )->Result<ContinuousProgramReport,String>{
     if !(2..=60).contains(&seconds){return Err("Live integration test supports 2–60 seconds".into())}
