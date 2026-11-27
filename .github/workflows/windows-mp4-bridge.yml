@@ -44,6 +44,7 @@ jobs:
           cargo test --lib live_health::tests
           cargo test --lib live_reconnect::tests
           cargo test --lib live_rejoin::tests
+          cargo test --lib live_soak::tests
           cargo test --lib program_alert_layer::tests
           cargo test --lib live_acceptance::tests
           cargo check --features native-live-acceptance

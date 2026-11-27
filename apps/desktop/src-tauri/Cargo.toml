@@ -32,6 +32,7 @@ xcap = "0.9.10"
 image = { version = "0.25", default-features = false, features = ["png", "gif", "jpeg"] }
 font8x8 = "0.3.1"
 
+sysinfo = "0.33"
 native-tls = "0.2"
 url = "2"
 getrandom = "0.3"

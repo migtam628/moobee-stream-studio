@@ -42,6 +42,7 @@ mod live_session;
 mod live_lifecycle;
 mod live_acceptance;
 mod live_health;
+mod live_soak;
 mod live_reconnect;
 #[cfg(any(target_os="macos",target_os="windows"))]
 mod stream_destinations;

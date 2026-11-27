@@ -425,10 +425,15 @@ try {
   await macPage.getByText(/Rehearsal: stopped/).waitFor();
   await macPage.getByRole('button',{name:'Analytics',exact:true}).click();
   await macPage.getByRole('region',{name:'Native streaming health'}).getByText('Offline rehearsal — no network measurements',{exact:true}).waitFor();
-  await macPage.evaluate(()=>{window.__healthFixture={mode:'native',phase:'streaming',elapsedMs:2000,sentPackets:90,sentPayloadBytes:750000,mediaFrames:60,health:{health:'normal',payloadKbps:3000,outputFpsTenths:300,queueBytes:0,queuePackets:0,lateFramesInWindow:0,sampleAgeMs:25}};});
+  await macPage.evaluate(()=>{window.__healthFixture={mode:'native',phase:'streaming',elapsedMs:2000,sentPackets:90,sentPayloadBytes:750000,mediaFrames:60,resources:{samples:2,sampleElapsedMs:1900,residentBytes:134217728,baselineResidentBytes:100663296,peakResidentBytes:134217728,cpuTenths:735,peakCpuTenths:735},timing:{videoPackets:60,audioPackets:90,videoEndMs:2000,audioEndMs:1920,encodedVideoLeadMs:80,maxAbsEncodedGapMs:80,pendingAudioFrames:3840,pcmFramesSupplied:96000,windowsMissingSourceFrames:null,maxEncodeMs:14},health:{health:'normal',payloadKbps:3000,outputFpsTenths:300,queueBytes:0,queuePackets:0,lateFramesInWindow:0,sampleAgeMs:25}};});
   const health=macPage.getByRole('region',{name:'Native streaming health'});
   await health.getByText('3000 kbps',{exact:true}).waitFor();
   await health.getByText('Sender normal',{exact:true}).waitFor();
+  await health.getByText('Process resources',{exact:true}).waitFor();
+  await health.getByText('Encoded A/V timing',{exact:true}).waitFor();
+  await health.getByText('73.5%',{exact:true}).first().waitFor();
+  await health.getByText('128.0 MiB',{exact:true}).first().waitFor();
+  await health.getByText('80 ms',{exact:true}).first().waitFor();
   await macPage.getByRole('button',{name:'Multistream',exact:true}).click();
   const dest=macPage.getByRole('region',{name:'Secure stream destinations'});
   await dest.getByText('No saved destinations.',{exact:true}).waitFor();

@@ -40,6 +40,7 @@ pub(crate) async fn start_live_acceptance(app:tauri::AppHandle,state:tauri::Stat
         let run=state.inner().start(request.session_id.clone(),Mode::Native)?;
         let guard=run.clone();
         let result=tauri::async_runtime::spawn_blocking(move||{
+            let _sampler=crate::live_soak::Sampler::start(run.clone());
             let result=std::panic::catch_unwind(std::panic::AssertUnwindSafe(||{
                 let Request{destinations,display_ids,video_device_id,seconds,profile,bitrate_kbps,layout,overlay,audio_inputs,transforms,..}=request;
                 if destinations.len()==1{
