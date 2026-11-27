@@ -122,21 +122,18 @@ pub(crate) fn authorized_destination(app:&tauri::AppHandle,id:&str,explicitly_au
     let r=load(&OsVault,id)?.ok_or("Destination credential missing")?;
     Ok((r.server_url,r.stream_key))
 }
-#[tauri::command]
 pub(crate) async fn list_stream_destinations(app:tauri::AppHandle)->Result<Vec<View>,String>{
     tauri::async_runtime::spawn_blocking(move||{
         let _guard=LOCK.lock().map_err(|_|"Destination store unavailable")?;
         views(&index(&app)?,&OsVault)
     }).await.map_err(|_|"Destination store worker stopped")?
 }
-#[tauri::command]
 pub(crate) async fn add_stream_destination(app:tauri::AppHandle,name:String,server_url:String,stream_key:String)->Result<View,String>{
     tauri::async_runtime::spawn_blocking(move||{
         let _guard=LOCK.lock().map_err(|_|"Destination store unavailable")?;
         create(&index(&app)?,&OsVault,name,server_url,stream_key)
     }).await.map_err(|_|"Destination store worker stopped")?
 }
-#[tauri::command]
 pub(crate) async fn remove_stream_destination(app:tauri::AppHandle,id:String)->Result<(),String>{
     tauri::async_runtime::spawn_blocking(move||{
         let _guard=LOCK.lock().map_err(|_|"Destination store unavailable")?;
