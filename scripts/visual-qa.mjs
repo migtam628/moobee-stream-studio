@@ -177,6 +177,7 @@ try {
         window.__rehearsal={sessionId:args.sessionId,mode:'rehearsal',phase:'streaming',elapsedMs:100,mediaFrames:0,sentPackets:0,sentPayloadBytes:0,pendingPackets:0,pendingBytes:0,lateFrames:0,bitrateKbps:0};
         return null;
       }
+      if(cmd==='live_health_status')return window.__healthFixture??window.__rehearsal??null;
       if(cmd==='live_session_status')return window.__rehearsal?.sessionId===args.sessionId?window.__rehearsal:null;
       if(cmd==='stop_live_rehearsal'){if(window.__rehearsal?.sessionId!==args.sessionId)return false;window.__rehearsal.phase='stopped';return true;}
       if (cmd === 'capture_program_live_packet_test') {window.__flvRequest=args;return {...clip,format:'flv',path:'/test/clip.flv',webcamIncluded:false};}
@@ -386,6 +387,12 @@ try {
   if(!(await macPage.getByRole('button',{name:'Go Live (unavailable)',exact:true}).isDisabled()))throw new Error('Actual Go Live must remain disabled');
   await macPage.getByRole('button',{name:'Stop rehearsal',exact:true}).click();
   await macPage.getByText(/Rehearsal: stopped/).waitFor();
+  await macPage.getByRole('button',{name:'Analytics',exact:true}).click();
+  await macPage.getByRole('region',{name:'Native streaming health'}).getByText('Offline rehearsal — no network measurements',{exact:true}).waitFor();
+  await macPage.evaluate(()=>{window.__healthFixture={mode:'native',phase:'streaming',elapsedMs:2000,sentPackets:90,sentPayloadBytes:750000,mediaFrames:60,health:{health:'normal',payloadKbps:3000,outputFpsTenths:300,queueBytes:0,queuePackets:0,lateFramesInWindow:0,sampleAgeMs:25}};});
+  const health=macPage.getByRole('region',{name:'Native streaming health'});
+  await health.getByText('3000 kbps',{exact:true}).waitFor();
+  await health.getByText('Sender normal',{exact:true}).waitFor();
   await macPage.close();
   const winPage = await browser.newPage({viewport:{width:1440,height:900},userAgent:'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36'});
   winPage.on('pageerror',error=>errors.push(error.message));
