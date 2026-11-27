@@ -931,6 +931,29 @@ pub(crate) fn run_authorized_rtmps_session(
     run.finish(result.is_ok());result
 }
 
+// Secure vault handoff is native-only. Hold the destination lease across
+// every recovery epoch and drop it after terminal lifecycle status. No key
+// is returned to the webview or accepted via a live IPC command.
+#[cfg(any(target_os="macos",target_os="windows"))]
+pub(crate) fn run_saved_destination_session(
+    app:&tauri::AppHandle,run:crate::live_lifecycle::Run,
+    destination_id:&str,expected_name:&str,expected_url:&str,explicitly_authorized:bool,
+    display_ids:Vec<usize>,video_device_id:Option<String>,seconds:u32,profile:&str,
+    bitrate_kbps:Option<u32>,layout:Option<&str>,
+    overlay:Option<crate::program_overlay::OverlayInput>,audio_inputs:Vec<crate::program_audio::AudioInput>,
+    transforms:Option<Vec<crate::source_transform::SourceTransform>>,
+)->Result<ContinuousProgramReport,String>{
+    if !run.native_active(){return Err("An active native streaming session is required".into())}
+    let lease=match crate::stream_destinations::authorized_destination(app,destination_id,expected_name,expected_url,explicitly_authorized){
+        Ok(lease)=>lease,Err(error)=>{run.finish(false);return Err(error)}
+    };
+    if !run.native_active(){run.finish(false);return Err("Streaming session cancelled before connection".into())}
+    let (url,key)=lease.credentials();
+    let result=run_authorized_rtmps_session(run,display_ids,video_device_id,seconds,profile,bitrate_kbps,layout,
+        overlay,audio_inputs,transforms,url.to_owned(),key.to_owned(),explicitly_authorized);
+    drop(lease);result
+}
+
 // The connector is injected by an explicitly authorized native caller.
 // Neither the browser nor Tauri command dispatcher can invoke this path yet.
 #[cfg(any(target_os="macos",target_os="windows"))]
