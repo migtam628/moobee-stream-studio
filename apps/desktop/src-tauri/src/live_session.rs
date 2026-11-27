@@ -54,8 +54,18 @@ impl<T:Read+Write> Session<T>{
         }
         Ok(())
     }
-    /// Explicit terminal stop: discard queued media and close the owned
-    /// transport. Graceful RTMP unpublish commands are future work.
+    /// Successful drain is distinct from emergency stop. End the assigned
+    /// RTMP stream only after every queued packet has been sent.
+    pub(crate) fn finish_drained(&mut self)->Result<(),String>{
+        self.require_active()?;
+        if self.queue.stats().queued_packets!=0{return Err("Cannot close with queued media".into())}
+        if self.publisher.as_mut().unwrap().close_stream().is_err(){
+            self.fail_transport();return Err("RTMP end command could not be sent".into())
+        }
+        self.stop();Ok(())
+    }
+    /// Emergency terminal stop: discard queued media and close transport.
+    /// No additional synchronous network write on abort or Drop.
     pub(crate) fn stop(&mut self){
         if matches!(self.phase,Phase::Stopped|Phase::Failed){return}
         self.pacer.stop(&mut self.queue);
