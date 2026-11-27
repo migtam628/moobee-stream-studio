@@ -7,6 +7,7 @@ const SERVICE:&str="com.moobee.streamstudio.destination.v1";
 const MAX_DESTINATIONS:usize=8;
 const MAX_RECORD:usize=2048;
 static LOCK:Mutex<()>=Mutex::new(());
+static ACTIVE:Mutex<Vec<String>>=Mutex::new(Vec::new());
 #[derive(Serialize,Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Record{version:u8,name:String,server_url:String,stream_key:String}
@@ -111,16 +112,33 @@ fn create(dir:&Path,vault:&impl Vault,name:String,server_url:String,stream_key:S
 }
 fn remove(dir:&Path,vault:&impl Vault,id:&str)->Result<(),String>{
     if !valid_id(id)||!ids(dir)?.iter().any(|v|v==id){return Err("Unknown destination".into())}
+    if ACTIVE.lock().map_err(|_|"Destination lease state unavailable")?.iter().any(|v|v==id){return Err("Stop the active publishing session before removing its destination".into())}
     vault.remove(id)?;
     fs::remove_file(dir.join(id)).map_err(|_|"Credential deleted; could not remove destination index".into())
 }
-/// Native-only lookup, deliberately never registered as IPC or HTTP.
-pub(crate) fn authorized_destination(app:&tauri::AppHandle,id:&str,explicitly_authorized:bool)->Result<(String,String),String>{
+/// Native-only credential lease. No Debug/Serialize implementation. A
+/// process-local lease prevents removal or duplicate use while an authorized
+/// publisher is active. The exact destination preview must be reconfirmed.
+pub(crate) struct Lease{id:String,record:Record}
+impl Lease{
+    pub(crate) fn credentials(&self)->(&str,&str){(&self.record.server_url,&self.record.stream_key)}
+}
+impl Drop for Lease{
+    fn drop(&mut self){if let Ok(mut active)=ACTIVE.lock(){active.retain(|v|v!=&self.id);}}
+}
+fn lease(dir:&Path,vault:&impl Vault,id:&str,expected_name:&str,expected_url:&str,explicitly_authorized:bool)->Result<Lease,String>{
     if !explicitly_authorized{return Err("Explicit destination authorization required".into())}
+    if !valid_id(id)||!ids(dir)?.iter().any(|v|v==id){return Err("Unknown destination".into())}
+    let record=load(vault,id)?.ok_or("Destination credential missing")?;
+    if record.name!=expected_name||record.server_url!=expected_url{return Err("Destination changed; refresh and reconfirm".into())}
+    let mut active=ACTIVE.lock().map_err(|_|"Destination lease state unavailable")?;
+    if active.iter().any(|v|v==id){return Err("Destination is already in use".into())}
+    active.push(id.to_owned());
+    Ok(Lease{id:id.to_owned(),record})
+}
+pub(crate) fn authorized_destination(app:&tauri::AppHandle,id:&str,expected_name:&str,expected_url:&str,explicitly_authorized:bool)->Result<Lease,String>{
     let _guard=LOCK.lock().map_err(|_|"Destination store unavailable")?;
-    if !valid_id(id)||!ids(&index(app)?)?.iter().any(|v|v==id){return Err("Unknown destination".into())}
-    let r=load(&OsVault,id)?.ok_or("Destination credential missing")?;
-    Ok((r.server_url,r.stream_key))
+    lease(&index(app)?,&OsVault,id,expected_name,expected_url,explicitly_authorized)
 }
 pub(crate) async fn list_stream_destinations(app:tauri::AppHandle)->Result<Vec<View>,String>{
     tauri::async_runtime::spawn_blocking(move||{
@@ -174,6 +192,19 @@ mod tests{
         assert!(removed.is_ok());
         assert_eq!(read.unwrap().unwrap().stream_key,"fixture-not-a-real-key");
         assert!(vault.get(&v.id).unwrap().is_none());
+    }
+    #[test]fn explicit_preview_confirmation_and_lease_block_removal(){
+        let dir=Temp(std::env::temp_dir().join(uuid::Uuid::new_v4().to_string()));let vault=Memory::default();
+        let url="rtmps://example.invalid/live";
+        let v=create(&dir.0,&vault,"Test".into(),url.into(),"fixture-secret".into()).unwrap();
+        assert!(lease(&dir.0,&vault,&v.id,"Test",url,false).is_err());
+        assert!(lease(&dir.0,&vault,&v.id,"Other",url,true).is_err());
+        assert!(lease(&dir.0,&vault,&v.id,"Test","rtmps://other.invalid/live",true).is_err());
+        let l=lease(&dir.0,&vault,&v.id,"Test",url,true).unwrap();
+        assert_eq!(l.credentials(),(url,"fixture-secret"));
+        assert!(lease(&dir.0,&vault,&v.id,"Test",url,true).is_err());
+        assert!(remove(&dir.0,&vault,&v.id).is_err());
+        drop(l);remove(&dir.0,&vault,&v.id).unwrap();
     }
     #[test]fn rejects_invalid_config_without_writing(){
         let dir=Temp(std::env::temp_dir().join(uuid::Uuid::new_v4().to_string()));let vault=Memory::default();
