@@ -64,6 +64,53 @@ mod tests{
         let err=p.tick(&mut q,0,|_|Err("sensitive transport detail".into())).unwrap_err();assert!(!err.contains("sensitive"));assert!(q.peek().is_none());
         let mut q=queue();let mut p=Pacer::default();p.tick(&mut q,100,|_|Ok(())).unwrap();assert!(p.tick(&mut q,99,|_|Ok(())).is_err());
     }
+    #[test]
+    fn accelerated_two_hour_av_timeline_remains_bounded(){
+        use crate::{media_clock::MediaClock,stream_mux::{aac_sequence,aac_access_unit}};
+        // Synthetic encoded packet framing only, not decoder or real-time IO.
+        let fps=30u32;let seconds=crate::live_acceptance::MAX_LIVE_SECONDS;
+        assert_eq!(seconds,7200);
+        let clock=MediaClock::new(fps).unwrap();
+        let mut q=MediaQueue::default();let mut p=Pacer::default();
+        q.push(avc_sequence(&[0x67,0x64,0,0x28],&[0x68,0xee]).unwrap()).unwrap();
+        q.push(aac_sequence()).unwrap();
+        let mut next_audio=0u64;let mut audio=0u64;let mut video=0u64;
+        let mut last_video=0u32;let mut last_audio=0u32;
+        let mut bytes=0u64;
+        for frame in 0..fps*seconds{
+            let time=clock.time(frame).as_millis() as u32;
+            let idr=frame%(fps*2)==0;
+            let nal=if idr{[0x65,1]}else{[0x41,2]};
+            q.push(avc_access_unit(&[&nal],time,0,idr).unwrap()).unwrap();
+            let range=clock.audio_range(frame,48000).unwrap();
+            // Model complete AAC blocks produced during this Program tick.
+            while next_audio+1024<=range.end{
+                q.push(aac_access_unit(&[1,2],(next_audio*1000/48000)as u32).unwrap()).unwrap();
+                next_audio+=1024;
+            }
+            assert!(q.stats().queued_packets<=5);
+            let elapsed=clock.time(frame+1).as_millis() as u64;
+            let t=p.tick(&mut q,elapsed,|packet|{
+                bytes+=packet.payload.len() as u64;
+                if packet.payload[1]==1{
+                    if packet.kind==9{assert!(packet.timestamp_ms>=last_video);last_video=packet.timestamp_ms;video+=1;}
+                    else{assert!(packet.timestamp_ms>=last_audio);last_audio=packet.timestamp_ms;audio+=1;}
+                }
+                Ok(())
+            }).unwrap();
+            assert!(t.sent<=8);
+            assert_eq!(q.stats().queued_packets,0);
+        }
+        assert_eq!(video,216000);
+        assert_eq!(audio,337500);
+        assert_eq!(next_audio,345600000);
+        assert_eq!(clock.time(fps*seconds).as_secs(),7200);
+        assert_eq!(p.stats(),(video+audio+2,bytes));
+        assert_eq!(q.stats().accepted_packets,p.stats().0);
+        assert_eq!(q.stats().dequeued_packets,p.stats().0);
+        assert!(last_video>7199900&&last_audio>7199900);
+        p.stop(&mut q);assert_eq!(q.stats().queued_bytes,0);
+    }
     #[test]fn explicit_stop_suppresses_delivery(){
         let mut q=queue();let mut p=Pacer::default();p.stop(&mut q);
         assert_eq!(p.tick(&mut q,0,|_|panic!("stopped")).unwrap().state,State::Stopped);assert_eq!(q.stats().queued_bytes,0);

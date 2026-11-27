@@ -40,7 +40,7 @@ impl Encoder{
     }
     fn push_inner(&mut self,pcm:&[f32])->Result<Vec<Packet>,String>{
         if pcm.is_empty()||pcm.len()%2!=0||pcm.len()>9600||pcm.iter().any(|v|!v.is_finite()||v.abs()>1.){return Err("Invalid bounded stereo PCM block".into())}
-        if self.submitted+self.pcm.len() as u64/2+pcm.len() as u64/2>48000*3600{return Err("AAC publishing epoch exceeds one hour".into())}
+        if self.submitted+self.pcm.len() as u64/2+pcm.len() as u64/2>48000*u64::from(crate::live_acceptance::MAX_LIVE_SECONDS){return Err("AAC publishing epoch exceeds two hours".into())}
         self.pcm.extend_from_slice(pcm);
         let mut out=Vec::new();
         while self.pcm.len()>=FRAMES*2{

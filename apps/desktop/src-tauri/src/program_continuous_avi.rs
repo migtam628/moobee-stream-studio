@@ -915,7 +915,7 @@ pub(crate) fn run_authorized_rtmps_session(
 )->Result<ContinuousProgramReport,String>{
     let result=(||{
         if !explicitly_authorized{return Err("Explicit destination authorization is required".into())}
-        if !(2..=crate::live_acceptance::MAX_LIVE_SECONDS).contains(&seconds){return Err("Live integration test supports 2–1800 seconds".into())}
+        if !(2..=crate::live_acceptance::MAX_LIVE_SECONDS).contains(&seconds){return Err("Live integration test supports 2–7200 seconds".into())}
         crate::rtmp_session::tls::validate_destination(&server_url,&stream_key)?;
         let started=Instant::now();
         let stop=run.stop_flag();
@@ -1060,7 +1060,7 @@ fn capture_live_fanout(
     connect:impl FnOnce()->Result<crate::live_fanout::Fanout,String>+'static,
     lifecycle:Option<crate::live_lifecycle::Run>,
 )->Result<ContinuousProgramReport,String>{
-    if !(2..=crate::live_acceptance::MAX_LIVE_SECONDS).contains(&seconds){return Err("Live integration test supports 2–1800 seconds".into())}
+    if !(2..=crate::live_acceptance::MAX_LIVE_SECONDS).contains(&seconds){return Err("Live integration test supports 2–7200 seconds".into())}
     let mut p=encoding_profile(profile)?;
     p.bitrate_kbps=validate_bitrate(bitrate_kbps,p.bitrate_kbps)?;
     if let Some(id)=video_device_id.as_ref(){
@@ -1223,7 +1223,7 @@ mod tests {
     #[test]
     fn invalid_or_cancelled_live_request_never_connects(){
         use std::sync::{Arc,atomic::AtomicBool};
-        for (seconds,stop) in [(0,false),(1801,false),(2,true)]{
+        for (seconds,stop) in [(0,false),(7201,false),(2,true)]{
             let result=super::capture_authorized_live_program(vec![0],None,seconds,"baseline",None,None,None,vec![],None,
                 Arc::new(AtomicBool::new(stop)),||panic!("Invalid live request opened a destination"));
             assert!(result.is_err());

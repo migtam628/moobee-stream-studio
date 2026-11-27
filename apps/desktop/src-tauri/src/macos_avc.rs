@@ -39,7 +39,7 @@ impl Encoder{
         result
     }
     fn encode_inner(&mut self,rgba:&[u8],force_key:bool)->Result<Vec<Packet>,String>{
-        if rgba.len()!=self.width as usize*self.height as usize*4||self.index>=self.fps*3600{return Err("Invalid AVC input frame or session limit".into())}
+        if rgba.len()!=self.width as usize*self.height as usize*4||self.index>=self.fps*crate::live_acceptance::MAX_LIVE_SECONDS{return Err("Invalid AVC input frame or session limit".into())}
         let mut error=[0;512];let mut sps=[0u8;CONFIG];let mut pps=[0u8;CONFIG];let(mut sn,mut pn,mut key)=(0usize,0usize,0i32);
         let n=unsafe{moobee_avc_encode(self.handle,rgba.as_ptr(),rgba.len(),i32::from(force_key),self.output.as_mut_ptr(),self.output.len(),sps.as_mut_ptr(),pps.as_mut_ptr(),CONFIG,&mut sn,&mut pn,&mut key,error.as_mut_ptr(),512)};
         if n<=0{return Err(message(&error))}

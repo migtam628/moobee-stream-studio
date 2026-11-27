@@ -303,7 +303,7 @@ export default function QuickCapture({ openClips, scenes, sources, otherAudio, s
   }
 
   async function prepareLiveAcceptance(seconds:number){
-    if(!supportedDesktop||busy||loading||graphicLoading||audioSelectionError||programWebcam||!Number.isInteger(seconds)||seconds<2||seconds>1800)throw new Error('Select a valid 2–1800 second native Program capture with webcam inset off.')
+    if(!supportedDesktop||busy||loading||graphicLoading||audioSelectionError||programWebcam||!Number.isInteger(seconds)||seconds<2||seconds>7200)throw new Error('Select a valid 2–7200 second native Program capture with webcam inset off.')
     const collection=await request<unknown>('/studio/collection')
     const state=collection as MinimalSceneCollection
     const videoDeviceId=programVideoInput(collection)
