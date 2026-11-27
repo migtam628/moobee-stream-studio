@@ -229,6 +229,89 @@ pub(crate) mod tls {
     #[cfg(test)]
     mod tests{
         use super::*;
+        // Test-only trust anchor and loopback socket. Never installed into
+        // system trust, never passed into a production connector.
+        fn certificates()->(native_tls::Identity,native_tls::Certificate){
+            use rcgen::{CertificateParams,KeyPair,IsCa,BasicConstraints,ExtendedKeyUsagePurpose};
+            let mut ca=CertificateParams::new(Vec::<String>::new()).unwrap();
+            ca.is_ca=IsCa::Ca(BasicConstraints::Unconstrained);
+            let ca_key=KeyPair::generate().unwrap();let ca=ca.self_signed(&ca_key).unwrap();
+            let mut leaf=CertificateParams::new(vec!["localhost".to_owned()]).unwrap();
+            leaf.extended_key_usages=vec![ExtendedKeyUsagePurpose::ServerAuth];
+            let key=KeyPair::generate().unwrap();let leaf=leaf.signed_by(&key,&ca,&ca_key).unwrap();
+            let chain=format!("{}{}",leaf.pem(),ca.pem());
+            (native_tls::Identity::from_pkcs8(chain.as_bytes(),key.serialize_pem().as_bytes()).unwrap(),
+             native_tls::Certificate::from_der(ca.der().as_ref()).unwrap())
+        }
+        fn loopback(f:impl FnOnce(&mut crate::live_publish_worker::Worker)->(u64,u64,u64,u64)){
+            use std::net::{TcpListener,Ipv4Addr};
+            use crate::{live_session::Session,live_publish_worker::Worker};
+            let (identity,root)=certificates();
+            let acceptor=native_tls::TlsAcceptor::builder(identity).min_protocol_version(Some(native_tls::Protocol::Tlsv12)).build().unwrap();
+            let listener=TcpListener::bind((Ipv4Addr::LOCALHOST,0)).unwrap();
+            let addr=listener.local_addr().unwrap();
+            let key="loopback-fixture-only";
+            let server=std::thread::spawn(move||{
+                let (socket,peer)=listener.accept().unwrap();assert!(peer.ip().is_loopback());
+                socket.set_read_timeout(Some(Duration::from_secs(5))).unwrap();socket.set_write_timeout(Some(Duration::from_secs(5))).unwrap();
+                let mut stream=acceptor.accept(socket).unwrap();
+                crate::rtmps_test_receiver::serve(&mut stream,key)
+            });
+            let socket=TcpStream::connect_timeout(&addr,Duration::from_secs(3)).unwrap();
+            socket.set_nodelay(true).unwrap();
+            let mut builder=native_tls::TlsConnector::builder();
+            builder.min_protocol_version(Some(native_tls::Protocol::Tlsv12)).add_root_certificate(root);
+            let tls=builder.build().unwrap().connect("localhost",DeadlineSocket{socket,deadline:Some(Instant::now()+NEGOTIATION_TIMEOUT)}).unwrap();
+            let mut random=[0u8;1528];getrandom::fill(&mut random).unwrap();
+            let mut publisher=Publisher::establish(tls,"live","rtmps://localhost/live",key,0,&random).unwrap();
+            publisher.io.get_mut().deadline=None;
+            let mut worker=Worker::start_with_poll(Session::new(publisher).unwrap(),|s|s.poll_tls_inbound()).unwrap();
+            let (packets,bytes,video,audio)=f(&mut worker);
+            worker.request_drain();
+            let deadline=Instant::now()+Duration::from_secs(5);
+            while !worker.reap().unwrap(){assert!(Instant::now()<deadline);std::thread::sleep(Duration::from_millis(10));}
+            let stats=worker.stats().unwrap();assert_eq!(stats.session.phase,crate::live_session::Phase::Stopped);
+            let report=server.join().unwrap().unwrap();
+            assert_eq!(report.media_packets,packets);assert_eq!(report.payload_bytes,bytes);
+            assert_eq!(report.video_frames,video);assert_eq!(report.audio_blocks,audio);
+            assert_eq!(stats.session.sent_packets,packets);assert_eq!(stats.session.sent_payload_bytes,bytes);
+            assert!(report.orderly_close&&report.pong_received);
+            println!("LOOPBACK_RECEIVER_REPORT {}",serde_json::to_string(&report).unwrap());
+        }
+        #[test]fn loopback_tls_independent_receiver_accepts_drained_synthetic_packets(){
+            use crate::stream_mux::{avc_sequence,avc_access_unit,aac_sequence,aac_access_unit};
+            loopback(|worker|{
+                let mut nal=vec![0x65];nal.extend([0x42;300]);
+                let batch=vec![avc_sequence(&[0x67,0x64,0,0x28],&[0x68,0xee]).unwrap(),aac_sequence(),
+                    avc_access_unit(&[&nal],0,0,true).unwrap(),aac_access_unit(&[1,2,3],0).unwrap(),
+                    avc_access_unit(&[&[0x41,1]],100,0,false).unwrap(),aac_access_unit(&[4,5],21).unwrap()];
+                let bytes=batch.iter().map(|p|p.payload.len()as u64).sum();
+                worker.submit_batch(batch).unwrap();
+                std::thread::sleep(Duration::from_millis(250));
+                (6,bytes,2,2)
+            });
+        }
+        #[test]
+        #[ignore="requires working native AVC/AAC encoders; local receiver only"]
+        fn loopback_tls_native_encoder_acceptance(){
+            loopback(|worker|{
+                let mut encoder=crate::live_program_encoder::Encoder::new(640,360,10,1500,true).unwrap();
+                let mut totals=(0u64,0u64,0u64,0u64);
+                let start=Instant::now();
+                for tick in 0..20u32{
+                    let frame=image::RgbaImage::from_pixel(640,360,image::Rgba([tick as u8,50,100,255]));
+                    let pcm=vec![0.1;9600];
+                    let batch=encoder.tick(frame.as_raw(),Some(&pcm)).unwrap();
+                    for p in &batch{
+                        totals.0+=1;totals.1+=p.payload.len()as u64;
+                        if p.payload[1]==1{if p.kind==9{totals.2+=1;}else{totals.3+=1;}}
+                    }
+                    worker.submit_batch(batch).unwrap();
+                    std::thread::sleep((start+Duration::from_millis(u64::from(tick+1)*100)).saturating_duration_since(Instant::now()));
+                }
+                assert_eq!(totals.2,20);assert!(totals.3>80);totals
+            });
+        }
         #[test]fn validates_secure_endpoint_without_leaking_credentials(){
             let a=endpoint("rtmps://ingest.example.invalid:443/live").unwrap();
             assert_eq!((&*a.host,a.port,&*a.app),("ingest.example.invalid",443,"live"));
