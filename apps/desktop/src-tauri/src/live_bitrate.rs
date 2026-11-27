@@ -14,7 +14,7 @@ pub(crate) struct Reading{
     pub suggested_kbps:Option<u32>,pub pressure_ms:u64,
 }
 #[derive(Default)]
-pub(crate) struct Advisor{reading:Reading,since:Option<u64>,last:Option<u64>}
+pub(crate) struct Advisor{reading:Reading,since:std::collections::HashMap<String,u64>,last:Option<u64>}
 impl Advisor{
     pub(crate) fn configure(&mut self,initial:u32,current:u32,enabled:bool){
         *self=Self{reading:Reading{initial_kbps:Some(initial),current_kbps:Some(current),fallback_enabled:enabled,..Reading::default()},..Self::default()};
@@ -22,10 +22,11 @@ impl Advisor{
     pub(crate) fn observe(&mut self,now:u64,destinations:&[crate::live_fanout::DestinationStats]){
         let gap=self.last.is_some_and(|t|now<t||now-t>MAX_SAMPLE_GAP_MS);
         self.last=Some(now);
-        let pressure=destinations.iter().any(|d|d.phase=="sending"&&(d.queued_bytes>=4*1024*1024||d.queued_packets>=96));
-        if gap||!pressure{self.since=None;}
-        if pressure{self.since.get_or_insert(now);}
-        self.reading.pressure_ms=self.since.map_or(0,|s|now.saturating_sub(s));
+        if gap{self.since.clear();}
+        let pressured=|d:&crate::live_fanout::DestinationStats|d.phase=="sending"&&(d.queued_bytes>=4*1024*1024||d.queued_packets>=96);
+        self.since.retain(|id,_|destinations.iter().any(|d|d.id==*id&&pressured(d)));
+        for d in destinations.iter().filter(|d|pressured(d)).take(3){self.since.entry(d.id.clone()).or_insert(now);}
+        self.reading.pressure_ms=self.since.values().map(|s|now.saturating_sub(*s)).max().unwrap_or(0);
         self.reading.suggested_kbps=if self.reading.pressure_ms>=PRESSURE_MS{
             self.reading.current_kbps.map(|v|epoch_bitrate(v,1,true)).filter(|v|Some(*v)!=self.reading.current_kbps)
         }else{None};
@@ -56,5 +57,7 @@ mod tests{
         assert_eq!(a.reading().suggested_kbps,None);
         for n in 11..=14{a.observe(n*1000,&[row("failed",8*1024*1024)]);}
         assert_eq!(a.reading().pressure_ms,0);
+        for n in 15..=20{let mut d=row("sending",5*1024*1024);d.id=format!("fixture-{}",n%2);a.observe(n*1000,&[d]);}
+        assert_eq!(a.reading().suggested_kbps,None);
     }
 }
