@@ -9,7 +9,8 @@ export default function LiveAcceptance({active,disabled,prepare,onBusy}:{active:
   const [destinations,setDestinations]=useState<Destination[]>([])
   const [selected,setSelected]=useState<string[]>([])
   const [duration,setDuration]=useState(4)
-  const [review,setReview]=useState<{prepared:Prepared;targets:Destination[]}|null>(null)
+  const [fallback,setFallback]=useState(false)
+  const [review,setReview]=useState<{prepared:Prepared;targets:Destination[];fallback:boolean}|null>(null)
   const [phrase,setPhrase]=useState('')
   const [session,setSession]=useState<string|null>(null)
   const [status,setStatus]=useState<Snapshot|null>(null)
@@ -59,7 +60,7 @@ export default function LiveAcceptance({active,disabled,prepare,onBusy}:{active:
     try{
       const targets=destinations.filter(d=>selected.includes(d.id)&&d.credentialAvailable&&d.serverUrl)
       if(targets.length!==selected.length)throw new Error('Refresh and reselect available destinations')
-      setReview({prepared:await prepare(duration),targets})
+      setReview({prepared:await prepare(duration),targets,fallback:targets.length===1&&fallback})
     }catch(e){setError((e as Error).message);setReview(null)}
     finally{setLoading(false)}
   }
@@ -71,7 +72,7 @@ export default function LiveAcceptance({active,disabled,prepare,onBusy}:{active:
     setSession(sessionId);setStatus(null);setError('');setPhrase('');setReview(null)
     try{
       await request('/studio/live-acceptance/start',{
-        ...snapshot.prepared.config,sessionId,confirmation,
+        ...snapshot.prepared.config,sessionId,confirmation,fallbackOnReconnect:snapshot.fallback,
         destinations:snapshot.targets.map(d=>({id:d.id,name:d.name,serverUrl:d.serverUrl}))
       })
     }catch{setError('Native test stream did not complete successfully. Review sender health and the saved destination.')}
@@ -95,11 +96,13 @@ export default function LiveAcceptance({active,disabled,prepare,onBusy}:{active:
     {destinations.map(d=><label key={d.id} className="layer-switch"><span>{d.name}<small>{d.serverUrl??'Missing credential'}</small></span><input type="checkbox" checked={selected.includes(d.id)} disabled={disabled||loading||busy.current||!d.credentialAvailable||(!selected.includes(d.id)&&selected.length>=3)} onChange={e=>{setReview(null);setSelected(old=>e.target.checked?[...old,d.id]:old.filter(id=>id!==d.id))}}/></label>)}
     <label>Test stream duration <select aria-label="Test stream duration" value={duration} disabled={disabled||loading||busy.current} onChange={e=>{setDuration(Number(e.target.value));setReview(null);setPhrase('')}}>{[4,15,30,60,300,900,1800,3600,7200].map(s=><option key={s} value={s}>{s>=60?s/60+' min':s+' sec'}</option>)}</select></label>
     <button className="secondary-button" disabled={disabled||loading||busy.current||selected.length===0} onClick={()=>void reviewSelection()}>Review real stream test</button>
+    {selected.length===1&&<label className="layer-switch"><span>Lower bitrate after reconnect <small>Optional; only a new single-destination encoder epoch</small></span><input aria-label="Lower bitrate after reconnect" type="checkbox" checked={fallback} disabled={disabled||loading||busy.current} onChange={e=>{setFallback(e.target.checked);setReview(null);setPhrase('')}}/></label>}
     {review&&<div>
       <b>Confirm the exact capture and destinations</b>
       <p>Scene: {review.prepared.scene} · {String(review.prepared.config.seconds)}s · {String(review.prepared.config.profile)}</p>
       <p>Sources: {review.prepared.sources.join(', ')}</p>
       <p>Audio: {review.prepared.audio.join(', ')||'None'}</p>
+      <p>Bitrate fallback: {review.fallback?'Enabled — lower preset after a classified transport retry':'Disabled — fixed preset'}</p>
       {review.targets.map(d=><p key={d.id}>{d.name} — {d.serverUrl}</p>)}
       <label>Type {confirmation}<input aria-label="Real stream confirmation" value={phrase} onChange={e=>setPhrase(e.target.value)} autoComplete="off"/></label>
       <button className="secondary-button" disabled={disabled||phrase!==confirmation} onClick={()=>void start()}>Start real test stream</button>
