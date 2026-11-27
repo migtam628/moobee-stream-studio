@@ -50,7 +50,7 @@ mod macos_avc;
 mod macos_aac;
 #[cfg(any(target_os = "macos",target_os = "windows"))]
 mod live_program_encoder;
-#[cfg(target_os="macos")]
+#[cfg(any(target_os="macos",target_os="windows"))]
 mod live_program_sink;
 
 use axum::{
