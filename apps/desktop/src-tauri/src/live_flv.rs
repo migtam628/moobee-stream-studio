@@ -30,12 +30,12 @@ impl<W:Write> Writer<W>{
         self.out.flush().map_err(|e|e.to_string())?;Ok(self.bytes)
     }
 }
-#[cfg(target_os="macos")]
+#[cfg(any(target_os="macos",target_os="windows"))]
 pub(crate) struct NativeSink{
     writer:Writer<std::fs::File>,encoder:crate::live_program_encoder::Encoder,
     audio:bool,pending:Option<image::RgbaImage>,frames:u32,
 }
-#[cfg(target_os="macos")]
+#[cfg(any(target_os="macos",target_os="windows"))]
 impl NativeSink{
     pub(crate) fn open(path:&std::path::Path,width:u32,height:u32,fps:u32,kbps:u32,audio:bool)->Result<Self,String>{
         let encoder=crate::live_program_encoder::Encoder::new(width,height,fps,kbps,audio)?;
