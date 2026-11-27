@@ -387,9 +387,9 @@ mod tests{
         while !w.reap().unwrap(){assert!(Instant::now()<deadline);std::thread::sleep(Duration::from_millis(5));}
         assert_eq!(w.stats().unwrap().session.phase,Phase::Failed);
     }
-    #[cfg(target_os="macos")]
+    #[cfg(any(target_os="macos",target_os="windows"))]
     #[test]
-    #[ignore="requires functioning macOS native encoders"]
+    #[ignore="requires functioning native AVC/AAC encoders"]
     fn native_program_sink_encodes_and_drains_to_simulated_server(){
         use crate::{live_session::Session,live_publish_worker::Worker,live_program_sink::Sink};
         let p=Publisher::establish(fixture(true),"live","rtmps://example.invalid/live","fixture-key",7,&[9;1528]).unwrap();
