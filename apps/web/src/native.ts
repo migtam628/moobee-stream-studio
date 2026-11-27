@@ -336,7 +336,7 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
     const compressed = mp4 || flv
     const replay=body.replaySeconds!==undefined;
     if(replay&&(!flv||typeof body.replaySeconds!=='number'||!Number.isInteger(body.replaySeconds)||body.replaySeconds<2||body.replaySeconds>30||typeof body.seconds!=='number'||body.replaySeconds>body.seconds||body.seconds>60))throw new Error('Choose a 2–30 second replay window within a capture up to 60 seconds');
-    if(flv && ((!macHost()&&!windowsHost()) || typeof body.seconds!=='number' || body.seconds>(replay?60:8) || body.webcam || body.sessionId!==undefined || body.microphone===true)) throw new Error('Offline packet test requires Mac or Windows, 2–8 seconds, named audio settings, and webcam inset off')
+    if(flv && ((!macHost()&&!windowsHost()) || typeof body.seconds!=='number' || body.seconds>(replay?60:8) || body.webcam || body.sessionId!==undefined || body.microphone===true)) throw new Error('Offline packet or replay test requires Mac or Windows, a valid duration, named audio settings, and webcam inset off')
     const hasVideo = videoDeviceId !== undefined && videoDeviceId !== null
     if (hasVideo && (!compressed || (!macHost() && !windowsHost()) || !validVideoInputId(videoDeviceId) || body.webcam)) throw new Error('Select one native video input with webcam inset off')
     if (!Array.isArray(ids) || (hasVideo ? ids.length !== 0 : ids.length < 1) || ids.length > 4 ||
