@@ -1002,7 +1002,7 @@ pub(crate) fn run_authorized_rtmps_session(
             });
         crate::live_bitrate::uninterrupted_result(retried,outcome)
     })();
-    run.finish(result.is_ok());result
+    run.finish_native(result.as_ref().ok().map(|report|report.stopped_early));result
 }
 
 // Secure vault handoff is native-only. Hold the destination lease across
@@ -1087,7 +1087,7 @@ pub(crate) fn run_saved_multistream_session(
         },Some(run.clone()));
         drop(leases);result
     })();
-    run.finish(result.is_ok());result
+    run.finish_native(result.as_ref().ok().map(|report|report.stopped_early));result
 }
 
 // The connector is injected by an explicitly authorized native caller.
