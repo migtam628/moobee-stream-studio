@@ -75,6 +75,17 @@ def evaluate(video, audio, seconds, fps, max_av_gap_ms=200):
             issues.append(label + ": packet gap exceeds 2.5 nominal intervals")
         if t["count"] < max(2, math.floor((seconds - 2) / cadence)):
             issues.append(label + ": too few packets for nominal cadence")
+        # Compare rate against the observed timeline as well as the requested
+        # duration. A 60 FPS capture must not pass a 30 FPS profile.
+        elapsed = t["last"] - t["first"]
+        if elapsed <= 0 or t["count"] < 2:
+            issues.append(label + ": insufficient timestamp span")
+        else:
+            observed = (t["count"] - 1) / elapsed
+            expected = 1 / cadence
+            t["observedPacketsPerSecond"] = observed
+            if abs(observed - expected) > expected * .05:
+                issues.append(label + ": observed packet rate differs from nominal cadence by over 5%")
     if all(t["first"] is not None and t["end"] is not None for t in (video, audio)):
         start_gap = abs(video["first"] - audio["first"]) * 1000
         end_gap = abs(video["end"] - audio["end"]) * 1000
