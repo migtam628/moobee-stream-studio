@@ -2,6 +2,7 @@
 //! devices, credentials or network. The internal native path uses the same
 //! controller with a real Program capture worker.
 use serde::Serialize;
+use crate::live_health::{Monitor,Reading,Sample};
 use std::{sync::{Arc,Mutex,atomic::{AtomicBool,Ordering}},time::{Duration,Instant}};
 #[derive(Clone,Copy,Debug,PartialEq,Eq,Serialize)]
 #[serde(rename_all="camelCase")]
@@ -14,9 +15,9 @@ pub(crate) enum Mode{Rehearsal,Native}
 pub(crate) struct Snapshot{
     session_id:String,mode:Mode,phase:Phase,elapsed_ms:u64,media_frames:u32,
     sent_packets:u64,sent_payload_bytes:u64,pending_packets:usize,pending_bytes:usize,
-    late_frames:u32,bitrate_kbps:u64,error:Option<&'static str>,
+    late_frames:u32,bitrate_kbps:u64,error:Option<&'static str>,health:Reading,
 }
-struct Entry{snapshot:Snapshot,start:Instant,stop:Arc<AtomicBool>}
+struct Entry{snapshot:Snapshot,start:Instant,stop:Arc<AtomicBool>,monitor:Monitor}
 #[derive(Default)]
 pub(crate) struct Controller{entry:Mutex<Option<Entry>>}
 #[derive(Clone)]
@@ -28,14 +29,23 @@ impl Controller{
         if e.as_ref().is_some_and(|v|!matches!(v.snapshot.phase,Phase::Stopped|Phase::Failed)){return Err("Another streaming session is active".into())}
         let stop=Arc::new(AtomicBool::new(false));
         *e=Some(Entry{snapshot:Snapshot{session_id:id.clone(),mode,phase:Phase::Starting,elapsed_ms:0,media_frames:0,
-            sent_packets:0,sent_payload_bytes:0,pending_packets:0,pending_bytes:0,late_frames:0,bitrate_kbps:0,error:None},start:Instant::now(),stop:stop.clone()});
+            sent_packets:0,sent_payload_bytes:0,pending_packets:0,pending_bytes:0,late_frames:0,bitrate_kbps:0,error:None,health:Reading::default()},start:Instant::now(),stop:stop.clone(),monitor:Monitor::default()});
         Ok(Run{controller:self.clone(),id,stop})
+    }
+    pub(crate) fn current(&self)->Option<Snapshot>{
+        let e=self.entry.lock().ok()?;
+        let e=e.as_ref()?;
+        let mut s=e.snapshot.clone();
+        if !matches!(s.phase,Phase::Stopped|Phase::Failed){s.elapsed_ms=e.start.elapsed().as_millis() as u64;}
+        s.health=e.monitor.reading(s.elapsed_ms,matches!(s.phase,Phase::Stopped|Phase::Failed));
+        Some(s)
     }
     pub(crate) fn snapshot(&self,id:&str)->Option<Snapshot>{
         let e=self.entry.lock().ok()?;
         let e=e.as_ref().filter(|v|v.snapshot.session_id==id)?;
         let mut s=e.snapshot.clone();
         if !matches!(s.phase,Phase::Stopped|Phase::Failed){s.elapsed_ms=e.start.elapsed().as_millis() as u64;}
+        s.health=e.monitor.reading(s.elapsed_ms,matches!(s.phase,Phase::Stopped|Phase::Failed));
         Some(s)
     }
     pub(crate) fn stop_rehearsal(&self,id:&str)->bool{
@@ -56,7 +66,7 @@ impl Run{
     pub(crate) fn cancelled(&self)->bool{self.stop.load(Ordering::Acquire)}
     fn update(&self,f:impl FnOnce(&mut Snapshot)){
         if let Ok(mut entry)=self.controller.entry.lock(){
-            if let Some(e)=entry.as_mut().filter(|v|v.snapshot.session_id==self.id){
+            if let Some(e)=entry.as_mut().filter(|v|v.snapshot.session_id==self.id&&Arc::ptr_eq(&v.stop,&self.stop)){
                 if matches!(e.snapshot.phase,Phase::Stopped|Phase::Failed){return}
                 e.snapshot.elapsed_ms=e.start.elapsed().as_millis() as u64;f(&mut e.snapshot);
             }
@@ -64,7 +74,12 @@ impl Run{
     }
     pub(crate) fn running(&self){self.update(|s|{if s.phase==Phase::Starting&&!self.cancelled(){s.phase=Phase::Streaming;}})}
     pub(crate) fn telemetry(&self,frames:u32,late:u32,worker:crate::live_publish_worker::WorkerStats){
-        self.update(|s|{
+        let Ok(mut entry)=self.controller.entry.lock()else{return};
+        let Some(e)=entry.as_mut().filter(|v|v.snapshot.session_id==self.id&&Arc::ptr_eq(&v.stop,&self.stop))else{return};
+        let s=&mut e.snapshot;
+        if matches!(s.phase,Phase::Stopped|Phase::Failed){return}
+        s.elapsed_ms=e.start.elapsed().as_millis() as u64;
+        {
             if s.mode!=Mode::Native{return}
             s.media_frames=frames;s.late_frames=late;s.sent_packets=worker.session.sent_packets;
             s.sent_payload_bytes=worker.session.sent_payload_bytes;
@@ -72,7 +87,8 @@ impl Run{
             s.pending_bytes=worker.pending_bytes+worker.session.queued_bytes;
             s.bitrate_kbps=s.sent_payload_bytes.saturating_mul(8)/s.elapsed_ms.max(1);
             if s.phase==Phase::Starting&&!self.cancelled()&&worker.session.phase==crate::live_session::Phase::Sending{s.phase=Phase::Streaming;}
-        });
+        }
+        e.monitor.observe(Sample{elapsed_ms:s.elapsed_ms,frames,late_frames:late,sent_bytes:s.sent_payload_bytes,sent_packets:s.sent_packets,queue_bytes:s.pending_bytes,queue_packets:s.pending_packets});
     }
     pub(crate) fn finish(&self,success:bool){self.update(|s|{
         s.phase=if success{Phase::Stopped}else{Phase::Failed};
@@ -110,5 +126,7 @@ mod tests{
         let next=uuid::Uuid::new_v4().to_string();let n=c.start(next.clone(),Mode::Native).unwrap();
         r.finish(false);assert_eq!(c.snapshot(&next).unwrap().phase,Phase::Starting);assert!(!c.stop_rehearsal(&next));
         n.finish(false);assert_eq!(c.snapshot(&next).unwrap().phase,Phase::Failed);
+        let reused=c.start(next.clone(),Mode::Rehearsal).unwrap();n.finish(false);
+        assert_eq!(c.snapshot(&next).unwrap().phase,Phase::Starting);reused.finish(true);
     }
 }
