@@ -550,17 +550,18 @@ fn capture_to_dir(
     let final_path = directory.join(format!("clip-{id}.{extension}"));
     let temporary = directory.join(format!(".clip-{id}.part.{extension}"));
     let audio_input_count = audio_inputs.as_ref().map_or(usize::from(microphone), |inputs| inputs.len());
-    if live_stop.as_ref().is_some_and(|s|s.load(Ordering::Acquire)){return Err("Live Program cancelled before connection".into())}
-    let mut writer = match FrameSink::open(&temporary, format, profile, audio_input_count > 0,live_connector) {
-        Ok(writer) => writer,
-        Err(error) => { if !live{let _ = fs::remove_file(&temporary);} return Err(error); }
+    // Preserve the original local-file writer/audio startup order.
+    let preopened=if live{None}else{
+        match FrameSink::open(&temporary,format,profile,audio_input_count>0,None){
+            Ok(writer)=>Some(writer),
+            Err(error)=>{let _=fs::remove_file(&temporary);return Err(error)}
+        }
     };
-
     #[cfg(target_os = "macos")]
     let mut mic = if microphone && audio_inputs.is_none() {
         match crate::program_microphone::ProgramMicrophone::start() {
             Ok(source) => Some(source),
-            Err(error) => { drop(writer); if !live{let _ = fs::remove_file(&temporary);} return Err(error); }
+            Err(error) => {drop(preopened);if !live{let _=fs::remove_file(&temporary);}return Err(error)},
         }
     } else { None };
     #[cfg(target_os = "macos")]
@@ -568,7 +569,7 @@ fn capture_to_dir(
         if inputs.is_empty() { None } else {
             match crate::program_audio::Mixer::open(inputs) {
                 Ok(mixer) => Some(mixer),
-                Err(error) => { drop(writer); if !live{let _=fs::remove_file(&temporary);} return Err(error); }
+                Err(error) => {drop(preopened);if !live{let _=fs::remove_file(&temporary);}return Err(error)},
             }
         }
     } else { None };
@@ -578,10 +579,43 @@ fn capture_to_dir(
         if inputs.is_empty(){None}else{
             match crate::windows_audio::Mixer::open(inputs){
                 Ok(mixer)=>Some(mixer),
-                Err(error)=>{drop(writer);if !live{let _=fs::remove_file(&temporary);}return Err(error);}
+                Err(error)=>{drop(preopened);if !live{let _=fs::remove_file(&temporary);}return Err(error)},
             }
         }
     };
+    if live_stop.as_ref().is_some_and(|s|s.load(Ordering::Acquire)){return Err("Live Program cancelled before connection".into())}
+    let mut writer = match preopened{
+        Some(writer)=>writer,
+        None=>FrameSink::open(&temporary,format,profile,audio_input_count>0,live_connector)?,
+    };
+
+    // A slow handshake must not turn pre-publish source buffers into
+    // timestamp-zero media. Audio devices were opened before publishing.
+    if let Some(stop)=live_stop.as_ref(){
+        let deadline=Instant::now()+crate::live_startup::STARTUP_REFRESH;
+        for receiver in &receivers{crate::live_startup::purge(receiver,stop,deadline)?;}
+        if let Some(source)=primary_camera.as_mut(){let _=source.poll()?;}
+        for (index,receiver) in receivers.iter().enumerate(){
+            let frame=frame_image(crate::live_startup::fresh(receiver,stop,deadline)?)?;
+            let remaining=total_pixels-u64::from(latest[index].width())*u64::from(latest[index].height());
+            total_pixels=validate_frame_geometry(frame.width(),frame.height(),remaining)?;
+            latest[index]=frame;last_received[index]=Instant::now();
+        }
+        if let Some(source)=primary_camera.as_mut(){
+            let frame=loop{
+                crate::live_startup::check(stop,deadline)?;
+                if let Some(frame)=source.poll()?{break frame}
+                std::thread::sleep(Duration::from_millis(10));
+            };
+            total_pixels=validate_frame_geometry(frame.width(),frame.height(),0)?;
+            latest[0]=frame;last_received[0]=Instant::now();
+        }
+        #[cfg(target_os="macos")]
+        if let Some(mixer)=&mixer{mixer.reset();}
+        #[cfg(target_os="windows")]
+        if let Some(mixer)=&windows_mixer{mixer.discard()?;}
+        crate::live_startup::check(stop,deadline)?;
+    }
     let mut audio_missing_source_frames=0u64;
     let mut audio_samples_written = 0u64;
     let mut audio_peak = 0.0f32;
@@ -612,13 +646,17 @@ fn capture_to_dir(
             let paused = written_frames >= 2 && stop_guard.is_some_and(|guard| guard.paused());
             let tick = written_frames;
             let target = started + clock.time(wall_tick);
+            if live{crate::live_startup::check_tick_lag(Instant::now().saturating_duration_since(target))?;}
             wall_tick += 1;
             std::thread::sleep(target.saturating_duration_since(Instant::now()));
+            if live_stop.as_ref().is_some_and(|s|s.load(Ordering::Acquire)){break;}
             for (index, receiver) in receivers.iter().enumerate() {
                 let mut was_updated = false;
+                let mut drained=0usize;
                 for _ in 0..MAX_DRAIN_PER_SOURCE_PER_TICK {
                     match receiver.try_recv() {
                         Ok(frame) => {
+                            drained+=1;
                             let image = frame_image(frame)?;
                             let next_pixels = u64::from(image.width()) * u64::from(image.height());
                             let previous_pixels = u64::from(latest[index].width()) *
@@ -638,6 +676,7 @@ fn capture_to_dir(
                             return Err("One continuous Program display source disconnected".into()),
                     }
                 }
+                if live&&drained==MAX_DRAIN_PER_SOURCE_PER_TICK{return Err("Live display queue saturated; refusing stale media".into())}
                 if !paused && !was_updated { repeats[index] = repeats[index].saturating_add(1); }
             }
             #[cfg(any(target_os = "macos",target_os = "windows"))]

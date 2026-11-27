@@ -77,3 +77,6 @@ PR #86 merged sustained sender monitoring. This increment adds a test-only local
 
 ## Workstream 9 — native streaming security hardening
 PRs #87 and #88 merged encrypted loopback receiver and independent decoder harness. This increment addresses cancellation during negotiation, detached recovery lease lifetime and owned credential-buffer clearing. See NATIVE_STREAM_SECURITY_REVIEW.md for scope, tests and unresolved release blockers. Source review and CI do not constitute a penetration test, real native decode or physical two-hour acceptance. Default production Go Live remains disabled and formal completion remains 8/20.
+
+## Workstream 10 — bounded native streaming startup
+This increment validates audio device open before live publish negotiation, purges pre-publish display backlog, requests subsequent camera/display arrivals and resets/discards named audio before media clock start. It rejects queue saturation and excessive scheduling lag. Existing local recorder startup order is preserved. See LIVE_STARTUP_RELIABILITY.md for conservative diagnostic limits and unresolved source-channel, hardware and receiver acceptance risks. Formal completion remains 8/20 until integration and acceptance gates are satisfied.
