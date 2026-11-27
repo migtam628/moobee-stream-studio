@@ -180,6 +180,8 @@ try {
         return await new Promise(resolve=>{window.__acceptanceResolve=resolve;});
       }
       if(cmd==='stop_live_acceptance'){
+        window.__liveStopCalls=(window.__liveStopCalls??0)+1;
+        if(window.__liveStopCalls===1)return false; // IPC arrives before native controller registration.
         if(window.__acceptanceState?.sessionId!==args.sessionId)return false;
         window.__acceptanceState.phase='stopped';window.__acceptanceResolve?.(null);return true;
       }
@@ -419,7 +421,14 @@ try {
   await acceptance.getByText(/Native test: streaming/).waitFor();
   const accepted=await macPage.evaluate(()=>window.__acceptanceRequest);
   if(accepted.displayIds.join()!=='1'||accepted.destinations[0].name!=='Private fixture'||accepted.seconds!==7200||accepted.fallbackOnReconnect!==true||accepted.adaptiveBitrate!==true||'streamKey' in accepted.destinations[0])throw new Error('Invalid acceptance source or destination handoff');
-  await acceptance.getByRole('button',{name:'Stop real test stream',exact:true}).click();
+  await macPage.getByRole('button',{name:'Analytics',exact:true}).click();
+  const globalLive=macPage.getByRole('region',{name:'Active native stream controls'});
+  await globalLive.getByText(/Native test: streaming/).waitFor();
+  if(await macPage.evaluate(()=>window.__liveStopCalls??0))throw new Error('Workspace navigation interrupted authorized live stream');
+  await globalLive.getByRole('button',{name:'Stop real test stream',exact:true}).click();
+  await globalLive.getByText(/Native test: stopped/).waitFor();
+  if(await macPage.evaluate(()=>window.__liveStopCalls)!==2)throw new Error('Stop IPC startup retry did not acknowledge exact session');
+  await macPage.getByRole('button',{name:'Studio',exact:true}).click();
   await acceptance.getByText(/Native test: stopped/).waitFor();
   await macPage.evaluate(()=>{window.__destinationRows=[];});
   await macPage.getByRole('button',{name:'Rehearse Go Live',exact:true}).click();
