@@ -7,6 +7,10 @@ pub(crate) fn epoch_bitrate(initial:u32,attempt:u8,enabled:bool)->u32{
     if !enabled{return initial}
     match (initial,attempt){(6000,1)=>3000,(6000,2..)|(3000,1..)=>1500,_=>initial}
 }
+pub(crate) fn uninterrupted_result<T>(retried:bool,outcome:Result<T,String>)->Result<T,String>{
+    if retried&&outcome.is_ok(){return Err("Recovered stream was interrupted; not an uninterrupted acceptance pass".into())}
+    outcome
+}
 #[derive(Clone,Copy,Debug,Default,Serialize)]
 #[serde(rename_all="camelCase")]
 pub(crate) struct Reading{
@@ -39,6 +43,11 @@ mod tests{
     use crate::live_fanout::DestinationStats;
     fn row(phase:&'static str,bytes:usize)->DestinationStats{
         DestinationStats{id:"fixture".into(),phase,sent_packets:0,sent_payload_bytes:0,queued_packets:0,queued_bytes:bytes,admitted_packets:0,admitted_bytes:0,reconnect_attempt:0,interrupted:false}
+    }
+    #[test]fn successful_recovery_is_not_a_clean_acceptance(){
+        assert_eq!(uninterrupted_result(false,Ok(42)),Ok(42));
+        assert!(uninterrupted_result(true,Ok(42)).is_err());
+        assert_eq!(uninterrupted_result::<()>(true,Err("fixture".into())),Err("fixture".into()));
     }
     #[test]fn fallback_is_opt_in_bounded_and_never_increases(){
         assert_eq!(epoch_bitrate(6000,0,true),6000);
