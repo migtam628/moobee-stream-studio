@@ -28,7 +28,7 @@ fn validate_profile(w:u32,h:u32,fps:u32,bitrate:u32)->Result<(),String>{
     Ok(())
 }
 // BT.601 limited-range 4:2:0. Average each 2x2 chroma block; no unbounded queue.
-fn rgba_to_nv12(rgba:&[u8],w:usize,h:usize,out:&mut [u8])->Result<(),String>{
+pub(crate) fn rgba_to_nv12(rgba:&[u8],w:usize,h:usize,out:&mut [u8])->Result<(),String>{
     let pixels=w.checked_mul(h).ok_or("Invalid frame dimensions")?;
     if w==0||h==0||w%2!=0||h%2!=0||pixels>1920*1080||rgba.len()!=pixels*4||out.len()!=pixels*3/2{return Err("Invalid NV12 input geometry".into())}
     let clamp=|v:i32|v.clamp(0,255) as u8;
