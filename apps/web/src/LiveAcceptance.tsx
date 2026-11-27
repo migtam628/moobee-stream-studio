@@ -93,7 +93,7 @@ export default function LiveAcceptance({active,disabled,prepare,onBusy}:{active:
     <p>Actual capture and network transmission. Use a private test destination. This is not production Go Live.</p>
     <button className="secondary-button" disabled={disabled||loading||busy.current} onClick={()=>void refresh()}>Load test destinations</button>
     {destinations.map(d=><label key={d.id} className="layer-switch"><span>{d.name}<small>{d.serverUrl??'Missing credential'}</small></span><input type="checkbox" checked={selected.includes(d.id)} disabled={disabled||loading||busy.current||!d.credentialAvailable||(!selected.includes(d.id)&&selected.length>=3)} onChange={e=>{setReview(null);setSelected(old=>e.target.checked?[...old,d.id]:old.filter(id=>id!==d.id))}}/></label>)}
-    <label>Test stream duration <select aria-label="Test stream duration" value={duration} disabled={disabled||loading||busy.current} onChange={e=>{setDuration(Number(e.target.value));setReview(null);setPhrase('')}}>{[4,15,30,60,300,900,1800].map(s=><option key={s} value={s}>{s>=60?s/60+' min':s+' sec'}</option>)}</select></label>
+    <label>Test stream duration <select aria-label="Test stream duration" value={duration} disabled={disabled||loading||busy.current} onChange={e=>{setDuration(Number(e.target.value));setReview(null);setPhrase('')}}>{[4,15,30,60,300,900,1800,3600,7200].map(s=><option key={s} value={s}>{s>=60?s/60+' min':s+' sec'}</option>)}</select></label>
     <button className="secondary-button" disabled={disabled||loading||busy.current||selected.length===0} onClick={()=>void reviewSelection()}>Review real stream test</button>
     {review&&<div>
       <b>Confirm the exact capture and destinations</b>
