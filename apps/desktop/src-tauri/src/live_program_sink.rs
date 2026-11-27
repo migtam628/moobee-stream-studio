@@ -1,4 +1,4 @@
-//! Mac Program-to-RTMPS sink. Same-thread native encoder; network I/O is
+//! Native Mac/Windows Program-to-RTMPS sink. Same-thread native encoder; network I/O is
 //! owned by the publisher worker. No file output and no UI command.
 use crate::{live_program_encoder::Encoder,live_publish_worker::Worker,live_session::Phase};
 use std::time::{Duration,Instant};
