@@ -261,7 +261,7 @@ pub(crate) mod tls {
             socket.set_nodelay(true).unwrap();
             let mut builder=native_tls::TlsConnector::builder();
             builder.min_protocol_version(Some(native_tls::Protocol::Tlsv12)).add_root_certificate(root);
-            let tls=builder.build().unwrap().connect("localhost",DeadlineSocket{socket,deadline:Some(Instant::now()+NEGOTIATION_TIMEOUT)}).unwrap();
+            let tls=builder.build().unwrap().connect("localhost",DeadlineSocket{socket,deadline:Some(Instant::now()+NEGOTIATION_TIMEOUT)}).unwrap_or_else(|_|panic!("Loopback TLS handshake failed"));
             let mut random=[0u8;1528];getrandom::fill(&mut random).unwrap();
             let mut publisher=Publisher::establish(tls,"live","rtmps://localhost/live",key,0,&random).unwrap();
             publisher.io.get_mut().deadline=None;
