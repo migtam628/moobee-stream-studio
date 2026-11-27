@@ -41,6 +41,8 @@ mod macos_avc;
 mod macos_aac;
 #[cfg(target_os = "macos")]
 mod live_program_encoder;
+#[cfg(target_os="macos")]
+mod live_program_sink;
 
 use axum::{
     extract::State,

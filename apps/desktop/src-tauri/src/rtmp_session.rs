@@ -156,6 +156,11 @@ pub(crate) mod tls {
         fn write(&mut self,data:&[u8])->io::Result<usize>{self.socket.set_write_timeout(Some(self.timeout()?))?;self.socket.write(data)}
         fn flush(&mut self)->io::Result<()>{self.timeout()?;self.socket.flush()}
     }
+    pub(crate) fn validate_destination(server_url:&str,stream_key:&str)->Result<()>{
+        endpoint(server_url)?;
+        rtmp::publish(stream_key)?;
+        Ok(())
+    }
     /// Explicit future caller only. DNS resolution is OS-blocking and must
     /// be isolated from the UI; socket I/O and negotiation are bounded.
     pub(crate) fn connect_tls(server_url:&str,stream_key:&str)->Result<Publisher<native_tls::TlsStream<DeadlineSocket>>>{
@@ -346,6 +351,21 @@ mod tests{
         let deadline=Instant::now()+Duration::from_secs(2);
         while !w.reap().unwrap(){assert!(Instant::now()<deadline);std::thread::sleep(Duration::from_millis(5));}
         assert_eq!(w.stats().unwrap().session.phase,Phase::Failed);
+    }
+    #[cfg(target_os="macos")]
+    #[test]
+    #[ignore="requires functioning macOS native encoders"]
+    fn native_program_sink_encodes_and_drains_to_simulated_server(){
+        use crate::{live_session::Session,live_publish_worker::Worker,live_program_sink::Sink};
+        let p=Publisher::establish(fixture(true),"live","rtmps://example.invalid/live","fixture-key",7,&[9;1528]).unwrap();
+        let mut sink=Sink::open(640,360,10,1500,true,||Worker::start(Session::new(p).unwrap())).unwrap();
+        for i in 0..3{
+            sink.append(image::RgbaImage::from_pixel(640,360,image::Rgba([i*20,60,80,255]))).unwrap();
+            sink.append_audio(&vec![0.1;9600]).unwrap();
+        }
+        sink.finish().unwrap();
+        assert!(sink.sent_packets()>3);assert!(sink.sent_bytes()>0);
+        assert!(sink.append(image::RgbaImage::new(640,360)).is_err());
     }
     #[test]fn rejects_publish_before_media(){
         let result=Publisher::establish(fixture(false),"live","rtmps://example.invalid/live","fixture-key",7,&[9;1528]);
