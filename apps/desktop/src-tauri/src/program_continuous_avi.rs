@@ -953,13 +953,14 @@ pub(crate) fn run_authorized_rtmps_session(
     seconds:u32,profile:&str,bitrate_kbps:Option<u32>,layout:Option<&str>,
     overlay:Option<crate::program_overlay::OverlayInput>,audio_inputs:Vec<crate::program_audio::AudioInput>,
     transforms:Option<Vec<crate::source_transform::SourceTransform>>,server_url:String,stream_key:String,
-    explicitly_authorized:bool,lease:Option<std::sync::Arc<crate::stream_destinations::Lease>>,
+    explicitly_authorized:bool,lease:Option<std::sync::Arc<crate::stream_destinations::Lease>>,fallback_on_reconnect:bool,
 )->Result<ContinuousProgramReport,String>{
     let stream_key=zeroize::Zeroizing::new(stream_key);
     let result=(||{
         if !explicitly_authorized{return Err("Explicit destination authorization is required".into())}
         if !(2..=crate::live_acceptance::MAX_LIVE_SECONDS).contains(&seconds){return Err("Live integration test supports 2–7200 seconds".into())}
         crate::rtmp_session::tls::validate_destination(&server_url,&stream_key)?;
+        let initial=validate_bitrate(bitrate_kbps,encoding_profile(profile)?.bitrate_kbps)?;
         let started=Instant::now();
         let stop=run.stop_flag();
         crate::live_reconnect::recover(u64::from(seconds)*1000+30000,
@@ -968,10 +969,12 @@ pub(crate) fn run_authorized_rtmps_session(
             |ms|{run.recovery_wait();std::thread::sleep(Duration::from_millis(ms));},
             |attempt,remaining|{
                 run.begin_epoch(attempt);
+                let target=crate::live_bitrate::epoch_bitrate(initial,attempt,fallback_on_reconnect);
+                run.bitrate_config(initial,target,fallback_on_reconnect);
                 let epoch_run=run.clone();let cancel=stop.clone();
                 let server_url=server_url.clone();let stream_key=stream_key.clone();let lease=lease.clone();
                 let duration=seconds.min((remaining/1000) as u32);
-                let result=capture_authorized_live_program_with_lifecycle(display_ids.clone(),video_device_id.clone(),duration,profile,bitrate_kbps,layout,
+                let result=capture_authorized_live_program_with_lifecycle(display_ids.clone(),video_device_id.clone(),duration,profile,Some(target),layout,
                     overlay.clone(),audio_inputs.clone(),transforms.clone(),stop.clone(),move||{
                         if cancel.load(Ordering::Acquire){return Err("Live Program cancelled before connection".into())}
                         let mut cause=crate::live_reconnect::Failure::Unknown;
@@ -999,6 +1002,7 @@ pub(crate) fn run_saved_destination_session(
     bitrate_kbps:Option<u32>,layout:Option<&str>,
     overlay:Option<crate::program_overlay::OverlayInput>,audio_inputs:Vec<crate::program_audio::AudioInput>,
     transforms:Option<Vec<crate::source_transform::SourceTransform>>,
+    fallback_on_reconnect:bool,
 )->Result<ContinuousProgramReport,String>{
     if !run.native_active(){return Err("An active native streaming session is required".into())}
     let lease=match crate::stream_destinations::authorized_destination(app,destination_id,expected_name,expected_url,explicitly_authorized){
@@ -1008,7 +1012,7 @@ pub(crate) fn run_saved_destination_session(
     let lease=std::sync::Arc::new(lease);
     let (url,key)=lease.credentials();
     let result=run_authorized_rtmps_session(run,display_ids,video_device_id,seconds,profile,bitrate_kbps,layout,
-        overlay,audio_inputs,transforms,url.to_owned(),key.to_owned(),explicitly_authorized,Some(lease.clone()));
+        overlay,audio_inputs,transforms,url.to_owned(),key.to_owned(),explicitly_authorized,Some(lease.clone()),fallback_on_reconnect);
     drop(lease);result
 }
 
@@ -1033,6 +1037,8 @@ pub(crate) fn run_saved_multistream_session(
             let lease=crate::stream_destinations::authorized_destination(app,&id,&name,&url,true)?;
             leases.push((id,std::sync::Arc::new(lease)));
         }
+        let initial=validate_bitrate(bitrate_kbps,encoding_profile(profile)?.bitrate_kbps)?;
+        run.bitrate_config(initial,initial,false);
         let credentials=leases.clone();
         let stop=run.stop_flag();let cancel=stop.clone();
         let result=capture_live_fanout(display_ids,video_device_id,seconds,profile,bitrate_kbps,layout,overlay,audio_inputs,transforms,stop,move||{
