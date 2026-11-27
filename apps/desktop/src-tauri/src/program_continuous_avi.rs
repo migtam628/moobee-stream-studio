@@ -387,7 +387,6 @@ enum FrameSink {
     Mp4(crate::program_mp4_sink::ProgramMp4Sink),
     #[cfg(target_os = "windows")]
     Mp4(crate::windows_mp4_sink::WindowsMp4Sink),
-    #[cfg(target_os = "macos")]
     Flv(crate::live_flv::NativeSink),
     #[cfg(target_os = "macos")]
     Live(crate::live_program_sink::Sink),
@@ -404,10 +403,7 @@ impl FrameSink {
                 { let _=live_connector; Err("Native live encoding requires macOS".into()) }
             }
             ProgramFormat::Flv => {
-                #[cfg(target_os = "macos")]
-                { Ok(Self::Flv(crate::live_flv::NativeSink::open(path,profile.width,profile.height,profile.fps,profile.bitrate_kbps,microphone)?)) }
-                #[cfg(target_os = "windows")]
-                { Err("Native streaming packet diagnostics require macOS".into()) }
+                Ok(Self::Flv(crate::live_flv::NativeSink::open(path,profile.width,profile.height,profile.fps,profile.bitrate_kbps,microphone)?))
             }
             ProgramFormat::Avi => {
                 let file = OpenOptions::new().write(true).create_new(true).open(path)
@@ -436,7 +432,6 @@ impl FrameSink {
             }
             #[cfg(any(target_os = "macos", target_os = "windows"))]
             Self::Mp4(writer) => writer.append(canvas.as_raw()),
-            #[cfg(target_os = "macos")]
             Self::Flv(writer) => writer.append(canvas),
             #[cfg(target_os = "macos")]
             Self::Live(writer) => writer.append(canvas),
@@ -446,7 +441,6 @@ impl FrameSink {
     fn append_audio(&mut self, pcm: &[f32]) -> Result<(),String> {
         match self {
             Self::Mp4(writer) => writer.append_audio(pcm),
-            #[cfg(target_os = "macos")]
             Self::Flv(writer) => writer.append_audio(pcm),
             #[cfg(target_os = "macos")]
             Self::Live(writer) => writer.append_audio(pcm),
@@ -479,7 +473,6 @@ impl FrameSink {
             Self::Avi(writer) => writer.finish().map(|_| ()).map_err(|e| (e, false)),
             #[cfg(any(target_os = "macos", target_os = "windows"))]
             Self::Mp4(writer) => writer.finish(),
-            #[cfg(target_os = "macos")]
             Self::Flv(writer) => writer.finish().map_err(|e|(e,false)),
             #[cfg(target_os = "macos")]
             Self::Live(writer) => writer.finish().map_err(|e|(e,false)),
@@ -1024,7 +1017,7 @@ pub async fn capture_program_live_packet_test(
     overlay:Option<crate::program_overlay::OverlayInput>,video_device_id:Option<String>,
     audio_inputs:Option<Vec<crate::program_audio::AudioInput>>,transforms:Option<Vec<crate::source_transform::SourceTransform>>,bitrate_kbps:Option<u32>,
 )->Result<ContinuousProgramReport,String>{
-    if !cfg!(target_os="macos")||!(2..=8).contains(&seconds){return Err("Offline streaming packet test requires macOS and 2–8 seconds".into())}
+    if !cfg!(any(target_os="macos",target_os="windows"))||!(2..=8).contains(&seconds){return Err("Offline streaming packet test requires Mac or Windows and 2–8 seconds".into())}
     capture_continuous_program(app,display_ids,seconds,profile,ProgramFormat::Flv,layout,false,false,1.,overlay,video_device_id,audio_inputs,transforms,None,bitrate_kbps).await
 }
 
