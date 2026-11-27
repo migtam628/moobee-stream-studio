@@ -164,6 +164,17 @@ mod tests{
         vault.remove(&v.id).unwrap();assert!(!views(&dir.0,&vault).unwrap()[0].credential_available);
         remove(&dir.0,&vault,&v.id).unwrap();assert!(views(&dir.0,&vault).unwrap().is_empty());
     }
+    #[test]
+    #[ignore="requires unlocked native OS credential store; creates and removes a random fixture credential"]
+    fn native_vault_round_trip(){
+        let dir=Temp(std::env::temp_dir().join(uuid::Uuid::new_v4().to_string()));let vault=OsVault;
+        let v=create(&dir.0,&vault,"MooBee QA fixture".into(),"rtmps://example.invalid/live".into(),"fixture-not-a-real-key".into()).unwrap();
+        let read=load(&vault,&v.id);
+        let removed=remove(&dir.0,&vault,&v.id);
+        assert!(removed.is_ok());
+        assert_eq!(read.unwrap().unwrap().stream_key,"fixture-not-a-real-key");
+        assert!(vault.get(&v.id).unwrap().is_none());
+    }
     #[test]fn rejects_invalid_config_without_writing(){
         let dir=Temp(std::env::temp_dir().join(uuid::Uuid::new_v4().to_string()));let vault=Memory::default();
         for url in ["rtmp://example.invalid/live","rtmps://user:secret@example.invalid/live","rtmps://example.invalid/live?key=secret"]{
