@@ -38,6 +38,7 @@ mod live_media_queue;
 mod live_packet_pacer;
 mod live_session;
 mod live_lifecycle;
+mod live_acceptance;
 mod live_health;
 mod live_reconnect;
 #[cfg(any(target_os="macos",target_os="windows"))]
@@ -406,7 +407,7 @@ pub fn run() {
             tauri::async_runtime::spawn(serve_overlays(runner_state));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![list_stream_destinations, add_stream_destination, remove_stream_destination, start_live_rehearsal, live_session_status, live_health_status, stop_live_rehearsal, emit_test_alert, list_displays, list_video_inputs, list_audio_inputs, program_audio_levels, stop_program_audio_levels, test_video_input, live_video_preview_frame, stop_video_previews, capture_display, scene_compositor::capture_scene_snapshot, clip::capture_test_clip, clip::list_test_clips, clip::read_test_clip, clip::reveal_test_clip, capture_probe::probe_native_capture, native_avi::capture_silent_avi, program_test_avi::capture_program_test_avi, program_continuous_avi::capture_continuous_program_avi, program_continuous_avi::capture_continuous_program_mp4, program_continuous_avi::capture_program_live_packet_test, program_continuous_avi::stop_continuous_program_mp4, program_continuous_avi::pause_continuous_program_mp4, program_continuous_avi::continuous_program_stats, program_continuous_avi::queue_program_scene_take, program_continuous_avi::recover_finalized_program_recordings, macos_mp4::capture_macos_mp4, macos_mp4::stop_macos_mp4, macos_mp4::macos_mp4_availability, native_service_diagnostics, open_screen_recording_settings])
+        .invoke_handler(tauri::generate_handler![live_acceptance::live_acceptance_available, live_acceptance::start_live_acceptance, live_acceptance::stop_live_acceptance, list_stream_destinations, add_stream_destination, remove_stream_destination, start_live_rehearsal, live_session_status, live_health_status, stop_live_rehearsal, emit_test_alert, list_displays, list_video_inputs, list_audio_inputs, program_audio_levels, stop_program_audio_levels, test_video_input, live_video_preview_frame, stop_video_previews, capture_display, scene_compositor::capture_scene_snapshot, clip::capture_test_clip, clip::list_test_clips, clip::read_test_clip, clip::reveal_test_clip, capture_probe::probe_native_capture, native_avi::capture_silent_avi, program_test_avi::capture_program_test_avi, program_continuous_avi::capture_continuous_program_avi, program_continuous_avi::capture_continuous_program_mp4, program_continuous_avi::capture_program_live_packet_test, program_continuous_avi::stop_continuous_program_mp4, program_continuous_avi::pause_continuous_program_mp4, program_continuous_avi::continuous_program_stats, program_continuous_avi::queue_program_scene_take, program_continuous_avi::recover_finalized_program_recordings, macos_mp4::capture_macos_mp4, macos_mp4::stop_macos_mp4, macos_mp4::macos_mp4_availability, native_service_diagnostics, open_screen_recording_settings])
         .run(tauri::generate_context!())
         .expect("failed to run MooBee Live desktop");
 }
