@@ -146,4 +146,18 @@ extern "C" int moobee_win_avc_encode(void* handle,const uint8_t* nv12,size_t len
     HRESULT hr=encode(e,nv12,length,force_key!=0,out,capacity,size,config,config_cap,config_len);
     if(FAILED(hr)){e.failed=true;report(error,error_capacity,"Encode synchronous AVC access unit",hr);return -1;}return 0;
 }
+extern "C" int moobee_win_avc_lower_bitrate(void* handle,UINT32 kbps){
+    if(!handle||(kbps!=1500&&kbps!=3000))return -1;
+    auto& e=*static_cast<Encoder*>(handle);
+    if(e.failed||!e.codec)return -1;
+    // Do not mutate a transform that does not advertise modifiability.
+    if(e.codec->IsModifiable(&CODECAPI_AVEncCommonMeanBitRate)!=S_OK)return 1;
+    HRESULT hr=set_u32(e.codec.Get(),CODECAPI_AVEncCommonMeanBitRate,kbps*1000);
+    if(FAILED(hr)){e.failed=true;return -1;}
+    VARIANT value{};hr=e.codec->GetValue(&CODECAPI_AVEncCommonMeanBitRate,&value);
+    bool matches=SUCCEEDED(hr)&&value.vt==VT_UI4&&value.ulVal==kbps*1000;
+    VariantClear(&value);
+    if(!matches){e.failed=true;return -1;}
+    return 0;
+}
 extern "C" void moobee_win_avc_destroy(void* handle){delete static_cast<Encoder*>(handle);}
