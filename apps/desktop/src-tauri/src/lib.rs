@@ -45,6 +45,7 @@ mod stream_destinations;
 mod live_publish_worker;
 mod live_fanout;
 mod live_flv;
+mod replay_buffer;
 #[cfg(target_os = "macos")]
 mod macos_avc;
 #[cfg(target_os = "macos")]
