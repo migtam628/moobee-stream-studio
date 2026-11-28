@@ -33,6 +33,7 @@ export default function LiveAcceptance({active,disabled,prepare,onBusy}:{active:
   const reviewGeneration=useRef(0)
   const [stopping,setStopping]=useState(false)
   const [checked,setChecked]=useState(false)
+  const [statusUncertain,setStatusUncertain]=useState(false)
   const adopted=useRef(false)
   const busyCallback=useRef(onBusy)
   busyCallback.current=onBusy
@@ -85,17 +86,34 @@ export default function LiveAcceptance({active,disabled,prepare,onBusy}:{active:
       inflight=true
       try{
         const s=await request<Snapshot|null>('/studio/live-rehearsal/status',{sessionId:session})
-        if(alive&&s?.sessionId===session&&s.mode==='native'){
-          setStatus(s)
-          if(adopted.current&&current.current===session){
+        if(!alive||current.current!==session)return
+        if(s?.sessionId===session&&s.mode==='native'){
+          setStatus(s);setStatusUncertain(false)
+          if(adopted.current){
             if(s.phase==='stopping')setStopping(true)
             if(s.phase==='stopped'||s.phase==='failed'){
               adopted.current=false;current.current=null;busy.current=false
               setStopping(false);busyCallback.current(false)
             }
           }
+        }else if(adopted.current){
+          // A missing scoped snapshot is not evidence that no output exists.
+          // Reconcile against the authoritative current native controller.
+          const latest=await request<Snapshot|null>('/studio/live-health')
+          if(!alive||current.current!==session)return
+          if(latest?.mode==='native'&&activePhase(latest.phase)){
+            if(!validId(latest.sessionId)){setStatusUncertain(true);return}
+            current.current=latest.sessionId;setSession(latest.sessionId);setStatus(latest)
+            setStopping(latest.phase==='stopping');setStatusUncertain(false)
+          }else if(latest===null||latest?.mode==='rehearsal'||(latest?.mode==='native'&&['stopped','failed'].includes(latest.phase))){
+            adopted.current=false;current.current=null;busy.current=false
+            setStatus(latest?.mode==='native'&&latest.sessionId===session?latest:null)
+            setStatusUncertain(false);setStopping(false);busyCallback.current(false)
+          }else setStatusUncertain(true)
         }
-      }catch{/* Start/stop remain available even if status polling fails. */}
+      }catch{
+        if(alive&&current.current===session)setStatusUncertain(true)
+      }
       finally{inflight=false}
     }
     void poll()
@@ -127,17 +145,27 @@ export default function LiveAcceptance({active,disabled,prepare,onBusy}:{active:
     const snapshot=review
     const sessionId=crypto.randomUUID()
     adopted.current=false;busy.current=true;current.current=sessionId;onBusy(true)
-    setSession(sessionId);setStatus(null);setError('');setPhrase('');setReview(null);setStopping(false)
+    setSession(sessionId);setStatus(null);setStatusUncertain(false);setError('');setPhrase('');setReview(null);setStopping(false)
     try{
       await request('/studio/live-acceptance/start',{
         ...snapshot.prepared.config,sessionId,confirmation,fallbackOnReconnect:snapshot.fallback,adaptiveBitrate:snapshot.adaptive,
         destinations:snapshot.targets.map(d=>({id:d.id,name:d.name,serverUrl:d.serverUrl,revision:d.revision??null}))
       })
-    }catch{setError('Native test stream did not complete successfully. Review sender health and the saved destination.')}
+    }catch(cause){
+      // Only surface explicitly known, non-secret native errors.
+      const message=cause instanceof Error?cause.message:''
+      const safe:Record<string,string>={
+        'Native broadcast confirmation declined or expired':'Native confirmation declined or expired. No new broadcast was authorized.',
+        'Another native confirmation is open':'Dismiss the existing native confirmation before trying again.',
+        'Test broadcast cancelled before capture':'Test was cancelled before capture.',
+        'Another streaming session is active':'Another native session is active. Check the Stop controls.',
+      }
+      setError(safe[message]??'Native test stream did not complete successfully. Review sender health and the saved destination.')
+    }
     finally{
-      current.current=null;busy.current=false;onBusy(false);setStopping(false)
-      // Fetch final state without claiming a successful receiver-side result.
-      try{const s=await request<Snapshot|null>('/studio/live-rehearsal/status',{sessionId});if(!current.current&&s?.sessionId===sessionId)setStatus(s)}catch{}
+      // Even a rejected IPC promise does not prove native capture ended.
+      // Keep the exact Stop control until the polling effect reconciles.
+      if(current.current===sessionId){adopted.current=true;setStatusUncertain(true)}
     }
   }
   async function stop(){
@@ -152,7 +180,8 @@ export default function LiveAcceptance({active,disabled,prepare,onBusy}:{active:
   const dock=document.getElementById('native-live-session-dock')
   const controls=<>
     {busy.current&&<button className="secondary-button" disabled={stopping} onClick={()=>void stop()}>{stopping?'Stop requested — draining':'Stop real test stream'}</button>}
-    {session&&<p role="status">Native test: {status?.phase??(busy.current?'starting':'status unavailable')} · {status?.mediaFrames??0} submitted frames · {status?.sentPackets??0} sent packets. Receiver verification required.</p>}
+    {statusUncertain&&busy.current&&<p role="status">Native session status uncertain. Stop remains available; checking the controller before unlocking capture.</p>}
+    {session&&<p role="status">Native test: {statusUncertain?'status uncertain':status?.phase??(busy.current?'starting':'status unavailable')} · {status?.mediaFrames??0} submitted frames · {status?.sentPackets??0} sent packets. Receiver verification required.</p>}
     {error&&<p role="alert" className="preview-error">{error}</p>}
   </>
   return <section className="dock-note" aria-label="Real native streaming acceptance">
