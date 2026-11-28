@@ -16,8 +16,7 @@ jobs:
     env:
       MACOSX_DEPLOYMENT_TARGET: '13.0'
       APPLE_SIGNING_IDENTITY: '-'
-      GITHUB_SHA: ${{ github.event.pull_request.head.sha }}
-      GITHUB_REF_NAME: qa/macos-arm64-group-a
+      QA_BUILD_SHA: ${{ github.event.pull_request.head.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -41,7 +40,7 @@ jobs:
           test "$(uname -m)" = arm64
       - name: Build acceptance-enabled DMG (never launch)
         working-directory: apps/desktop
-        run: npm run tauri:build -- --features native-live-acceptance --target aarch64-apple-darwin --bundles dmg
+        run: GITHUB_SHA="$QA_BUILD_SHA" GITHUB_REF_NAME=qa/macos-arm64-group-a npm run tauri:build -- --features native-live-acceptance --target aarch64-apple-darwin --bundles dmg
       - name: Validate and collect Apple Silicon installer
         shell: bash
         run: |
