@@ -1,5 +1,6 @@
 import {useEffect,useState} from 'react'
 import {request,runningInTauri} from './api'
+import {HISTORY_LIMIT,liveHistoryReport,updateSessionHistory,type SessionHistory} from './liveHistory.mjs'
 
 type Health='unavailable'|'warmingUp'|'normal'|'backpressure'|'stalled'|'stale'|'ended'
 type Destination={id:string;phase:string;sentPackets:number;sentPayloadBytes:number;queuedPackets:number;queuedBytes:number;admittedPackets:number;admittedBytes:number;reconnectAttempt?:number;interrupted?:boolean}
@@ -8,12 +9,15 @@ type Timing={videoPackets:number;audioPackets:number;videoEndMs:number|null;audi
 type BitrateAdvice={initialKbps:number|null;currentKbps:number|null;fallbackEnabled:boolean;suggestedKbps:number|null;pressureMs:number;inplaceEnabled?:boolean;inplaceChanges?:number;inplaceUnsupported?:boolean;inplaceUncertain?:boolean}
 type NativeOutcome='senderCompleted'|'stoppedEarly'|'failed'|'unverified'
 const outcomes:Record<NativeOutcome,string>={senderCompleted:'Sender completed requested duration — receiver evidence required',stoppedEarly:'Stopped early — not a full-duration acceptance pass',failed:'Sender failed or delivery was interrupted',unverified:'Sender ended — duration unverified'}
-type Snapshot={nativeOutcome?:NativeOutcome|null;bitrateAdvice?:BitrateAdvice;resources?:Resources;timing?:Timing|null;destinations?:Destination[];mode:'native'|'rehearsal';phase:string;elapsedMs:number;sentPackets:number;sentPayloadBytes:number;mediaFrames:number;reconnectAttempt?:number;health:{health:Health;payloadKbps:number|null;outputFpsTenths:number|null;queueBytes:number;queuePackets:number;lateFramesInWindow:number|null;sampleAgeMs:number|null}}
+type Snapshot={sessionId?:string;nativeOutcome?:NativeOutcome|null;bitrateAdvice?:BitrateAdvice;resources?:Resources;timing?:Timing|null;destinations?:Destination[];mode:'native'|'rehearsal';phase:string;elapsedMs:number;sentPackets:number;sentPayloadBytes:number;mediaFrames:number;reconnectAttempt?:number;health:{health:Health;payloadKbps:number|null;outputFpsTenths:number|null;queueBytes:number;queuePackets:number;lateFramesInWindow:number|null;sampleAgeMs:number|null}}
 const labels:Record<Health,string>={unavailable:'Unavailable',warmingUp:'Collecting samples',normal:'Sender normal',backpressure:'Queue pressure',stalled:'Sender stalled',stale:'Stale sample',ended:'Ended'}
 export default function LiveHealth(){
   const native=runningInTauri()
   const [snapshot,setSnapshot]=useState<Snapshot|null>(null)
   const [error,setError]=useState(false)
+  const [history,setHistory]=useState<SessionHistory>({sessionId:null,samples:[]})
+  const [report,setReport]=useState('')
+  const [copyStatus,setCopyStatus]=useState('')
   useEffect(()=>{
     if(!native)return
     let active=true,inflight=false
@@ -22,7 +26,7 @@ export default function LiveHealth(){
       inflight=true
       try{
         const result=await request<Snapshot|null>('/studio/live-health',{})
-        if(active){setSnapshot(result);setError(false)}
+        if(active){setSnapshot(result);setError(false);setHistory(old=>updateSessionHistory(old,result))}
       }catch{if(active){setSnapshot(null);setError(true)}}
       finally{inflight=false}
     }
@@ -30,6 +34,14 @@ export default function LiveHealth(){
     const timer=setInterval(()=>void poll(),500)
     return()=>{active=false;clearInterval(timer)}
   },[native])
+  useEffect(()=>{setReport('');setCopyStatus('')},[history.sessionId])
+  function prepareReport(){
+    setReport(liveHistoryReport(history.samples));setCopyStatus('')
+  }
+  async function copyReport(){
+    try{await navigator.clipboard.writeText(report);setCopyStatus('Report copied')}
+    catch{setCopyStatus('Clipboard unavailable; select and copy the report manually')}
+  }
   const h=snapshot?.mode==='native'?snapshot.health:null
   const advice=snapshot?.mode==='native'?snapshot.bitrateAdvice:null
   const r=snapshot?.mode==='native'?snapshot.resources:null
@@ -83,6 +95,18 @@ export default function LiveHealth(){
       <p className="dock-note">Approximate packet-end difference; positive means video leads audio. This is not hardware clock drift or receiver lip-sync. Timing counters reset on whole-encoder restart.</p>
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))',gap:'12px'}}>{timingMetrics.map(([label,value])=><div className="dock-note" key={label}><span>{label}</span><br/><strong>{value}</strong></div>)}</div>
       {snapshot?.mode==='native'&&!!snapshot.destinations?.length&&<div aria-label="Per-destination publishing health" style={{marginBlock:'16px'}}><h3>Destination output</h3>{snapshot.destinations.map((d,i)=><div className="dock-note" key={d.id} style={{marginBlock:'8px'}}><strong>{d.id==='single'?'Single destination':`Destination ${i+1} · ${d.id.slice(0,8)}`}</strong> · {d.phase} · Retry {d.reconnectAttempt??0}{d.interrupted?' · Delivery interrupted':''}<br/>{d.sentPackets} of {d.admittedPackets} admitted packets sent · {(d.sentPayloadBytes/1048576).toFixed(2)} MiB sent · {d.queuedPackets} queued</div>)}<p className="dock-note">A failed destination does not automatically stop the remaining workers. Aggregate bitrate is the sum of native sender payloads, not individual stream bitrate.</p></div>}
+      {native&&<section aria-label="Local sender diagnostics export">
+        <h3>Local sender diagnostic history</h3>
+        <p className="dock-note">Latest observed native session · {history.samples.length} / {HISTORY_LIMIT} samples. Samples are collected about every ten seconds and on observed state changes, including while navigating. Kept in renderer memory only; a reload, close or new session can discard history. Older samples may be dropped. No automatic upload or receiver verification.</p>
+        <button className="secondary-button" disabled={!history.samples.length} onClick={prepareReport}>Prepare redacted sender report</button>
+        {report&&<div>
+          <p className="dock-note">Export snapshot prepared on request; prepare again for newer readings. Stream keys, URLs, destination names and session IDs are excluded.</p>
+          <textarea aria-label="Redacted sender report JSON" readOnly value={report} rows={10} style={{width:'100%',fontFamily:'monospace'}}/>
+          <button className="secondary-button" onClick={()=>void copyReport()}>Copy sender report</button>
+          <button className="secondary-button" onClick={()=>{setReport('');setCopyStatus('')}}>Close report</button>
+          {copyStatus&&<p role="status">{copyStatus}</p>}
+        </div>}
+      </section>}
       <p className="dock-note">Actual Go Live and native recovery remain gated pending secure destination authorization and receiving-side acceptance. Counters reset for each new publishing epoch.</p>
     </div>
   </section>
