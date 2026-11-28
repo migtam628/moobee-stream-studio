@@ -49,12 +49,12 @@ jobs:
           DIR=apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg
           DMG="$(find "$DIR" -maxdepth 1 -type f -name '*.dmg' -print -quit)"
           test -s "$DMG"
-          bash scripts/verify-macos-app-bundle.sh --dmg "$DMG"
           # Inspect without launching, then unmount even if verification fails.
           mount="$(mktemp -d)"
           trap 'hdiutil detach "$mount" -quiet || true; rmdir "$mount" || true' EXIT
           hdiutil attach -readonly -nobrowse -quiet -mountpoint "$mount" "$DMG"
           app="$mount/MooBee Stream Studio.app"
+          bash scripts/verify-macos-app-bundle.sh "$app"
           exe=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")
           test "$(lipo -archs "$app/Contents/MacOS/$exe")" = arm64
           codesign --verify --deep --strict "$app"
