@@ -194,8 +194,15 @@ try {
       if(cmd==='list_stream_destinations')return window.__destinationRows??[];
       if(cmd==='add_stream_destination'){
         if(args.streamKey!=='fixture-not-a-real-key')throw new Error('Unexpected fixture key');
-        const row={id:'e9525c58-0e63-40b3-94b6-a9d0f0de4e99',name:args.name,serverUrl:args.serverUrl,credentialAvailable:true};
+        const row={id:'e9525c58-0e63-40b3-94b6-a9d0f0de4e99',name:args.name,serverUrl:args.serverUrl,credentialAvailable:true,revision:'c1111111-1111-4111-8111-111111111111'};
         window.__destinationRows=[row];return row;
+      }
+      if(cmd==='edit_stream_destination'){
+        const row=window.__destinationRows?.find(row=>row.id===args.id);
+        if(!row||row.revision!==args.expectedRevision)throw new Error('Destination changed');
+        if(args.newKey!=='fixture-rotated-key')throw new Error('Unexpected replacement key');
+        const updated={...row,name:args.name,serverUrl:args.serverUrl,revision:'c2222222-2222-4222-8222-222222222222'};
+        window.__destinationRows=[updated];window.__editRequest=args;return updated;
       }
       if(cmd==='remove_stream_destination'){window.__destinationRows=[];return null;}
       if(cmd==='live_health_status')return window.__healthFixture??(window.__acceptanceState?.phase==='streaming'?window.__acceptanceState:null)??window.__rehearsal??null;
@@ -405,7 +412,7 @@ try {
   if(flv.seconds!==4||flv.displayIds.join()!=='1'||flv.sessionId!==undefined||!Array.isArray(flv.audioInputs))throw new Error('Offline FLV capture routing failed');
   await macPage.getByRole('button',{name:'Close capture diagnostics',exact:true}).click();
   await macPage.getByRole('button',{name:'Saved FLV · View result',exact:true}).waitFor();
-  await macPage.evaluate(()=>{window.__destinationRows=[{id:'e9525c58-0e63-40b3-94b6-a9d0f0de4e99',name:'Private fixture',serverUrl:'rtmps://example.invalid/live',credentialAvailable:true}];});
+  await macPage.evaluate(()=>{window.__destinationRows=[{id:'e9525c58-0e63-40b3-94b6-a9d0f0de4e99',name:'Private fixture',serverUrl:'rtmps://example.invalid/live',credentialAvailable:true,revision:'c1111111-1111-4111-8111-111111111111'}];});
   const acceptance=macPage.getByRole('region',{name:'Real native streaming acceptance'});
   await acceptance.getByRole('button',{name:'Load test destinations',exact:true}).click();
   await acceptance.getByRole('checkbox').check();
@@ -422,7 +429,7 @@ try {
   await startReal.click();
   await acceptance.getByText(/Native test: streaming/).waitFor();
   const accepted=await macPage.evaluate(()=>window.__acceptanceRequest);
-  if(accepted.displayIds.join()!=='1'||accepted.destinations[0].name!=='Private fixture'||accepted.seconds!==7200||accepted.fallbackOnReconnect!==true||accepted.adaptiveBitrate!==true||'streamKey' in accepted.destinations[0])throw new Error('Invalid acceptance source or destination handoff');
+  if(accepted.displayIds.join()!=='1'||accepted.destinations[0].name!=='Private fixture'||accepted.destinations[0].revision!=='c1111111-1111-4111-8111-111111111111'||accepted.seconds!==7200||accepted.fallbackOnReconnect!==true||accepted.adaptiveBitrate!==true||'streamKey' in accepted.destinations[0])throw new Error('Invalid acceptance source or destination handoff');
   await macPage.getByRole('button',{name:'Analytics',exact:true}).click();
   const globalLive=macPage.getByRole('region',{name:'Active native stream controls'});
   await globalLive.getByText(/Native test: streaming/).waitFor();
@@ -475,7 +482,19 @@ try {
   await dest.getByRole('button',{name:'Save destination',exact:true}).click();
   await dest.getByText('Fixture destination',{exact:true}).waitFor();
   if(await dest.getByLabel('Stream key').inputValue()!=='')throw new Error('Stream key field not cleared');
-  await dest.getByRole('button',{name:'Remove Fixture destination',exact:true}).click();
+  await dest.getByRole('button',{name:'Edit Fixture destination',exact:true}).click();
+  const editForm=dest.getByRole('form',{name:'Edit saved destination'});
+  await editForm.getByLabel('Edited destination name',{exact:true}).fill('Rotated fixture');
+  await editForm.getByLabel('Edited RTMPS server URL',{exact:true}).fill('rtmps://new.example.invalid/live');
+  await editForm.getByRole('button',{name:'Save destination changes'}).click();
+  await dest.getByRole('alert').filter({hasText:'Enter a new stream key'}).waitFor();
+  if(await macPage.evaluate(()=>!!window.__editRequest))throw new Error('Endpoint change reused a stream key');
+  await editForm.getByLabel('Replacement stream key',{exact:true}).fill('fixture-rotated-key');
+  await editForm.getByRole('button',{name:'Save destination changes'}).click();
+  await dest.getByText('Rotated fixture',{exact:true}).waitFor();
+  const editRequest=await macPage.evaluate(()=>window.__editRequest);
+  if(editRequest.expectedRevision!=='c1111111-1111-4111-8111-111111111111'||editRequest.id!=='e9525c58-0e63-40b3-94b6-a9d0f0de4e99')throw new Error('Edit lost destination identity or revision');
+  await dest.getByRole('button',{name:'Remove Rotated fixture',exact:true}).click();
   await dest.getByRole('button',{name:'Confirm removal',exact:true}).click();
   await dest.getByText('No saved destinations.',{exact:true}).waitFor();
   // A renderer reload must recover the existing native session without starting another one.

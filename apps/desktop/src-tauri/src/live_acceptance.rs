@@ -5,7 +5,7 @@ use crate::live_lifecycle::{Controller,Mode};
 use std::sync::Arc;
 #[derive(Deserialize)]
 #[serde(rename_all="camelCase",deny_unknown_fields)]
-struct Destination{id:String,name:String,server_url:String}
+struct Destination{id:String,name:String,server_url:String,revision:Option<String>}
 #[derive(Deserialize)]
 #[serde(rename_all="camelCase",deny_unknown_fields)]
 pub(crate) struct Request{
@@ -36,7 +36,7 @@ pub(crate) async fn start_live_acceptance(app:tauri::AppHandle,state:tauri::Stat
         let mut ids=HashSet::new();
         for d in &request.destinations{
             if !uuid::Uuid::parse_str(&d.id).is_ok_and(|u|u.to_string()==d.id)||!ids.insert(&d.id)||
-                d.name.is_empty()||d.name.len()>80||d.server_url.len()>768{return Err("Invalid confirmed destination preview".into())}
+                d.name.is_empty()||d.name.len()>80||d.server_url.len()>768||d.revision.as_ref().is_some_and(|id|!uuid::Uuid::parse_str(id).is_ok_and(|u|u.to_string()==*id)){return Err("Invalid confirmed destination preview".into())}
         }
         let run=state.inner().start(request.session_id.clone(),Mode::Native)?;
         run.enable_inplace_bitrate(request.adaptive_bitrate.unwrap_or(false));
@@ -47,11 +47,11 @@ pub(crate) async fn start_live_acceptance(app:tauri::AppHandle,state:tauri::Stat
                 let Request{destinations,display_ids,video_device_id,seconds,profile,bitrate_kbps,fallback_on_reconnect,layout,overlay,audio_inputs,transforms,..}=request;
                 if destinations.len()==1{
                     let d=&destinations[0];
-                    crate::program_continuous_avi::run_saved_destination_session(&app,run.clone(),&d.id,&d.name,&d.server_url,true,
+                    crate::program_continuous_avi::run_saved_destination_session(&app,run.clone(),&d.id,&d.name,&d.server_url,d.revision.as_deref(),true,
                         display_ids,video_device_id,seconds,&profile,bitrate_kbps,layout.as_deref(),overlay,audio_inputs,transforms,fallback_on_reconnect.unwrap_or(false))
                 }else{
                     crate::program_continuous_avi::run_saved_multistream_session(&app,run.clone(),
-                        destinations.into_iter().map(|d|(d.id,d.name,d.server_url)).collect(),true,
+                        destinations.into_iter().map(|d|(d.id,d.name,d.server_url,d.revision)).collect(),true,
                         display_ids,video_device_id,seconds,&profile,bitrate_kbps,layout.as_deref(),overlay,audio_inputs,transforms)
                 }
             }));

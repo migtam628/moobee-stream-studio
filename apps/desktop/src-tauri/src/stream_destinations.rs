@@ -10,11 +10,11 @@ static LOCK:Mutex<()>=Mutex::new(());
 static ACTIVE:Mutex<Vec<String>>=Mutex::new(Vec::new());
 #[derive(Serialize,Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Record{version:u8,name:String,server_url:String,stream_key:String}
+struct Record{version:u8,name:String,server_url:String,stream_key:String,#[serde(default)] revision:Option<String>}
 impl Drop for Record{fn drop(&mut self){use zeroize::Zeroize;self.stream_key.zeroize();}}
 #[derive(Serialize)]
 #[serde(rename_all="camelCase")]
-pub(crate) struct View{id:String,name:String,server_url:Option<String>,credential_available:bool}
+pub(crate) struct View{id:String,name:String,server_url:Option<String>,credential_available:bool,revision:Option<String>}
 trait Vault{
     fn put(&self,id:&str,bytes:&[u8])->Result<(),String>;
     fn get(&self,id:&str)->Result<Option<Vec<u8>>,String>;
@@ -79,7 +79,7 @@ fn load(vault:&impl Vault,id:&str)->Result<Option<Record>,String>{
     let bytes=zeroize::Zeroizing::new(bytes);
     if bytes.len()>MAX_RECORD{return Err("Invalid stored destination".into())}
     let r:Record=serde_json::from_slice(&bytes).map_err(|_|"Invalid stored destination")?;
-    if r.version!=1{return Err("Unsupported destination version".into())}
+    if r.version!=1||r.revision.as_ref().is_some_and(|id|!valid_id(id)){return Err("Unsupported destination version".into())}
     validate(&r.name,&r.server_url,&r.stream_key)?;
     Ok(Some(r))
 }
@@ -87,13 +87,13 @@ fn views(dir:&Path,vault:&impl Vault)->Result<Vec<View>,String>{
     ids(dir)?.into_iter().map(|id|{
         let r=load(vault,&id)?;
         Ok(match r{
-            Some(r)=>View{id,name:r.name.clone(),server_url:Some(r.server_url.clone()),credential_available:true},
-            None=>View{id,name:"Missing OS credential".into(),server_url:None,credential_available:false},
+            Some(r)=>View{id,name:r.name.clone(),server_url:Some(r.server_url.clone()),credential_available:true,revision:r.revision.clone()},
+            None=>View{id,name:"Missing OS credential".into(),server_url:None,credential_available:false,revision:None},
         })
     }).collect()
 }
 fn create(dir:&Path,vault:&impl Vault,name:String,server_url:String,stream_key:String)->Result<View,String>{
-    let record=Record{version:1,name,server_url,stream_key};
+    let record=Record{version:1,name,server_url,stream_key,revision:Some(uuid::Uuid::new_v4().to_string())};
     validate(&record.name,&record.server_url,&record.stream_key)?;
     if ids(dir)?.len()>=MAX_DESTINATIONS{return Err("At most eight saved destinations are supported".into())}
     let bytes=zeroize::Zeroizing::new(serde_json::to_vec(&record).map_err(|_|"Could not encode destination")?);
@@ -110,7 +110,30 @@ fn create(dir:&Path,vault:&impl Vault,name:String,server_url:String,stream_key:S
         if vault.remove(&id).is_ok(){let _=fs::remove_file(&marker);}
         return Err(e)
     }
-    Ok(View{id,name:record.name.clone(),server_url:Some(record.server_url.clone()),credential_available:true})
+    Ok(View{id,name:record.name.clone(),server_url:Some(record.server_url.clone()),credential_available:true,revision:record.revision.clone()})
+}
+// Replace one complete vault record under the process-local store lock.
+// No plaintext persistence and no changes to the UUID marker.
+fn edit(dir:&Path,vault:&impl Vault,id:&str,expected_revision:Option<&str>,name:String,server_url:String,new_key:Option<String>)->Result<View,String>{
+    let new_key=new_key.map(zeroize::Zeroizing::new);
+    if !valid_id(id)||!ids(dir)?.iter().any(|v|v==id){return Err("Unknown destination".into())}
+    if ACTIVE.lock().map_err(|_|"Destination lease state unavailable")?.iter().any(|v|v==id){return Err("Stop the active publishing session before editing its destination".into())}
+    let mut record=load(vault,id)?.ok_or("Destination credential missing; remove and recreate it")?;
+    if record.revision.as_deref()!=expected_revision{return Err("Destination changed; refresh and review again".into())}
+    // A different endpoint must not silently inherit the old endpoint's key.
+    if record.server_url!=server_url&&new_key.is_none(){return Err("A new stream key is required when changing the server URL".into())}
+    if let Some(key)=new_key{
+        use zeroize::Zeroize;
+        record.stream_key.zeroize();
+        record.stream_key=key.to_string();
+    }
+    validate(&name,&server_url,&record.stream_key)?;
+    record.name=name;record.server_url=server_url;
+    record.revision=Some(uuid::Uuid::new_v4().to_string());
+    let bytes=zeroize::Zeroizing::new(serde_json::to_vec(&record).map_err(|_|"Could not encode destination")?);
+    if bytes.len()>MAX_RECORD{return Err("Destination record exceeds credential store budget".into())}
+    vault.put(id,&bytes)?;
+    Ok(View{id:id.to_owned(),name:record.name.clone(),server_url:Some(record.server_url.clone()),credential_available:true,revision:record.revision.clone()})
 }
 fn remove(dir:&Path,vault:&impl Vault,id:&str)->Result<(),String>{
     if !valid_id(id)||!ids(dir)?.iter().any(|v|v==id){return Err("Unknown destination".into())}
@@ -128,19 +151,19 @@ impl Lease{
 impl Drop for Lease{
     fn drop(&mut self){if let Ok(mut active)=ACTIVE.lock(){active.retain(|v|v!=&self.id);}}
 }
-fn lease(dir:&Path,vault:&impl Vault,id:&str,expected_name:&str,expected_url:&str,explicitly_authorized:bool)->Result<Lease,String>{
+fn lease(dir:&Path,vault:&impl Vault,id:&str,expected_name:&str,expected_url:&str,expected_revision:Option<&str>,explicitly_authorized:bool)->Result<Lease,String>{
     if !explicitly_authorized{return Err("Explicit destination authorization required".into())}
     if !valid_id(id)||!ids(dir)?.iter().any(|v|v==id){return Err("Unknown destination".into())}
     let record=load(vault,id)?.ok_or("Destination credential missing")?;
-    if record.name!=expected_name||record.server_url!=expected_url{return Err("Destination changed; refresh and reconfirm".into())}
+    if record.name!=expected_name||record.server_url!=expected_url||record.revision.as_deref()!=expected_revision{return Err("Destination changed; refresh and reconfirm".into())}
     let mut active=ACTIVE.lock().map_err(|_|"Destination lease state unavailable")?;
     if active.iter().any(|v|v==id){return Err("Destination is already in use".into())}
     active.push(id.to_owned());
     Ok(Lease{id:id.to_owned(),record})
 }
-pub(crate) fn authorized_destination(app:&tauri::AppHandle,id:&str,expected_name:&str,expected_url:&str,explicitly_authorized:bool)->Result<Lease,String>{
+pub(crate) fn authorized_destination(app:&tauri::AppHandle,id:&str,expected_name:&str,expected_url:&str,expected_revision:Option<&str>,explicitly_authorized:bool)->Result<Lease,String>{
     let _guard=LOCK.lock().map_err(|_|"Destination store unavailable")?;
-    lease(&index(app)?,&OsVault,id,expected_name,expected_url,explicitly_authorized)
+    lease(&index(app)?,&OsVault,id,expected_name,expected_url,expected_revision,explicitly_authorized)
 }
 pub(crate) async fn list_stream_destinations(app:tauri::AppHandle)->Result<Vec<View>,String>{
     tauri::async_runtime::spawn_blocking(move||{
@@ -152,6 +175,12 @@ pub(crate) async fn add_stream_destination(app:tauri::AppHandle,name:String,serv
     tauri::async_runtime::spawn_blocking(move||{
         let _guard=LOCK.lock().map_err(|_|"Destination store unavailable")?;
         create(&index(&app)?,&OsVault,name,server_url,stream_key)
+    }).await.map_err(|_|"Destination store worker stopped")?
+}
+pub(crate) async fn edit_stream_destination(app:tauri::AppHandle,id:String,expected_revision:Option<String>,name:String,server_url:String,new_key:Option<String>)->Result<View,String>{
+    tauri::async_runtime::spawn_blocking(move||{
+        let _guard=LOCK.lock().map_err(|_|"Destination store unavailable")?;
+        edit(&index(&app)?,&OsVault,&id,expected_revision.as_deref(),name,server_url,new_key)
     }).await.map_err(|_|"Destination store worker stopped")?
 }
 pub(crate) async fn remove_stream_destination(app:tauri::AppHandle,id:String)->Result<(),String>{
@@ -199,16 +228,44 @@ mod tests{
         let dir=Temp(std::env::temp_dir().join(uuid::Uuid::new_v4().to_string()));let vault=Memory::default();
         let url="rtmps://example.invalid/live";
         let v=create(&dir.0,&vault,"Test".into(),url.into(),"fixture-secret".into()).unwrap();
-        assert!(lease(&dir.0,&vault,&v.id,"Test",url,false).is_err());
-        assert!(lease(&dir.0,&vault,&v.id,"Other",url,true).is_err());
-        assert!(lease(&dir.0,&vault,&v.id,"Test","rtmps://other.invalid/live",true).is_err());
-        let l=lease(&dir.0,&vault,&v.id,"Test",url,true).unwrap();
+        assert!(lease(&dir.0,&vault,&v.id,"Test",url,v.revision.as_deref(),false).is_err());
+        assert!(lease(&dir.0,&vault,&v.id,"Other",url,v.revision.as_deref(),true).is_err());
+        assert!(lease(&dir.0,&vault,&v.id,"Test","rtmps://other.invalid/live",v.revision.as_deref(),true).is_err());
+        let l=lease(&dir.0,&vault,&v.id,"Test",url,v.revision.as_deref(),true).unwrap();
         assert_eq!(l.credentials(),(url,"fixture-secret"));
-        assert!(lease(&dir.0,&vault,&v.id,"Test",url,true).is_err());
+        assert!(lease(&dir.0,&vault,&v.id,"Test",url,v.revision.as_deref(),true).is_err());
         assert!(remove(&dir.0,&vault,&v.id).is_err());
         let owner=std::sync::Arc::new(l);let transport=owner.clone();
         drop(owner);assert!(remove(&dir.0,&vault,&v.id).is_err());
         drop(transport);remove(&dir.0,&vault,&v.id).unwrap();
+    }
+    #[test]fn edits_rotate_revision_and_block_stale_preview_and_active_lease(){
+        let dir=Temp(std::env::temp_dir().join(uuid::Uuid::new_v4().to_string()));let vault=Memory::default();
+        let url="rtmps://example.invalid/live";
+        let v=create(&dir.0,&vault,"Test".into(),url.into(),"fixture-old".into()).unwrap();
+        let l=lease(&dir.0,&vault,&v.id,"Test",url,v.revision.as_deref(),true).unwrap();
+        assert!(edit(&dir.0,&vault,&v.id,v.revision.as_deref(),"Test".into(),url.into(),Some("fixture-new".into())).is_err());
+        drop(l);
+        assert!(edit(&dir.0,&vault,&v.id,v.revision.as_deref(),"Test".into(),"rtmps://other.invalid/live".into(),None).is_err());
+        let updated=edit(&dir.0,&vault,&v.id,v.revision.as_deref(),"Test".into(),url.into(),Some("fixture-new".into())).unwrap();
+        assert_eq!(updated.id,v.id);assert_ne!(updated.revision,v.revision);
+        assert!(lease(&dir.0,&vault,&v.id,"Test",url,v.revision.as_deref(),true).is_err());
+        assert!(edit(&dir.0,&vault,&v.id,v.revision.as_deref(),"Stale".into(),url.into(),None).is_err());
+        let renamed=edit(&dir.0,&vault,&v.id,updated.revision.as_deref(),"Renamed".into(),url.into(),None).unwrap();
+        let l=lease(&dir.0,&vault,&v.id,"Renamed",url,renamed.revision.as_deref(),true).unwrap();
+        assert_eq!(l.credentials(),(url,"fixture-new"));
+        assert!(!serde_json::to_string(&renamed).unwrap().contains("fixture-new"));
+        assert_eq!(fs::read(dir.0.join(&v.id)).unwrap().len(),0);
+    }
+    #[test]fn legacy_record_without_revision_can_be_updated_once(){
+        let dir=Temp(std::env::temp_dir().join(uuid::Uuid::new_v4().to_string()));let vault=Memory::default();
+        let url="rtmps://example.invalid/live";
+        let v=create(&dir.0,&vault,"Test".into(),url.into(),"fixture-old".into()).unwrap();
+        let mut record=load(&vault,&v.id).unwrap().unwrap();record.revision=None;
+        vault.put(&v.id,&serde_json::to_vec(&record).unwrap()).unwrap();
+        let updated=edit(&dir.0,&vault,&v.id,None,"Test".into(),url.into(),None).unwrap();
+        assert!(updated.revision.is_some());
+        assert!(lease(&dir.0,&vault,&v.id,"Test",url,None,true).is_err());
     }
     #[test]fn rejects_invalid_config_without_writing(){
         let dir=Temp(std::env::temp_dir().join(uuid::Uuid::new_v4().to_string()));let vault=Memory::default();

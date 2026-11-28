@@ -1,7 +1,7 @@
 import {useEffect,useRef,useState} from 'react'
 import {createPortal} from 'react-dom'
 import {request,runningInTauri} from './api'
-type Destination={id:string;name:string;serverUrl:string|null;credentialAvailable:boolean}
+type Destination={id:string;name:string;serverUrl:string|null;credentialAvailable:boolean;revision?:string|null}
 type Prepared={scene:string;sources:string[];audio:string[];config:Record<string,unknown>}
 type Snapshot={sessionId:string;mode:string;phase:string;mediaFrames:number;sentPackets:number;elapsedMs:number;error?:string|null}
 const confirmation='START REAL TEST STREAM'
@@ -122,7 +122,7 @@ export default function LiveAcceptance({active,disabled,prepare,onBusy}:{active:
     try{
       await request('/studio/live-acceptance/start',{
         ...snapshot.prepared.config,sessionId,confirmation,fallbackOnReconnect:snapshot.fallback,adaptiveBitrate:snapshot.adaptive,
-        destinations:snapshot.targets.map(d=>({id:d.id,name:d.name,serverUrl:d.serverUrl}))
+        destinations:snapshot.targets.map(d=>({id:d.id,name:d.name,serverUrl:d.serverUrl,revision:d.revision??null}))
       })
     }catch{setError('Native test stream did not complete successfully. Review sender health and the saved destination.')}
     finally{

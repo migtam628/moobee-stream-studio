@@ -1011,7 +1011,7 @@ pub(crate) fn run_authorized_rtmps_session(
 #[cfg(any(target_os="macos",target_os="windows"))]
 pub(crate) fn run_saved_destination_session(
     app:&tauri::AppHandle,run:crate::live_lifecycle::Run,
-    destination_id:&str,expected_name:&str,expected_url:&str,explicitly_authorized:bool,
+    destination_id:&str,expected_name:&str,expected_url:&str,expected_revision:Option<&str>,explicitly_authorized:bool,
     display_ids:Vec<usize>,video_device_id:Option<String>,seconds:u32,profile:&str,
     bitrate_kbps:Option<u32>,layout:Option<&str>,
     overlay:Option<crate::program_overlay::OverlayInput>,audio_inputs:Vec<crate::program_audio::AudioInput>,
@@ -1019,7 +1019,7 @@ pub(crate) fn run_saved_destination_session(
     fallback_on_reconnect:bool,
 )->Result<ContinuousProgramReport,String>{
     if !run.native_active(){return Err("An active native streaming session is required".into())}
-    let lease=match crate::stream_destinations::authorized_destination(app,destination_id,expected_name,expected_url,explicitly_authorized){
+    let lease=match crate::stream_destinations::authorized_destination(app,destination_id,expected_name,expected_url,expected_revision,explicitly_authorized){
         Ok(lease)=>lease,Err(error)=>{run.finish(false);return Err(error)}
     };
     if !run.native_active(){run.finish(false);return Err("Streaming session cancelled before connection".into())}
@@ -1036,7 +1036,7 @@ pub(crate) fn run_saved_destination_session(
 #[cfg(any(target_os="macos",target_os="windows"))]
 pub(crate) fn run_saved_multistream_session(
     app:&tauri::AppHandle,run:crate::live_lifecycle::Run,
-    destinations:Vec<(String,String,String)>,explicitly_authorized:bool,
+    destinations:Vec<(String,String,String,Option<String>)>,explicitly_authorized:bool,
     display_ids:Vec<usize>,video_device_id:Option<String>,seconds:u32,profile:&str,
     bitrate_kbps:Option<u32>,layout:Option<&str>,
     overlay:Option<crate::program_overlay::OverlayInput>,audio_inputs:Vec<crate::program_audio::AudioInput>,
@@ -1046,9 +1046,9 @@ pub(crate) fn run_saved_multistream_session(
     let result=(||{
         if !explicitly_authorized||!(2..=crate::live_fanout::MAX_DESTINATIONS).contains(&destinations.len()){return Err("Confirm two or three destinations".into())}
         let mut leases=Vec::new();let mut ids=std::collections::HashSet::new();
-        for (id,name,url) in destinations{
+        for (id,name,url,revision) in destinations{
             if !ids.insert(id.clone()){return Err("Duplicate destination".into())}
-            let lease=crate::stream_destinations::authorized_destination(app,&id,&name,&url,true)?;
+            let lease=crate::stream_destinations::authorized_destination(app,&id,&name,&url,revision.as_deref(),true)?;
             leases.push((id,std::sync::Arc::new(lease)));
         }
         let initial=validate_bitrate(bitrate_kbps,encoding_profile(profile)?.bitrate_kbps)?;
