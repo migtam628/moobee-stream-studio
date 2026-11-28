@@ -49,3 +49,12 @@ test('session isolation, terminal classification and no session identity in expo
   assert.ok(!liveHistoryReport(h.samples).includes(second))
   assert.equal(updateSessionHistory(h,fixture(0,{sessionId:'invalid'})),h)
 })
+
+test('authorized output and unsupported/uncertain encoder transitions are retained immediately',()=>{
+  let h=appendLiveSample([],fixture(0,{destinations:[{phase:'authorized'}]}))
+  assert.equal(h[0].destinations[0].phase,'authorized')
+  h=appendLiveSample(h,fixture(100,{destinations:[{phase:'authorized'}],bitrateAdvice:{currentKbps:3000,inplaceUnsupported:true}}))
+  h=appendLiveSample(h,fixture(200,{destinations:[{phase:'authorized'}],bitrateAdvice:{currentKbps:3000,inplaceUnsupported:true,inplaceUncertain:true}}))
+  assert.equal(h.length,3)
+  assert.equal(h.at(-1).bitrateAdvice.inplaceUncertain,true)
+})
