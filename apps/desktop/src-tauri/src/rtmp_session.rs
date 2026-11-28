@@ -63,6 +63,7 @@ impl<T:Read+Write> Publisher<T>{
         Err("RTMP negotiation exceeded chunk limit".into())
     }
     pub(crate) fn transport_failure(&self)->Option<Failure>{self.transport_failure}
+    fn clean_inbound_boundary(&self)->bool{self.inbound.is_empty()&&!self.reader.has_pending_message()}
     pub(crate) fn authorized(&self)->bool{!self.failed&&matches!(self.state.phase(),Phase::Live(_))}
     /// Send a protocol-level end command after draining all admitted media.
     /// Successful local write is not a server acknowledgement.
@@ -284,10 +285,17 @@ pub(crate) mod tls {
             let read=self.io.read(&mut bytes[..room]);
             self.io.get_ref().socket.set_nonblocking(false).map_err(|_|"RTMPS poll restore failed")?;
             match read{
-                Ok(0)=>Err("RTMPS server closed connection".into()),
+                Ok(0)=>{
+                    // EOF after an authorized publish, without a parsed terminal
+                    // protocol command, is a transport interruption. A partial
+                    // inbound chunk is ambiguous and remains fail-closed.
+                    self.transport_failure=if self.clean_inbound_boundary(){Some(Failure::TransientTransport)}else{None};
+                    self.failed=true;
+                    Err("RTMPS server closed connection".into())
+                },
                 Ok(n)=>{self.ingest_inbound(&bytes[..n])?;Ok(())},
                 Err(e) if matches!(e.kind(),io::ErrorKind::WouldBlock|io::ErrorKind::TimedOut|io::ErrorKind::Interrupted)=>Ok(()),
-                Err(e)=>{if transient_io(e.kind()){self.transport_failure=Some(Failure::TransientTransport);}Err("RTMPS inbound transport failed".into())},
+                Err(e)=>{self.transport_failure=if self.clean_inbound_boundary()&&(transient_io(e.kind())||e.kind()==io::ErrorKind::UnexpectedEof){Some(Failure::TransientTransport)}else{None};self.failed=true;Err("RTMPS inbound transport failed".into())},
             }
         }
     }
@@ -357,6 +365,129 @@ pub(crate) mod tls {
             assert_eq!(stats.session.sent_packets,packets);assert_eq!(stats.session.sent_payload_bytes,bytes);
             assert!(report.orderly_close&&report.pong_received);
             println!("LOOPBACK_RECEIVER_REPORT {}",serde_json::to_string(&report).unwrap());
+        }
+        #[test]fn authorized_tls_eof_is_retryable_but_explicit_publish_stop_is_not(){
+            use std::net::{TcpListener,Ipv4Addr};
+            use crate::live_session::{Session,Phase};
+            for explicit_stop in [false,true]{
+                let (config,root)=certificates();
+                let listener=TcpListener::bind((Ipv4Addr::LOCALHOST,0)).unwrap();
+                let addr=listener.local_addr().unwrap();
+                let (tx,rx)=mpsc::sync_channel(1);
+                let server=std::thread::spawn(move||{
+                    let (socket,_)=listener.accept().unwrap();
+                    socket.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+                    socket.set_write_timeout(Some(Duration::from_secs(5))).unwrap();
+                    let mut stream=rustls::StreamOwned::new(rustls::ServerConnection::new(config).unwrap(),socket);
+                    crate::rtmps_test_receiver::authorize_fixture(&mut stream,"loopback-fixture-only").unwrap();
+                    rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                    if explicit_stop{crate::rtmps_test_receiver::stop_fixture(&mut stream).unwrap();}
+                    stream.conn.send_close_notify();
+                    stream.flush().unwrap();
+                });
+                let socket=TcpStream::connect_timeout(&addr,Duration::from_secs(3)).unwrap();
+                let mut builder=native_tls::TlsConnector::builder();
+                builder.min_protocol_version(Some(native_tls::Protocol::Tlsv12)).max_protocol_version(Some(native_tls::Protocol::Tlsv12)).add_root_certificate(root);
+                let tls=builder.build().unwrap().connect("localhost",DeadlineSocket{socket,deadline:Some(Instant::now()+NEGOTIATION_TIMEOUT),permit:None,_lease:None}).unwrap_or_else(|_|panic!("Fixture TLS handshake failed"));
+                let mut publisher=Publisher::establish(tls,"live","rtmps://localhost/live","loopback-fixture-only",0,&[9;1528]).unwrap();
+                publisher.io.get_mut().deadline=None;
+                let mut session=Session::new(publisher).unwrap();
+                tx.send(()).unwrap();
+                let deadline=Instant::now()+Duration::from_secs(5);
+                loop{
+                    if session.poll_tls_inbound().is_err(){break}
+                    assert!(Instant::now()<deadline,"Receiver disconnect was not observed");
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                assert_eq!(session.stats().phase,Phase::Failed);
+                assert_eq!(session.stats().failure,if explicit_stop{None}else{Some(Failure::TransientTransport)});
+                server.join().unwrap();
+            }
+        }
+        #[test]fn encrypted_fanout_recovers_only_disconnected_receiver_at_fresh_idr(){
+            use std::{net::{TcpListener,Ipv4Addr},sync::Arc,thread::JoinHandle};
+            use crate::{live_session::Session,live_publish_worker::Worker,live_fanout::{Fanout,Connector},rtmps_test_receiver::Report,stream_mux::{avc_sequence,avc_access_unit}};
+            fn client(addr:SocketAddr,root:native_tls::Certificate)->Worker{
+                let socket=TcpStream::connect_timeout(&addr,Duration::from_secs(3)).unwrap();
+                socket.set_nodelay(true).unwrap();
+                let mut builder=native_tls::TlsConnector::builder();
+                builder.min_protocol_version(Some(native_tls::Protocol::Tlsv12)).max_protocol_version(Some(native_tls::Protocol::Tlsv12)).add_root_certificate(root);
+                let tls=builder.build().unwrap().connect("localhost",DeadlineSocket{socket,deadline:Some(Instant::now()+NEGOTIATION_TIMEOUT),permit:None,_lease:None}).unwrap_or_else(|_|panic!("Fixture TLS handshake failed"));
+                let mut publisher=Publisher::establish(tls,"live","rtmps://localhost/live","loopback-fixture-only",0,&[9;1528]).unwrap();
+                publisher.io.get_mut().deadline=None;
+                Worker::start_with_poll(Session::new(publisher).unwrap(),|s|s.poll_tls_inbound()).unwrap()
+            }
+            fn open()->(Worker,JoinHandle<Result<Report>>){
+                let (config,root)=certificates();
+                let listener=TcpListener::bind((Ipv4Addr::LOCALHOST,0)).unwrap();
+                let addr=listener.local_addr().unwrap();
+                let server=std::thread::spawn(move||{
+                    let (socket,_)=listener.accept().unwrap();
+                    socket.set_read_timeout(Some(Duration::from_secs(8))).unwrap();
+                    socket.set_write_timeout(Some(Duration::from_secs(5))).unwrap();
+                    let mut stream=rustls::StreamOwned::new(rustls::ServerConnection::new(config).unwrap(),socket);
+                    crate::rtmps_test_receiver::serve(&mut stream,"loopback-fixture-only",None)
+                });
+                (client(addr,root),server)
+            }
+            let (healthy,healthy_server)=open();
+            let (config,root)=certificates();
+            let listener=TcpListener::bind((Ipv4Addr::LOCALHOST,0)).unwrap();
+            let addr=listener.local_addr().unwrap();
+            let broken_server=std::thread::spawn(move||{
+                let (socket,_)=listener.accept().unwrap();
+                socket.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+                socket.set_write_timeout(Some(Duration::from_secs(5))).unwrap();
+                let mut stream=rustls::StreamOwned::new(rustls::ServerConnection::new(config).unwrap(),socket);
+                crate::rtmps_test_receiver::authorize_fixture(&mut stream,"loopback-fixture-only").unwrap();
+                crate::rtmps_test_receiver::consume_video_start_fixture(&mut stream).unwrap();
+                stream.conn.send_close_notify();
+                stream.flush().unwrap();
+            });
+            let broken=client(addr,root);
+            let (tx,rx)=mpsc::sync_channel(1);
+            let connector:Connector=Arc::new(move|permit|{
+                if !permit(){return Err(Failure::Unknown)}
+                let (worker,server)=open();
+                if !permit(){worker.request_stop();return Err(Failure::Unknown)}
+                tx.try_send(server).map_err(|_|Failure::Unknown)?;
+                Ok(worker)
+            });
+            let mut fanout=Fanout::with_recovery(vec![(uuid::Uuid::new_v4().to_string(),healthy,None),(uuid::Uuid::new_v4().to_string(),broken,Some(connector))],None).unwrap();
+            let video=|t,key|avc_access_unit(&[&[if key{0x65}else{0x41},1]],t,0,key).unwrap();
+            fanout.submit(vec![avc_sequence(&[0x67,0x64,0,0x28],&[0x68,0xee]).unwrap(),video(0,true)]).unwrap();
+            let origin=Instant::now();let until=origin+Duration::from_secs(5);
+            while fanout.destinations()[1].phase!="failed"{
+                assert!(Instant::now()<until,"Receiver disconnect not observed");
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            broken_server.join().unwrap();
+            let mut expected=1u64;
+            let mut ts=0;
+            while !fanout.test_awaiting_key(1){
+                assert!(Instant::now()<until,"Receiver reconnect not observed");
+                std::thread::sleep(Duration::from_millis(50));
+                ts=(origin.elapsed().as_millis() as u32).max(ts+1);
+                fanout.submit(vec![video(ts,false)]).unwrap();
+                expected+=1;
+            }
+            let rejoined=rx.recv_timeout(Duration::from_secs(1)).unwrap();
+            assert!(fanout.destinations()[1].interrupted);
+            ts+=50;fanout.submit(vec![video(ts,true)]).unwrap();expected+=1;
+            ts+=50;fanout.submit(vec![video(ts,false)]).unwrap();expected+=1;
+            // The healthy receiver finishes normally; rejoining is not an uninterrupted soak.
+            assert!(fanout.finish().is_err());
+            let rows=fanout.destinations();
+            let healthy_report=healthy_server.join().unwrap().unwrap();
+            let rejoined_report=rejoined.join().unwrap().unwrap();
+            assert_eq!(healthy_report.video_frames,expected);
+            assert_eq!(rejoined_report.video_frames,2);
+            assert_eq!(rejoined_report.idr_frames,1);
+            assert_eq!(rejoined_report.last_video_ms,Some(50));
+            assert!(healthy_report.orderly_close&&rejoined_report.orderly_close);
+            assert!(!rows[0].interrupted&&rows[1].interrupted);
+            assert_eq!(rows[1].reconnect_attempt,1);
+            assert_eq!(rows[0].phase,"stopped");assert_eq!(rows[1].phase,"stopped");
         }
         #[test]fn loopback_tls_rejects_untrusted_root_and_wrong_hostname(){
             use std::net::{TcpListener,Ipv4Addr};
@@ -609,6 +740,20 @@ mod tests{
             let s=worker.stats().unwrap();
             assert_eq!(s.session.phase,Phase::Failed);assert_eq!(s.pending_bytes,0);assert!(s.session.restart_required);
         }
+    }
+    #[test]fn incomplete_message_is_not_a_clean_disconnect_boundary(){
+        let mut p=Publisher::establish(fixture(true),"live","rtmps://example.invalid/live","fixture-key",7,&[9;1528]).unwrap();
+        assert!(p.clean_inbound_boundary());
+        let body=vec![0u8;200];
+        let wire=rtmp::chunks(6,0,18,0,&body,128).unwrap();
+        assert_eq!(p.ingest_inbound(&wire[..140]).unwrap(),1);
+        assert!(p.inbound.is_empty());
+        assert!(p.reader.has_pending_message());
+        assert!(!p.clean_inbound_boundary());
+        assert_eq!(p.ingest_inbound(&wire[140..]).unwrap(),1);
+        assert!(p.clean_inbound_boundary());
+        assert_eq!(p.ingest_inbound(&wire[..5]).unwrap(),0);
+        assert!(!p.clean_inbound_boundary());
     }
     #[test]fn buffered_inbound_survives_fragmentation_and_services_ping(){
         let mut p=Publisher::establish(fixture(true),"live","rtmps://example.invalid/live","fixture-key",7,&[9;1528]).unwrap();
