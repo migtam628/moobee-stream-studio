@@ -299,6 +299,11 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
     if(typeof body.name!=='string'||typeof body.serverUrl!=='string'||typeof body.streamKey!=='string')throw new Error('Invalid destination');
     return invoke('add_stream_destination',{name:body.name,serverUrl:body.serverUrl,streamKey:body.streamKey});
   }
+  if(path==='/studio/destinations/preflight'){
+    if(!macHost()&&!windowsHost())throw new Error('Native credential storage requires Mac or Windows');
+    if(!Array.isArray(body.selected)||body.selected.length<1||body.selected.length>3)throw new Error('Invalid destination selection');
+    return invoke('preflight_stream_destinations',{selected:body.selected});
+  }
   if(path==='/studio/destinations/edit'){
     if(!macHost()&&!windowsHost())throw new Error('Native credential storage requires Mac or Windows');
     if(typeof body.id!=='string'||typeof body.name!=='string'||typeof body.serverUrl!=='string'||(body.expectedRevision!==null&&typeof body.expectedRevision!=='string')||(body.newKey!==null&&typeof body.newKey!=='string'))throw new Error('Invalid destination edit');
