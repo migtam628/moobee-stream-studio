@@ -6,6 +6,7 @@ fn main() {
     println!("cargo:rerun-if-changed=swift/MooBeeProgramVideoWriter.swift");
     println!("cargo:rerun-if-changed=swift/MooBeeAVCEncoder.swift");
     println!("cargo:rerun-if-changed=swift/MooBeeAACEncoder.swift");
+    println!("cargo:rerun-if-changed=swift/MooBeeBroadcastConsent.swift");
     println!("cargo:rerun-if-changed=swift/MooBeeProgramCamera.swift");
     println!("cargo:rerun-if-changed=swift/MooBeeProgramMicrophone.swift");
 
@@ -41,6 +42,7 @@ fn main() {
             .arg("swift/MooBeeProgramVideoWriter.swift")
             .arg("swift/MooBeeAVCEncoder.swift")
             .arg("swift/MooBeeAACEncoder.swift")
+            .arg("swift/MooBeeBroadcastConsent.swift")
             .arg("swift/MooBeeProgramCamera.swift")
             .arg("swift/MooBeeProgramMicrophone.swift")
             .status()
@@ -55,6 +57,7 @@ fn main() {
         // This is a system path, not a developer-machine Xcode dependency.
         println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/swift");
         println!("cargo:rustc-link-lib=framework=Foundation");
+        println!("cargo:rustc-link-lib=framework=AppKit");
         println!("cargo:rustc-link-lib=framework=AVFoundation");
         println!("cargo:rustc-link-lib=framework=AudioToolbox");
         println!("cargo:rustc-link-lib=framework=CoreMedia");

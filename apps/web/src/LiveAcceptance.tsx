@@ -147,7 +147,7 @@ export default function LiveAcceptance({active,disabled,prepare,onBusy}:{active:
   </>
   return <section className="dock-note" aria-label="Real native streaming acceptance">
     <strong>Developer-only real stream test</strong>
-    <p>Actual capture and network transmission. Use a private test destination. This is not production Go Live.</p>
+    <p>Actual capture and network transmission. Use a private test destination. This is not production Go Live. After the typed confirmation, approve the separate operating-system prompt; Cancel or expiry prevents capture.</p>
     {!checked&&<p role="status">Checking native session state before enabling a new test.</p>}
     <button className="secondary-button" disabled={!checked||disabled||loading||busy.current} onClick={()=>void refresh()}>Load test destinations</button>
     {destinations.map(d=><label key={d.id} className="layer-switch"><span>{d.name}<small>{d.serverUrl??'Missing credential'}</small></span><input type="checkbox" checked={selected.includes(d.id)} disabled={disabled||loading||busy.current||!d.credentialAvailable||(!selected.includes(d.id)&&selected.length>=3)} onChange={e=>{setReview(null);setSelected(old=>e.target.checked?[...old,d.id]:old.filter(id=>id!==d.id))}}/></label>)}
