@@ -11,9 +11,9 @@ Local alternative from a clean checkout of the reviewed commit, with Node 22, Ru
 ```sh
 npm ci
 # macOS: creates app bundle only, not a DMG
-npm run desktop:build -- --features native-live-acceptance --bundles app
+npm run tauri:build -w @moobee-live/desktop -- --features native-live-acceptance --bundles app
 # Windows: creates executable only, not an installer
-npm run desktop:build -- --features native-live-acceptance --no-bundle
+npm run tauri:build -w @moobee-live/desktop -- --features native-live-acceptance --no-bundle
 ```
 
 Use the appropriate command for the actual OS. For local build provenance, set GITHUB_SHA to the exact checkout commit and GITHUB_REF_NAME to private-qa before building; do not claim CI provenance for a local build. Do not run a QA app concurrently with the normal app; both use the existing OS credential store and app identity. Use an isolated test OS account where practical. No changes to system trust or security bypass are required by this procedure.
