@@ -113,7 +113,7 @@ impl Capture{
         }Ok(())
     }
 }
-pub(crate) fn serve(io:&mut (impl Read+Write),fixture_key:&str,capture_path:Option<&std::path::Path>)->Result<Report>{
+pub(crate) fn authorize_fixture(io:&mut (impl Read+Write),fixture_key:&str)->Result<()>{
     let c=read::<1537>(io)?;
     if c[0]!=3{return Err("Invalid RTMP client version".into())}
     let mut s=vec![3];let mut s1=[0u8;1536];getrandom::fill(&mut s1[8..]).map_err(|_|"Randomness unavailable")?;
@@ -128,6 +128,14 @@ pub(crate) fn serve(io:&mut (impl Read+Write),fixture_key:&str,capture_path:Opti
     let mut publish=command("publish",0.);publish.push(5);publish.extend(text(fixture_key));publish.extend(text("live"));
     expect(&receive(io)?,STREAM,&publish,false)?;
     reply(io,"onStatus",0.,STREAM,status("NetStream.Publish.Start"))?;
+    Ok(())
+}
+/// Test-only explicit protocol termination, distinct from a transport EOF.
+pub(crate) fn stop_fixture(io:&mut impl Write)->Result<()>{
+    reply(io,"onStatus",0.,STREAM,status("NetStream.Publish.Stop"))
+}
+pub(crate) fn serve(io:&mut (impl Read+Write),fixture_key:&str,capture_path:Option<&std::path::Path>)->Result<Report>{
+    authorize_fixture(io,fixture_key)?;
     // Exercise the actual sender's inbound TLS polling path.
     write(io,&[2,0,0,0,0,0,6,4,0,0,0,0,0,6,1,2,3,4])?;
     let mut close=command("deleteStream",0.);close.push(5);close.extend(number(f64::from(STREAM)));
