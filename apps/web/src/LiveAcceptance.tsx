@@ -108,6 +108,7 @@ export default function LiveAcceptance({active,disabled,prepare,onBusy}:{active:
     try{
       const targets=destinations.filter(d=>selected.includes(d.id)&&d.credentialAvailable&&d.serverUrl)
       if(targets.length!==selected.length)throw new Error('Refresh and reselect available destinations')
+      await request('/studio/destinations/preflight',{selected:targets.map(d=>({id:d.id,name:d.name,serverUrl:d.serverUrl,revision:d.revision??null}))})
       const prepared=await prepare(duration)
       if(generation===reviewGeneration.current)setReview({prepared,targets,fallback:targets.length===1&&fallback,adaptive:targets.length===1&&adaptive})
     }catch(e){setError((e as Error).message);setReview(null)}
@@ -157,6 +158,7 @@ export default function LiveAcceptance({active,disabled,prepare,onBusy}:{active:
     {selected.length===1&&<label className="layer-switch"><span>Adaptive bitrate during stream <small>Experimental; reduce only at GOP boundaries if encoder supports it</small></span><input aria-label="Adaptive bitrate during stream" type="checkbox" checked={adaptive} disabled={disabled||loading||busy.current} onChange={e=>{setAdaptive(e.target.checked);setReview(null);setPhrase('')}}/></label>}
     {review&&<div>
       <b>Confirm the exact capture and destinations</b>
+      <p>Local vault and destination selection checked. Provider credentials and network reception are not verified.</p>
       <p>Scene: {review.prepared.scene} · {String(review.prepared.config.seconds)}s · {String(review.prepared.config.profile)}</p>
       <p>Sources: {review.prepared.sources.join(', ')}</p>
       <p>Audio: {review.prepared.audio.join(', ')||'None'}</p>

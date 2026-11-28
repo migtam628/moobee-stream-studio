@@ -1053,6 +1053,7 @@ pub(crate) fn run_saved_multistream_session(
         }
         let initial=validate_bitrate(bitrate_kbps,encoding_profile(profile)?.bitrate_kbps)?;
         run.bitrate_config(initial,initial,false);
+        crate::stream_destinations::validate_distinct_leases(&leases)?;
         let flags=run.register_destination_stops(leases.iter().map(|(id,_)|id.clone()).collect())?;
         let credentials=leases.clone();
         let stop=run.stop_flag();let cancel=stop.clone();
