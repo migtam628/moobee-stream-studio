@@ -74,7 +74,7 @@ jobs:
         run: npm run test:e2e
       - name: Preserve release UI verification screenshots
         if: always() && startsWith(github.ref, 'refs/heads/release/')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-ui-verification
           path: .qa/*.png
@@ -114,7 +114,7 @@ jobs:
         run: |
           tar -tzf moobee-stream-studio-web-*.tar.gz | grep -qx 'apps/api/studio.mjs'
           tar -tzf moobee-stream-studio-web-*.tar.gz | grep -qx 'apps/desktop/src-tauri/resources/overlay.html'
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: web-node-bundle
           path: moobee-stream-studio-web-*.tar.gz
@@ -195,7 +195,7 @@ jobs:
           mkdir -p release-assets
           find apps/desktop/src-tauri/target -type f \( -name '*.dmg' -o -name '*.deb' -o -name '*setup.exe' \) -print -exec sh -c 'cp "$1" "release-assets/${{ matrix.label }}-$(basename "$1")"' _ '{}' \;
           test -n "$(find release-assets -type f -print -quit)"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: desktop-${{ matrix.label }}
           path: release-assets/*
@@ -266,7 +266,7 @@ jobs:
           done
       - name: Publish verifiable Android dependency throttle marker
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: android-dependency-throttle
           path: android-dependency-throttle.json
@@ -276,7 +276,7 @@ jobs:
           mkdir -p release-assets
           find apps/desktop/src-tauri/gen/android/app/build/outputs/apk -type f -name '*.apk' -exec cp '{}' release-assets/moobee-stream-studio-android-arm64-debug.apk \;
           test -s release-assets/moobee-stream-studio-android-arm64-debug.apk
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: android-arm64-debug
           path: release-assets/*.apk
