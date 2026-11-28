@@ -130,6 +130,14 @@ pub(crate) fn authorize_fixture(io:&mut (impl Read+Write),fixture_key:&str)->Res
     reply(io,"onStatus",0.,STREAM,status("NetStream.Publish.Start"))?;
     Ok(())
 }
+/// Consume the first two video messages before a simulated transport loss.
+pub(crate) fn consume_video_start_fixture(io:&mut impl Read)->Result<()>{
+    let mut report=Report::default();
+    report.media(receive(io)?)?;
+    report.media(receive(io)?)?;
+    if !report.video_config||report.video_frames!=1{return Err("Missing initial video configuration or frame".into())}
+    Ok(())
+}
 /// Test-only explicit protocol termination, distinct from a transport EOF.
 pub(crate) fn stop_fixture(io:&mut impl Write)->Result<()>{
     reply(io,"onStatus",0.,STREAM,status("NetStream.Publish.Stop"))
