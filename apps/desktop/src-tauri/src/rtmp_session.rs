@@ -227,6 +227,11 @@ pub(crate) mod tls {
         fn write(&mut self,data:&[u8])->io::Result<usize>{self.socket.set_write_timeout(Some(self.timeout()?))?;self.socket.write(data)}
         fn flush(&mut self)->io::Result<()>{self.timeout()?;self.socket.flush()}
     }
+    // Canonicalize the actual protocol routing fields without DNS or key material.
+    pub(crate) fn same_publish_endpoint(a:&str,b:&str)->Result<bool>{
+        let a=endpoint(a)?;let b=endpoint(b)?;
+        Ok(a.host.eq_ignore_ascii_case(&b.host)&&a.port==b.port&&a.app==b.app)
+    }
     pub(crate) fn validate_destination(server_url:&str,stream_key:&str)->Result<()>{
         endpoint(server_url)?;
         let _validated=zeroize::Zeroizing::new(rtmp::publish(stream_key)?);
