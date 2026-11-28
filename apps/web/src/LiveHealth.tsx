@@ -39,7 +39,7 @@ export default function LiveHealth(){
     return()=>{active=false;clearInterval(timer)}
   },[native])
   useEffect(()=>{setReport('');setCopyStatus('')},[history.sessionId])
-  const stoppable=(snapshot?.mode==='native'&&snapshot.phase==='streaming'&&snapshot.sessionId? snapshot.destinations??[]:[]).filter(d=>['authorized','sending','reconnecting'].includes(d.phase)&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(d.id)&&!(requestedStops?.sessionId===snapshot?.sessionId&&requestedStops.ids.includes(d.id)))
+  const stoppable=(snapshot?.mode==='native'&&snapshot.phase==='streaming'&&snapshot.sessionId? snapshot.destinations??[]:[]).filter(d=>['authorized','sending','reconnecting'].includes(d.phase)&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(d.id)&&!(requestedStops&&requestedStops.sessionId===snapshot?.sessionId&&requestedStops.ids.includes(d.id)))
   useEffect(()=>{setStopReview(null);setStopNotice('')},[snapshot?.sessionId])
   async function stopOutput(){
     if(!native||stopPending||!stopReview||stopReview.sessionId!==snapshot?.sessionId||stoppable.length<2||!stoppable.some(d=>d.id===stopReview.destinationId))return
@@ -47,7 +47,7 @@ export default function LiveHealth(){
     setStopReview(null);setStopPending(true);setStopNotice('')
     try{
       if(await request<boolean>('/studio/live-acceptance/stop-destination',intent)){
-        setRequestedStops(old=>({sessionId:intent.sessionId,ids:[...(old?.sessionId===intent.sessionId?old.ids:[]),intent.destinationId]}))
+        setRequestedStops(old=>({sessionId:intent.sessionId,ids:[...(old&&old.sessionId===intent.sessionId?old.ids:[]),intent.destinationId]}))
         setStopNotice('Output stop requested. Awaiting native status; remaining destinations continue if healthy.')
       }else setStopNotice('Output stop was not accepted. Refresh status or use the global Stop control.')
     }catch{setStopNotice('Output stop request failed; check native status before retrying.')}
