@@ -13,6 +13,7 @@ import BrowserRecorder from './BrowserRecorder'
 import QuickCapture from './QuickCapture'
 import LiveLifecycle from './LiveLifecycle'
 import LiveHealth from './LiveHealth'
+import NativeBroadcastFooter from './NativeBroadcastFooter'
 import StreamDestinations from './StreamDestinations'
 import { TransformCanvas, TransformControls, geometry } from './SourceTransformEditor'
 import type { SourceTransform } from './programDisplay'
@@ -68,13 +69,6 @@ function Panel({ title, icon: Icon, children, action, className = '' }: {
   title: string; icon: LucideIcon; children: ReactNode; action?: ReactNode; className?: string
 }) {
   return <section className={`panel ${className}`}><div className="panel-head"><div className="panel-title"><Icon size={17}/>{title}</div>{action}</div>{children}</section>
-}
-
-function formatElapsed(seconds: number) {
-  const h = Math.floor(seconds / 3600).toString().padStart(2, '0')
-  const m = Math.floor((seconds % 3600) / 60).toString().padStart(2, '0')
-  const s = Math.floor(seconds % 60).toString().padStart(2, '0')
-  return `${h}:${m}:${s}`
 }
 
 type PreviewRefresh = 'live' | 'fast' | 'normal' | 'paused'
@@ -716,6 +710,6 @@ export default function App() {
       <Panel title="Quick Actions" icon={SlidersHorizontal}><div className="quick-actions"><button onClick={() => go('Alerts')}><Bell size={17}/>Test an alert</button><button onClick={() => go('Overlays')}><LayoutGrid size={17}/>Browser overlay</button><button onClick={() => go('Clips')}><Film size={17}/>Capture a test GIF</button><button onClick={() => go('Settings')}><Terminal size={17}/>Native engine settings</button></div></Panel>
       {alert && activityOpen && <div className="recent-test"><Bell size={18}/>Last test: {alert.name}</div>}
     </aside>
-    <footer className="status-footer"><div className={`health ${status.connected ? 'healthy' : ''}`}><span className="status-dot"/>{status.connected ? (status.streaming ? 'Live Broadcast' : 'Scene Editor Ready · No Live Output') : 'Local engine offline'}</div><div className="footer-data"><span>Encoder <b>In development</b></span><span>Bitrate <b>{status.bitrateKbps === null ? '—' : `${status.bitrateKbps} kbps`}</b></span><span>Uptime <b>{formatElapsed(status.streamSeconds)}</b></span><span>Dropped <b>{status.droppedFrames === null ? '—' : status.droppedFrames}</b></span></div>{alert && !activityOpen && <span className="footer-alert">Last test: {alert.name}</span>}<span className="footer-build" title={buildIdentity}>{buildIdentity}</span></footer>
+    <footer className="status-footer"><NativeBroadcastFooter status={status}/>{alert && !activityOpen && <span className="footer-alert">Last test: {alert.name}</span>}<span className="footer-build" title={buildIdentity}>{buildIdentity}</span></footer>
   </div>
 }
