@@ -12,6 +12,8 @@ Group A covers the four core workstreams 9–12: Live RTMPS, reliability, destin
 - Encrypted receiver disconnect recovery and independent multistream rejoin: #99.
 - Secure destination editing and revision-bound key rotation: #100.
 - Separate OS-native broadcast consent: #101 (all six CI workflows passed; manual interaction remains unverified).
+- Individual destination retirement: #102 (six CI workflows passed).
+- Global native sender status: #103 (six CI workflows passed).
 
 ## Individual destination retirement
 
@@ -34,3 +36,6 @@ Record sender commit, OS/architecture, actual device/source configuration, selec
 | Production activation | Explicit review of above evidence and gated production controls; separate release/signing acceptance | Not authorized by synthetic CI alone |
 
 CI regression results do not constitute physical acceptance. Do not declare Group A complete, promote the formal workstream count, or enable default production broadcasting without the required evidence. Continue independent development increments only with explicit scope and green applicable CI.
+
+## Local destination preflight
+Before the renderer presents a broadcast review, native preflight rereads the selected OS-vault records, rejects missing or leased credentials and stale revisions, and checks that no two selections have the same RTMPS host (case-insensitive), port, application path and key. The actual leased records are checked again before multistream capture and connection. This checks only local configuration: aliases, different provider endpoints for the same account and remote credential acceptance cannot be inferred. No DNS, socket, publish, credential export, or automatic consent occurs during preflight. A new review is required after changes. Production Go Live remains gated.
