@@ -201,6 +201,11 @@ try {
         return null;
       }
       if(cmd==='list_stream_destinations')return window.__destinationRows??[];
+      if(cmd==='preflight_stream_destinations'){
+        window.__preflightRequest=args.selected;
+        if(window.__rejectPreflight)throw new Error('Destination changed; refresh and review again');
+        return null;
+      }
       if(cmd==='add_stream_destination'){
         if(args.streamKey!=='fixture-not-a-real-key')throw new Error('Unexpected fixture key');
         const row={id:'e9525c58-0e63-40b3-94b6-a9d0f0de4e99',name:args.name,serverUrl:args.serverUrl,credentialAvailable:true,revision:'c1111111-1111-4111-8111-111111111111'};
@@ -428,7 +433,15 @@ try {
   await acceptance.getByLabel('Lower bitrate after reconnect',{exact:true}).check();
   await acceptance.getByLabel('Adaptive bitrate during stream',{exact:true}).check();
   await acceptance.getByLabel('Test stream duration',{exact:true}).selectOption('7200');
+  await macPage.evaluate(()=>{window.__rejectPreflight=true;});
   await acceptance.getByRole('button',{name:'Review real stream test',exact:true}).click();
+  await acceptance.getByText('Destination changed; refresh and review again',{exact:true}).waitFor();
+  if(await acceptance.getByRole('button',{name:'Start real test stream',exact:true}).count())throw new Error('Failed preflight allowed broadcast confirmation');
+  await macPage.evaluate(()=>{window.__rejectPreflight=false;});
+  await acceptance.getByRole('button',{name:'Review real stream test',exact:true}).click();
+  await acceptance.getByText('Local vault and destination selection checked. Provider credentials and network reception are not verified.',{exact:true}).waitFor();
+  const preflight=await macPage.evaluate(()=>window.__preflightRequest);
+  if(preflight.length!==1||preflight[0].revision!=='c1111111-1111-4111-8111-111111111111'||'streamKey' in preflight[0])throw new Error('Invalid local preflight payload');
   await acceptance.getByText('Bitrate fallback: Enabled — lower preset after a classified transport retry',{exact:true}).waitFor();
   await acceptance.getByText('In-place bitrate reduction: Enabled — experimental single-output downshift',{exact:true}).waitFor();
   const startReal=acceptance.getByRole('button',{name:'Start real test stream',exact:true});
