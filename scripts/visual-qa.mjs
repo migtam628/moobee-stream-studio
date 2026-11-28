@@ -449,6 +449,10 @@ try {
   await health.getByText('73.5%',{exact:true}).first().waitFor();
   await health.getByText('128.0 MiB',{exact:true}).first().waitFor();
   await health.getByText('80 ms',{exact:true}).first().waitFor();
+  await macPage.evaluate(()=>{window.__healthFixture={...window.__healthFixture,phase:'stopped',nativeOutcome:'stoppedEarly'};});
+  await health.getByText('Stopped early — not a full-duration acceptance pass',{exact:true}).waitFor();
+  await macPage.evaluate(()=>{window.__healthFixture={...window.__healthFixture,nativeOutcome:'senderCompleted'};});
+  await health.getByText('Sender completed requested duration — receiver evidence required',{exact:true}).waitFor();
   await macPage.getByRole('button',{name:'Multistream',exact:true}).click();
   const dest=macPage.getByRole('region',{name:'Secure stream destinations'});
   await dest.getByText('No saved destinations.',{exact:true}).waitFor();
