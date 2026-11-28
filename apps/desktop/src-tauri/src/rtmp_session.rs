@@ -868,6 +868,27 @@ mod tests{
         assert_eq!(rows[1].reconnect_attempt,1);
         assert_eq!(rows[1].sent_packets,5);assert_eq!(rows[1].admitted_packets,6);
     }
+    #[test]fn fanout_user_stop_drains_one_output_and_keeps_survivor(){
+        use crate::{live_session::Session,live_publish_worker::Worker,live_fanout::Fanout,stream_mux::{avc_sequence,avc_access_unit}};
+        use std::{sync::{Arc,atomic::{AtomicBool,Ordering}},time::{Duration,Instant}};
+        let open=||Worker::start(Session::new(Publisher::establish(fixture(true),"live","rtmps://example.invalid/live","fixture-key",7,&[9;1528]).unwrap()).unwrap()).unwrap();
+        let a=uuid::Uuid::new_v4().to_string();let b=uuid::Uuid::new_v4().to_string();
+        let stop=Arc::new(AtomicBool::new(false));
+        let flags=std::collections::HashMap::from([(a.clone(),stop.clone()),(b.clone(),Arc::new(AtomicBool::new(false)))]);
+        let mut fanout=Fanout::new(vec![(a,open()),(b,open())]).unwrap().bind_destination_stops(flags).unwrap();
+        let video=|t,key|avc_access_unit(&[&[if key{0x65}else{0x41},1]],t,0,key).unwrap();
+        fanout.submit(vec![avc_sequence(&[0x67,0x64,0,0x28],&[0x68,0xee]).unwrap(),video(0,true)]).unwrap();
+        let until=Instant::now()+Duration::from_secs(2);
+        while fanout.destinations().iter().any(|d|d.sent_packets<2){assert!(Instant::now()<until);std::thread::sleep(Duration::from_millis(5));}
+        stop.store(true,Ordering::Release);
+        fanout.submit(vec![video(100,false)]).unwrap();
+        fanout.submit(vec![video(200,false)]).unwrap();
+        assert!(fanout.finish().is_err(),"retiring one output cannot be an uninterrupted pass");
+        let rows=fanout.destinations();
+        assert_eq!((rows[0].phase,rows[0].admitted_packets,rows[0].sent_packets),("stopped",2,2));
+        assert!(rows[0].interrupted);assert_eq!(rows[0].reconnect_attempt,0);
+        assert_eq!((rows[1].phase,rows[1].sent_packets),("stopped",4));assert!(!rows[1].interrupted);
+    }
     #[test]fn fanout_rejects_duplicate_destination(){
         use crate::{live_session::Session,live_publish_worker::Worker,live_fanout::Fanout};
         let open=||Worker::start(Session::new(Publisher::establish(fixture(true),"live","rtmps://example.invalid/live","fixture-key",7,&[9;1528]).unwrap()).unwrap()).unwrap();
