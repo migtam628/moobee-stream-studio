@@ -33,7 +33,7 @@ jobs:
     env:
       MACOSX_DEPLOYMENT_TARGET: '13.0'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Check Swift type correctness against the macOS 15+ SDK
         run: |
           SDK="$(xcrun --sdk macosx --show-sdk-path)"
