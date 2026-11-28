@@ -15,6 +15,9 @@ impl Drop for Record{fn drop(&mut self){use zeroize::Zeroize;self.stream_key.zer
 #[derive(Serialize)]
 #[serde(rename_all="camelCase")]
 pub(crate) struct View{id:String,name:String,server_url:Option<String>,credential_available:bool,revision:Option<String>}
+#[derive(Deserialize)]
+#[serde(rename_all="camelCase",deny_unknown_fields)]
+pub(crate) struct Preview{id:String,name:String,server_url:String,revision:Option<String>}
 trait Vault{
     fn put(&self,id:&str,bytes:&[u8])->Result<(),String>;
     fn get(&self,id:&str)->Result<Option<Vec<u8>>,String>;
@@ -161,6 +164,44 @@ fn lease(dir:&Path,vault:&impl Vault,id:&str,expected_name:&str,expected_url:&st
     active.push(id.to_owned());
     Ok(Lease{id:id.to_owned(),record})
 }
+// Validate only selected saved records. Never return secret material or
+// claim remote credentials work. Repeat the route check on actual leases.
+fn distinct_routes<'a>(records:impl IntoIterator<Item=(&'a str,&'a str)>)->Result<(),String>{
+    let mut seen=Vec::<(&str,&str)>::new();
+    for (url,key) in records{
+        for (other_url,other_key) in &seen{
+            if key==*other_key&&crate::rtmp_session::tls::same_publish_endpoint(url,other_url)?{
+                return Err("Choose distinct publishing routes; two selected destinations refer to the same endpoint and key".into())
+            }
+        }
+        seen.push((url,key));
+    }
+    Ok(())
+}
+fn preflight(dir:&Path,vault:&impl Vault,selected:&[Preview])->Result<(),String>{
+    if !(1..=3).contains(&selected.len()){return Err("Choose one to three destinations".into())}
+    let available=ids(dir)?;
+    let mut seen=std::collections::HashSet::new();
+    let mut records=Vec::new();
+    let active=ACTIVE.lock().map_err(|_|"Destination lease state unavailable")?;
+    for preview in selected{
+        if !valid_id(&preview.id)||!seen.insert(&preview.id)||!available.contains(&preview.id){return Err("Invalid or duplicate destination selection".into())}
+        if active.contains(&preview.id){return Err("A selected destination is already in use".into())}
+        let record=load(vault,&preview.id)?.ok_or("Destination credential missing")?;
+        if record.name!=preview.name||record.server_url!=preview.server_url||record.revision!=preview.revision{return Err("Destination changed; refresh and review again".into())}
+        records.push(record);
+    }
+    distinct_routes(records.iter().map(|r|(r.server_url.as_str(),r.stream_key.as_str())))
+}
+pub(crate) fn validate_distinct_leases(leases:&[(String,std::sync::Arc<Lease>)])->Result<(),String>{
+    distinct_routes(leases.iter().map(|(_,lease)|lease.credentials()))
+}
+pub(crate) async fn preflight_stream_destinations(app:tauri::AppHandle,selected:Vec<Preview>)->Result<(),String>{
+    tauri::async_runtime::spawn_blocking(move||{
+        let _guard=LOCK.lock().map_err(|_|"Destination store unavailable")?;
+        preflight(&index(&app)?,&OsVault,&selected)
+    }).await.map_err(|_|"Destination store worker stopped")?
+}
 pub(crate) fn authorized_destination(app:&tauri::AppHandle,id:&str,expected_name:&str,expected_url:&str,expected_revision:Option<&str>,explicitly_authorized:bool)->Result<Lease,String>{
     let _guard=LOCK.lock().map_err(|_|"Destination store unavailable")?;
     lease(&index(app)?,&OsVault,id,expected_name,expected_url,expected_revision,explicitly_authorized)
@@ -266,6 +307,25 @@ mod tests{
         let updated=edit(&dir.0,&vault,&v.id,None,"Test".into(),url.into(),None).unwrap();
         assert!(updated.revision.is_some());
         assert!(lease(&dir.0,&vault,&v.id,"Test",url,None,true).is_err());
+    }
+    #[test]fn local_preflight_rejects_duplicate_route_and_stale_selection(){
+        let dir=Temp(std::env::temp_dir().join(uuid::Uuid::new_v4().to_string()));let vault=Memory::default();
+        let a=create(&dir.0,&vault,"One".into(),"rtmps://example.invalid/live".into(),"fixture-secret".into()).unwrap();
+        let b=create(&dir.0,&vault,"Two".into(),"rtmps://EXAMPLE.invalid:443/live/".into(),"fixture-secret".into()).unwrap();
+        let preview=|v:&View|Preview{id:v.id.clone(),name:v.name.clone(),server_url:v.server_url.clone().unwrap(),revision:v.revision.clone()};
+        assert!(preflight(&dir.0,&vault,&[preview(&a)]).is_ok());
+        let err=preflight(&dir.0,&vault,&[preview(&a),preview(&b)]).unwrap_err();
+        assert!(err.contains("distinct publishing routes"));assert!(!err.contains("fixture-secret"));
+        assert!(preflight(&dir.0,&vault,&[preview(&a),preview(&a)]).is_err());
+        let active_lease=lease(&dir.0,&vault,&a.id,&a.name,a.server_url.as_deref().unwrap(),a.revision.as_deref(),true).unwrap();
+        assert!(preflight(&dir.0,&vault,&[preview(&a)]).is_err());
+        drop(active_lease);
+        let updated=edit(&dir.0,&vault,&b.id,b.revision.as_deref(),b.name.clone(),b.server_url.clone().unwrap(),Some("other-fixture-key".into())).unwrap();
+        assert!(preflight(&dir.0,&vault,&[preview(&a),preview(&b)]).is_err());
+        assert!(preflight(&dir.0,&vault,&[preview(&a),preview(&updated)]).is_ok());
+        let a_lease=lease(&dir.0,&vault,&a.id,&a.name,a.server_url.as_deref().unwrap(),a.revision.as_deref(),true).unwrap();
+        let b_lease=lease(&dir.0,&vault,&updated.id,&updated.name,updated.server_url.as_deref().unwrap(),updated.revision.as_deref(),true).unwrap();
+        assert!(validate_distinct_leases(&[(a.id.clone(),std::sync::Arc::new(a_lease)),(updated.id.clone(),std::sync::Arc::new(b_lease))]).is_ok());
     }
     #[test]fn rejects_invalid_config_without_writing(){
         let dir=Temp(std::env::temp_dir().join(uuid::Uuid::new_v4().to_string()));let vault=Memory::default();
