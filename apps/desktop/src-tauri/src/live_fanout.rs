@@ -18,6 +18,7 @@ struct Output{
     connector:Option<Connector>,policy:Policy,recovery:Option<Recovery>,first_failure:Option<u64>,attempt:u8,
     interrupted:bool,base:Option<u32>,prior_packets:u64,prior_bytes:u64,
     epoch_admitted_packets:u64,epoch_admitted_bytes:u64,
+    user_stop:Arc<AtomicBool>,retired:bool,
 }
 pub(crate) struct Fanout{
     outputs:Vec<Output>,finished:bool,config:Config,start:Instant,
@@ -38,8 +39,22 @@ impl Fanout{
         Ok(Self{outputs:workers.into_iter().map(|(id,worker,connector)|Output{
             id,worker,failed:false,completed:false,admitted_packets:0,admitted_bytes:0,failure:None,
             connector,policy:Policy::default(),recovery:None,first_failure:None,attempt:0,interrupted:false,base:None,
-            prior_packets:0,prior_bytes:0,epoch_admitted_packets:0,epoch_admitted_bytes:0,
+            prior_packets:0,prior_bytes:0,epoch_admitted_packets:0,epoch_admitted_bytes:0,user_stop:Arc::new(AtomicBool::new(false)),retired:false,
         }).collect(),finished:false,config:Config::default(),start:Instant::now(),cancel:Arc::new(AtomicBool::new(false)),session_stop})
+    }
+    pub(crate) fn bind_destination_stops(mut self,flags:std::collections::HashMap<String,Arc<AtomicBool>>)->Result<Self,String>{
+        if self.outputs.len()<2||flags.len()!=self.outputs.len(){return Err("Invalid destination stop controls".into())}
+        for o in &mut self.outputs{o.user_stop=flags.get(&o.id).ok_or("Missing destination stop permit")?.clone();}
+        Ok(self)
+    }
+    fn retire_if_requested(o:&mut Output){
+        if o.retired||!o.user_stop.load(Ordering::Acquire){return}
+        o.retired=true;o.interrupted=true;
+        // An already reconnecting output has no continuous epoch to drain.
+        // Revocation also prevents an in-flight connector from rejoining.
+        let recovering=o.recovery.take().is_some();
+        o.connector=None;
+        if recovering||o.failed{o.worker.request_stop();}else{o.worker.request_drain();}
     }
     fn fail(o:&mut Output){
         if !o.failed{
@@ -66,11 +81,11 @@ impl Fanout{
                 Decision::StartFreshEpoch{attempt}=>{
                     o.attempt=attempt;
                     let connector=o.connector.as_ref().unwrap().clone();
-                    let cancel=cancel.clone();let stop=session_stop.clone();
+                    let cancel=cancel.clone();let stop=session_stop.clone();let output_stop=o.user_stop.clone();
                     let remaining=30000u64.saturating_sub(now.saturating_sub(o.first_failure.unwrap_or(now)));
                     let deadline=Instant::now()+Duration::from_millis(remaining);
                     let h=std::thread::Builder::new().name("moobee-destination-recovery".into()).spawn(move||{
-                        let allowed:crate::rtmp_session::ConnectionPermit=Arc::new(move||Instant::now()<deadline&&!cancel.load(Ordering::Acquire)&&!stop.as_ref().is_some_and(|s|s.load(Ordering::Acquire)));
+                        let allowed:crate::rtmp_session::ConnectionPermit=Arc::new(move||Instant::now()<deadline&&!cancel.load(Ordering::Acquire)&&!output_stop.load(Ordering::Acquire)&&!stop.as_ref().is_some_and(|s|s.load(Ordering::Acquire)));
                         if !allowed(){return Err(Failure::Unknown)}
                         let worker=connector(allowed.clone())?;
                         if !allowed(){worker.request_stop();return Err(Failure::Unknown)}
@@ -114,6 +129,8 @@ impl Fanout{
         let allowed=!self.cancel.load(Ordering::Acquire)&&!self.session_stop.as_ref().is_some_and(|s|s.load(Ordering::Acquire));
         let mut viable=0;
         for o in &mut self.outputs{
+            Self::retire_if_requested(o);
+            if o.retired{continue}
             Self::advance(o,now,allowed,&self.cancel,&self.session_stop);
             if matches!(o.recovery,Some(Recovery::Waiting|Recovery::Connecting(_))){viable+=1;continue}
             if o.failed{continue}
@@ -159,6 +176,7 @@ impl Fanout{
             total.session.sent_payload_bytes=total.session.sent_payload_bytes.saturating_add(o.prior_bytes).saturating_add(s.session.sent_payload_bytes);
             total.session.queued_packets+=s.session.queued_packets;total.session.queued_bytes+=s.session.queued_bytes;
             total.pending_packets+=s.pending_packets;total.pending_bytes+=s.pending_bytes;
+            if o.retired{continue}
             if o.recovery.is_some(){active+=1;}
             else if o.failed||s.session.phase==Phase::Failed{failed+=1;}
             else if matches!(s.session.phase,Phase::Authorized|Phase::Sending){active+=1;sending|=s.session.phase==Phase::Sending;}
@@ -170,7 +188,9 @@ impl Fanout{
     pub(crate) fn destinations(&self)->Vec<DestinationStats>{
         self.outputs.iter().map(|o|{
             let stats=o.worker.stats().ok();
-            let phase=if o.recovery.is_some(){"reconnecting"}else if o.failed{"failed"}else if o.completed{"stopped"}else{match stats.map(|s|s.session.phase){Some(Phase::Authorized)=>"authorized",Some(Phase::Sending)=>"sending",Some(Phase::Stopped)=>"stopped",_=>"failed"}};
+            let phase=if o.retired||o.user_stop.load(Ordering::Acquire){
+                match stats.map(|s|s.session.phase){Some(Phase::Stopped)=>"stopped",Some(Phase::Failed) if o.retired=>"failed",_=>"stopping"}
+            }else if o.recovery.is_some(){"reconnecting"}else if o.failed{"failed"}else if o.completed{"stopped"}else{match stats.map(|s|s.session.phase){Some(Phase::Authorized)=>"authorized",Some(Phase::Sending)=>"sending",Some(Phase::Stopped)=>"stopped",_=>"failed"}};
             DestinationStats{id:o.id.clone(),phase,sent_packets:o.prior_packets.saturating_add(stats.map_or(0,|s|s.session.sent_packets)),
                 sent_payload_bytes:o.prior_bytes.saturating_add(stats.map_or(0,|s|s.session.sent_payload_bytes)),
                 queued_packets:stats.map_or(0,|s|s.pending_packets+s.session.queued_packets),
@@ -181,7 +201,7 @@ impl Fanout{
     pub(crate) fn finish(&mut self)->Result<(),String>{
         if self.finished{return if self.outputs.iter().all(|o|o.completed&&!o.interrupted){Ok(())}else{Err("One or more destinations did not finish publishing".into())}}
         self.cancel.store(true,Ordering::Release);
-        for o in &mut self.outputs{if o.recovery.take().is_some(){Self::fail(o);}if !o.failed{o.worker.request_drain();}}
+        for o in &mut self.outputs{Self::retire_if_requested(o);if o.recovery.take().is_some(){Self::fail(o);}if !o.failed&&!o.retired{o.worker.request_drain();}}
         let deadline=Instant::now()+Duration::from_secs(5);
         loop{
             let mut pending=false;
