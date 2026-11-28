@@ -1,0 +1,79 @@
+name: Prepare native broadcast acceptance builds
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'Type BUILD PRIVATE QA to build non-production test applications'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  acceptance-build:
+    if: github.ref == 'refs/heads/main' && inputs.confirmation == 'BUILD PRIVATE QA'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+            platform: macos-arm64
+            target: aarch64-apple-darwin
+          - runner: macos-15-intel
+            platform: macos-x64
+            target: x86_64-apple-darwin
+          - runner: windows-latest
+            platform: windows-x64
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '13.0'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - run: npm ci
+      - name: Build macOS QA app (no installer)
+        if: runner.os == 'macOS'
+        run: npm run tauri:build -w @moobee-live/desktop -- --features native-live-acceptance --target ${{ matrix.target }} --bundles app
+      - name: Build Windows QA executable (no installer)
+        if: runner.os == 'Windows'
+        run: npm run tauri:build -w @moobee-live/desktop -- --features native-live-acceptance --target ${{ matrix.target }} --no-bundle
+      - name: Archive macOS application
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          mkdir -p qa-output
+          app="apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/macos/MooBee Stream Studio.app"
+          test -d "$app"
+          ditto -c -k --keepParent "$app" qa-output/MooBee-private-QA.zip
+      - name: Copy Windows executable
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path qa-output -Force | Out-Null
+          $exe = "apps/desktop/src-tauri/target/${{ matrix.target }}/release/moobee-live-desktop.exe"
+          if (!(Test-Path $exe)) { throw "Missing expected QA executable" }
+          Copy-Item $exe qa-output/MooBee-private-QA.exe
+      - name: Write build provenance and hashes
+        shell: bash
+        env:
+          QA_PLATFORM: ${{ matrix.platform }}
+          QA_TARGET: ${{ matrix.target }}
+        run: |
+          node --input-type=module -e 'import fs from "node:fs"; import crypto from "node:crypto"; const files=fs.readdirSync("qa-output");const manifest={schemaVersion:1,kind:"private-developer-acceptance-build",commit:process.env.GITHUB_SHA,platform:process.env.QA_PLATFORM,target:process.env.QA_TARGET,feature:"native-live-acceptance",productionRelease:false,physicalAcceptanceVerified:false,files:files.map(name=>({name,sha256:crypto.createHash("sha256").update(fs.readFileSync("qa-output/"+name)).digest("hex")}))};fs.writeFileSync("qa-output/QA-MANIFEST.json",JSON.stringify(manifest,null,2)+"\n");'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: private-broadcast-QA-${{ matrix.platform }}-${{ github.sha }}
+          path: qa-output/
+          if-no-files-found: error
+          retention-days: 7

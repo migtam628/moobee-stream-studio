@@ -47,7 +47,7 @@
     {
       "id": "rtmps-broadcast",
       "status": "needs-hardware-qa",
-      "details": "Native encrypted synthetic receiver decode passed on macOS ARM64/Intel and Windows x64; offline receiver verifier, persistent Stop/reload controls, diagnostics, bounded DNS, encrypted recovery, secure destination revision binding and native consent merged (#93–101). Physical capture and external private receiver QA, manual native consent, real credential vault QA, actual network recovery, two-hour soak, security review and default production Go Live remain gated.",
+      "details": "Native encrypted synthetic receiver decode passed on macOS ARM64/Intel and Windows x64; offline receiver verifier, persistent Stop/reload controls, diagnostics, bounded DNS, encrypted recovery, secure destination revision binding and native consent merged (#93–106), including per-output Stop, global native status, local credential preflight, shared configuration validation and lost IPC response reconciliation. Physical capture and external private receiver QA, manual native consent, real credential vault QA, actual network recovery, two-hour soak, security review and default production Go Live remain gated.",
       "evidence": [
         "https://github.com/migtam628/moobee-stream-studio/pull/93",
         "https://github.com/migtam628/moobee-stream-studio/pull/94",
@@ -58,7 +58,12 @@
         "https://github.com/migtam628/moobee-stream-studio/pull/98",
         "https://github.com/migtam628/moobee-stream-studio/pull/99",
         "https://github.com/migtam628/moobee-stream-studio/pull/100",
-        "https://github.com/migtam628/moobee-stream-studio/pull/101"
+        "https://github.com/migtam628/moobee-stream-studio/pull/101",
+        "https://github.com/migtam628/moobee-stream-studio/pull/102",
+        "https://github.com/migtam628/moobee-stream-studio/pull/103",
+        "https://github.com/migtam628/moobee-stream-studio/pull/104",
+        "https://github.com/migtam628/moobee-stream-studio/pull/105",
+        "https://github.com/migtam628/moobee-stream-studio/pull/106"
       ]
     },
     {
