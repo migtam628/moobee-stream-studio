@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "target": "v0.4.0-beta.1",
-  "reviewDate": "2026-11-27",
+  "reviewDate": "2026-11-28",
   "note": "Statuses are engineering tracking claims, not proof of device acceptance. Do not set verified without linked real-device evidence, human review, and required signoffs.",
   "gates": [
     {
@@ -47,19 +47,28 @@
     {
       "id": "rtmps-broadcast",
       "status": "needs-hardware-qa",
-      "details": "Developer-only explicit native RTMPS acceptance path and native H.264/AAC synthetic loopback with independent decoder passed on macOS ARM64, macOS Intel and Windows x64 (PR #93); independent offline receiver soak file verifier merged (PR #94). Real capture-device and external private receiver interoperability, physical lip-sync, reconnect and two-hour soak, independent security review and production Go Live remain pending. Synthetic evidence is not physical acceptance.",
+      "details": "Native encrypted synthetic receiver decode passed on macOS ARM64/Intel and Windows x64; offline receiver verifier, persistent Stop/reload controls, diagnostics, bounded DNS, encrypted recovery, secure destination revision binding and native consent merged (#93–101). Physical capture and external private receiver QA, manual native consent, real credential vault QA, actual network recovery, two-hour soak, security review and default production Go Live remain gated.",
       "evidence": [
         "https://github.com/migtam628/moobee-stream-studio/pull/93",
         "https://github.com/migtam628/moobee-stream-studio/pull/94",
         "https://github.com/migtam628/moobee-stream-studio/actions/runs/46078570981",
-        "https://github.com/migtam628/moobee-stream-studio/actions/runs/46078570916"
+        "https://github.com/migtam628/moobee-stream-studio/actions/runs/46078570916",
+        "https://github.com/migtam628/moobee-stream-studio/pull/96",
+        "https://github.com/migtam628/moobee-stream-studio/pull/97",
+        "https://github.com/migtam628/moobee-stream-studio/pull/98",
+        "https://github.com/migtam628/moobee-stream-studio/pull/99",
+        "https://github.com/migtam628/moobee-stream-studio/pull/100",
+        "https://github.com/migtam628/moobee-stream-studio/pull/101"
       ]
     },
     {
       "id": "secure-credentials-and-api",
       "status": "blocked",
-      "details": "Secure OS keychain stream-key storage and public API authorization/TLS are incomplete; API must remain loopback-only.",
-      "evidence": []
+      "details": "Native OS vault storage, revision-bound editing/key rotation, active lease protection and independent OS consent are implemented with CI coverage (#100–101). Real native vault and consent interaction, independent security review, and authenticated public API/TLS remain incomplete; API stays loopback-only.",
+      "evidence": [
+        "https://github.com/migtam628/moobee-stream-studio/pull/100",
+        "https://github.com/migtam628/moobee-stream-studio/pull/101"
+      ]
     },
     {
       "id": "signed-desktop-and-hardware-acceptance",

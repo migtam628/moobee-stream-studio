@@ -144,6 +144,10 @@ pub(crate) async fn start_live_acceptance(app:tauri::AppHandle,state:tauri::Stat
 pub(crate) fn stop_live_acceptance(state:tauri::State<'_,Arc<Controller>>,session_id:String)->bool{
     supported()&&state.stop_native(&session_id)
 }
+#[tauri::command]
+pub(crate) fn stop_live_destination(state:tauri::State<'_,Arc<Controller>>,session_id:String,destination_id:String)->bool{
+    supported()&&state.stop_destination(&session_id,&destination_id)
+}
 #[cfg(test)]
 mod tests{
     use super::*;

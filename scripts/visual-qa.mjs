@@ -187,6 +187,15 @@ try {
         if(window.__acceptanceState?.sessionId!==args.sessionId)return false;
         window.__acceptanceState.phase='stopped';window.__acceptanceResolve?.(null);return true;
       }
+      if(cmd==='stop_live_destination'){
+        const snapshot=window.__healthFixture;
+        if(snapshot?.sessionId!==args.sessionId||snapshot.phase!=='streaming')return false;
+        const active=snapshot.destinations?.filter(d=>['authorized','sending','reconnecting'].includes(d.phase))??[];
+        if(active.length<2||!active.some(d=>d.id===args.destinationId))return false;
+        window.__outputStopRequest=args;
+        snapshot.destinations=snapshot.destinations.map(d=>d.id===args.destinationId?{...d,phase:'stopped',interrupted:true}:d);
+        return true;
+      }
       if(cmd==='start_live_rehearsal'){
         window.__rehearsal={sessionId:args.sessionId,mode:'rehearsal',phase:'streaming',elapsedMs:100,mediaFrames:0,sentPackets:0,sentPayloadBytes:0,pendingPackets:0,pendingBytes:0,lateFrames:0,bitrateKbps:0};
         return null;
@@ -473,6 +482,22 @@ try {
   if(parsedReport.receiverVerified!==false||!parsedReport.samples.some(s=>s.phase==='reconnecting'&&s.reconnectAttempt===1)||!parsedReport.samples.some(s=>s.nativeOutcome==='senderCompleted'))throw new Error('Sender history did not retain navigation or outcome samples');
   if(/never-export-this-key|private\.invalid|aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/.test(report))throw new Error('Sender report exposes credentials or session identity');
   await history.getByRole('button',{name:'Close report'}).click();
+  await macPage.evaluate(()=>{
+    const row=id=>({id,phase:'sending',sentPackets:20,sentPayloadBytes:1000,queuedPackets:0,queuedBytes:0,admittedPackets:20,admittedBytes:1000,reconnectAttempt:0,interrupted:false});
+    window.__healthFixture={...window.__healthFixture,phase:'streaming',destinations:[row('b1111111-1111-4111-8111-111111111111'),row('b2222222-2222-4222-8222-222222222222')]};
+  });
+  const output=health.getByLabel('Per-destination publishing health');
+  await output.getByRole('button',{name:'Stop destination 1',exact:true}).click();
+  await output.getByRole('button',{name:'Cancel',exact:true}).click();
+  if(await macPage.evaluate(()=>!!window.__outputStopRequest))throw new Error('Destination stop must require confirmation');
+  await output.getByRole('button',{name:'Stop destination 1',exact:true}).click();
+  await output.getByRole('button',{name:'Confirm destination stop',exact:true}).click();
+  await output.getByText(/Output stop requested/).waitFor();
+  await output.getByText(/stopped · Retry 0 · Delivery interrupted/).waitFor();
+  if(await output.getByRole('button',{name:'Stop destination 2',exact:true}).count())throw new Error('Last output must use global Stop');
+  const stopped=await macPage.evaluate(()=>window.__outputStopRequest);
+  if(stopped.sessionId!=='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'||stopped.destinationId!=='b1111111-1111-4111-8111-111111111111')throw new Error('Destination stop escaped reviewed identity');
+  await macPage.evaluate(()=>{window.__healthFixture={...window.__healthFixture,phase:'stopped'};});
   await macPage.getByRole('button',{name:'Multistream',exact:true}).click();
   const dest=macPage.getByRole('region',{name:'Secure stream destinations'});
   await dest.getByText('No saved destinations.',{exact:true}).waitFor();

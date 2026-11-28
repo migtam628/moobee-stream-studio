@@ -868,6 +868,66 @@ mod tests{
         assert_eq!(rows[1].reconnect_attempt,1);
         assert_eq!(rows[1].sent_packets,5);assert_eq!(rows[1].admitted_packets,6);
     }
+    #[test]fn retiring_disconnected_output_cancels_pending_recovery(){
+        use crate::{live_session::Session,live_publish_worker::Worker,live_fanout::{Fanout,Connector},stream_mux::{avc_sequence,avc_access_unit}};
+        use std::{sync::{Arc,atomic::{AtomicBool,AtomicUsize,Ordering}},time::{Duration,Instant}};
+        struct Fault{inner:Fixture,fail:Arc<AtomicBool>}
+        impl Read for Fault{fn read(&mut self,b:&mut[u8])->io::Result<usize>{self.inner.read(b)}}
+        impl Write for Fault{
+            fn write(&mut self,b:&[u8])->io::Result<usize>{
+                if self.fail.load(Ordering::Acquire){Err(io::Error::from(ErrorKind::ConnectionReset))}else{self.inner.write(b)}
+            }
+            fn flush(&mut self)->io::Result<()>{Ok(())}
+        }
+        let open=||Worker::start(Session::new(Publisher::establish(fixture(true),"live","rtmps://example.invalid/live","fixture-key",7,&[9;1528]).unwrap()).unwrap()).unwrap();
+        let fault=Arc::new(AtomicBool::new(false));
+        let broken=Worker::start(Session::new(Publisher::establish(Fault{inner:fixture(true),fail:fault.clone()},"live","rtmps://example.invalid/live","fixture-key",7,&[9;1528]).unwrap()).unwrap()).unwrap();
+        let calls=Arc::new(AtomicUsize::new(0));let count=calls.clone();
+        let connector:Connector=Arc::new(move|_|{count.fetch_add(1,Ordering::AcqRel);Err(Failure::Unknown)});
+        let a=uuid::Uuid::new_v4().to_string();let b=uuid::Uuid::new_v4().to_string();let stop=Arc::new(AtomicBool::new(false));
+        let flags=std::collections::HashMap::from([(a.clone(),Arc::new(AtomicBool::new(false))),(b.clone(),stop.clone())]);
+        let mut fanout=Fanout::with_recovery(vec![(a,open(),None),(b,broken,Some(connector))],None).unwrap().bind_destination_stops(flags).unwrap();
+        let video=|t,key|avc_access_unit(&[&[if key{0x65}else{0x41},1]],t,0,key).unwrap();
+        fanout.submit(vec![avc_sequence(&[0x67,0x64,0,0x28],&[0x68,0xee]).unwrap(),video(0,true)]).unwrap();
+        let until=Instant::now()+Duration::from_secs(2);
+        while fanout.destinations().iter().any(|d|d.sent_packets<2){assert!(Instant::now()<until);std::thread::sleep(Duration::from_millis(5));}
+        fault.store(true,Ordering::Release);
+        fanout.submit(vec![video(10,false)]).unwrap();
+        while fanout.destinations()[1].phase!="failed"{assert!(Instant::now()<until);std::thread::sleep(Duration::from_millis(5));}
+        fanout.submit(vec![video(20,false)]).unwrap();
+        assert_eq!(fanout.destinations()[1].phase,"reconnecting");
+        stop.store(true,Ordering::Release);
+        fanout.submit(vec![video(30,false)]).unwrap();
+        std::thread::sleep(Duration::from_millis(1100));
+        fanout.submit(vec![video(1200,true)]).unwrap();
+        assert!(fanout.finish().is_err());
+        let rows=fanout.destinations();
+        assert_eq!(calls.load(Ordering::Acquire),0);
+        assert_eq!(rows[0].phase,"stopped");
+        assert!(!rows[0].interrupted&&rows[1].interrupted);
+        assert_eq!(rows[1].reconnect_attempt,0);
+    }
+    #[test]fn fanout_user_stop_drains_one_output_and_keeps_survivor(){
+        use crate::{live_session::Session,live_publish_worker::Worker,live_fanout::Fanout,stream_mux::{avc_sequence,avc_access_unit}};
+        use std::{sync::{Arc,atomic::{AtomicBool,Ordering}},time::{Duration,Instant}};
+        let open=||Worker::start(Session::new(Publisher::establish(fixture(true),"live","rtmps://example.invalid/live","fixture-key",7,&[9;1528]).unwrap()).unwrap()).unwrap();
+        let a=uuid::Uuid::new_v4().to_string();let b=uuid::Uuid::new_v4().to_string();
+        let stop=Arc::new(AtomicBool::new(false));
+        let flags=std::collections::HashMap::from([(a.clone(),stop.clone()),(b.clone(),Arc::new(AtomicBool::new(false)))]);
+        let mut fanout=Fanout::new(vec![(a,open()),(b,open())]).unwrap().bind_destination_stops(flags).unwrap();
+        let video=|t,key|avc_access_unit(&[&[if key{0x65}else{0x41},1]],t,0,key).unwrap();
+        fanout.submit(vec![avc_sequence(&[0x67,0x64,0,0x28],&[0x68,0xee]).unwrap(),video(0,true)]).unwrap();
+        let until=Instant::now()+Duration::from_secs(2);
+        while fanout.destinations().iter().any(|d|d.sent_packets<2){assert!(Instant::now()<until);std::thread::sleep(Duration::from_millis(5));}
+        stop.store(true,Ordering::Release);
+        fanout.submit(vec![video(100,false)]).unwrap();
+        fanout.submit(vec![video(200,false)]).unwrap();
+        assert!(fanout.finish().is_err(),"retiring one output cannot be an uninterrupted pass");
+        let rows=fanout.destinations();
+        assert_eq!((rows[0].phase,rows[0].admitted_packets,rows[0].sent_packets),("stopped",2,2));
+        assert!(rows[0].interrupted);assert_eq!(rows[0].reconnect_attempt,0);
+        assert_eq!((rows[1].phase,rows[1].sent_packets),("stopped",4));assert!(!rows[1].interrupted);
+    }
     #[test]fn fanout_rejects_duplicate_destination(){
         use crate::{live_session::Session,live_publish_worker::Worker,live_fanout::Fanout};
         let open=||Worker::start(Session::new(Publisher::establish(fixture(true),"live","rtmps://example.invalid/live","fixture-key",7,&[9;1528]).unwrap()).unwrap()).unwrap();
