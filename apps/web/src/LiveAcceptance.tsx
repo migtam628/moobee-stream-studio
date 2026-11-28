@@ -85,7 +85,9 @@ export default function LiveAcceptance({active,disabled,prepare,onBusy}:{active:
       if(inflight)return
       inflight=true
       try{
-        const s=await request<Snapshot|null>('/studio/live-rehearsal/status',{sessionId:session})
+        let s:Snapshot|null=null
+        try{s=await request<Snapshot|null>('/studio/live-rehearsal/status',{sessionId:session})}
+        catch{if(!adopted.current){if(alive&&current.current===session)setStatusUncertain(true);return}}
         if(!alive||current.current!==session)return
         if(s?.sessionId===session&&s.mode==='native'){
           setStatus(s);setStatusUncertain(false)
