@@ -284,10 +284,17 @@ pub(crate) mod tls {
             let read=self.io.read(&mut bytes[..room]);
             self.io.get_ref().socket.set_nonblocking(false).map_err(|_|"RTMPS poll restore failed")?;
             match read{
-                Ok(0)=>Err("RTMPS server closed connection".into()),
+                Ok(0)=>{
+                    // EOF after an authorized publish, without a parsed terminal
+                    // protocol command, is a transport interruption. A partial
+                    // inbound chunk is ambiguous and remains fail-closed.
+                    self.transport_failure=if self.inbound.is_empty(){Some(Failure::TransientTransport)}else{None};
+                    self.failed=true;
+                    Err("RTMPS server closed connection".into())
+                },
                 Ok(n)=>{self.ingest_inbound(&bytes[..n])?;Ok(())},
                 Err(e) if matches!(e.kind(),io::ErrorKind::WouldBlock|io::ErrorKind::TimedOut|io::ErrorKind::Interrupted)=>Ok(()),
-                Err(e)=>{if transient_io(e.kind()){self.transport_failure=Some(Failure::TransientTransport);}Err("RTMPS inbound transport failed".into())},
+                Err(e)=>{if transient_io(e.kind())||(e.kind()==io::ErrorKind::UnexpectedEof&&self.inbound.is_empty()){self.transport_failure=Some(Failure::TransientTransport);}self.failed=true;Err("RTMPS inbound transport failed".into())},
             }
         }
     }
@@ -357,6 +364,44 @@ pub(crate) mod tls {
             assert_eq!(stats.session.sent_packets,packets);assert_eq!(stats.session.sent_payload_bytes,bytes);
             assert!(report.orderly_close&&report.pong_received);
             println!("LOOPBACK_RECEIVER_REPORT {}",serde_json::to_string(&report).unwrap());
+        }
+        #[test]fn authorized_tls_eof_is_retryable_but_explicit_publish_stop_is_not(){
+            use std::net::{TcpListener,Ipv4Addr};
+            use crate::live_session::{Session,Phase};
+            for explicit_stop in [false,true]{
+                let (config,root)=certificates();
+                let listener=TcpListener::bind((Ipv4Addr::LOCALHOST,0)).unwrap();
+                let addr=listener.local_addr().unwrap();
+                let (tx,rx)=mpsc::sync_channel(1);
+                let server=std::thread::spawn(move||{
+                    let (socket,_)=listener.accept().unwrap();
+                    socket.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+                    socket.set_write_timeout(Some(Duration::from_secs(5))).unwrap();
+                    let mut stream=rustls::StreamOwned::new(rustls::ServerConnection::new(config).unwrap(),socket);
+                    crate::rtmps_test_receiver::authorize_fixture(&mut stream,"loopback-fixture-only").unwrap();
+                    rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                    if explicit_stop{crate::rtmps_test_receiver::stop_fixture(&mut stream).unwrap();}
+                    stream.conn.send_close_notify();
+                    stream.flush().unwrap();
+                });
+                let socket=TcpStream::connect_timeout(&addr,Duration::from_secs(3)).unwrap();
+                let mut builder=native_tls::TlsConnector::builder();
+                builder.min_protocol_version(Some(native_tls::Protocol::Tlsv12)).max_protocol_version(Some(native_tls::Protocol::Tlsv12)).add_root_certificate(root);
+                let tls=builder.build().unwrap().connect("localhost",DeadlineSocket{socket,deadline:Some(Instant::now()+NEGOTIATION_TIMEOUT),permit:None,_lease:None}).unwrap_or_else(|_|panic!("Fixture TLS handshake failed"));
+                let mut publisher=Publisher::establish(tls,"live","rtmps://localhost/live","loopback-fixture-only",0,&[9;1528]).unwrap();
+                publisher.io.get_mut().deadline=None;
+                let mut session=Session::new(publisher).unwrap();
+                tx.send(()).unwrap();
+                let deadline=Instant::now()+Duration::from_secs(5);
+                loop{
+                    if session.poll_tls_inbound().is_err(){break}
+                    assert!(Instant::now()<deadline,"Receiver disconnect was not observed");
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                assert_eq!(session.stats().phase,Phase::Failed);
+                assert_eq!(session.stats().failure,if explicit_stop{None}else{Some(Failure::TransientTransport)});
+                server.join().unwrap();
+            }
         }
         #[test]fn loopback_tls_rejects_untrusted_root_and_wrong_hostname(){
             use std::net::{TcpListener,Ipv4Addr};
