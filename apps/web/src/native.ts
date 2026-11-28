@@ -289,6 +289,10 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
     }
     return invoke('stop_live_acceptance',{sessionId});
   }
+  if(path==='/studio/live-acceptance/stop-destination'){
+    if(typeof body.sessionId!=='string'||typeof body.destinationId!=='string')throw new Error('Invalid destination stop');
+    return invoke('stop_live_destination',{sessionId:body.sessionId,destinationId:body.destinationId});
+  }
   if(path==='/studio/destinations')return invoke('list_stream_destinations');
   if(path==='/studio/destinations/add'){
     if(!macHost()&&!windowsHost())throw new Error('Native credential storage requires Mac or Windows');
