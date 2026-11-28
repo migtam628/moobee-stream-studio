@@ -18,6 +18,10 @@ export default function LiveHealth(){
   const [history,setHistory]=useState<SessionHistory>({sessionId:null,samples:[]})
   const [report,setReport]=useState('')
   const [copyStatus,setCopyStatus]=useState('')
+  const [stopReview,setStopReview]=useState<{sessionId:string;destinationId:string}|null>(null)
+  const [stopPending,setStopPending]=useState(false)
+  const [stopNotice,setStopNotice]=useState('')
+  const [requestedStops,setRequestedStops]=useState<{sessionId:string;ids:string[]}|null>(null)
   useEffect(()=>{
     if(!native)return
     let active=true,inflight=false
@@ -35,6 +39,20 @@ export default function LiveHealth(){
     return()=>{active=false;clearInterval(timer)}
   },[native])
   useEffect(()=>{setReport('');setCopyStatus('')},[history.sessionId])
+  const stoppable=(snapshot?.mode==='native'&&snapshot.phase==='streaming'&&snapshot.sessionId? snapshot.destinations??[]:[]).filter(d=>['authorized','sending','reconnecting'].includes(d.phase)&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(d.id)&&!(requestedStops?.sessionId===snapshot?.sessionId&&requestedStops.ids.includes(d.id)))
+  useEffect(()=>{setStopReview(null);setStopNotice('')},[snapshot?.sessionId])
+  async function stopOutput(){
+    if(!native||stopPending||!stopReview||stopReview.sessionId!==snapshot?.sessionId||stoppable.length<2||!stoppable.some(d=>d.id===stopReview.destinationId))return
+    const intent=stopReview
+    setStopReview(null);setStopPending(true);setStopNotice('')
+    try{
+      if(await request<boolean>('/studio/live-acceptance/stop-destination',intent)){
+        setRequestedStops(old=>({sessionId:intent.sessionId,ids:[...(old?.sessionId===intent.sessionId?old.ids:[]),intent.destinationId]}))
+        setStopNotice('Output stop requested. Awaiting native status; remaining destinations continue if healthy.')
+      }else setStopNotice('Output stop was not accepted. Refresh status or use the global Stop control.')
+    }catch{setStopNotice('Output stop request failed; check native status before retrying.')}
+    finally{setStopPending(false)}
+  }
   function prepareReport(){
     setReport(liveHistoryReport(history.samples));setCopyStatus('')
   }
@@ -94,7 +112,10 @@ export default function LiveHealth(){
       <h3>Encoded A/V timing</h3>
       <p className="dock-note">Approximate packet-end difference; positive means video leads audio. This is not hardware clock drift or receiver lip-sync. Timing counters reset on whole-encoder restart.</p>
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))',gap:'12px'}}>{timingMetrics.map(([label,value])=><div className="dock-note" key={label}><span>{label}</span><br/><strong>{value}</strong></div>)}</div>
-      {snapshot?.mode==='native'&&!!snapshot.destinations?.length&&<div aria-label="Per-destination publishing health" style={{marginBlock:'16px'}}><h3>Destination output</h3>{snapshot.destinations.map((d,i)=><div className="dock-note" key={d.id} style={{marginBlock:'8px'}}><strong>{d.id==='single'?'Single destination':`Destination ${i+1} · ${d.id.slice(0,8)}`}</strong> · {d.phase} · Retry {d.reconnectAttempt??0}{d.interrupted?' · Delivery interrupted':''}<br/>{d.sentPackets} of {d.admittedPackets} admitted packets sent · {(d.sentPayloadBytes/1048576).toFixed(2)} MiB sent · {d.queuedPackets} queued</div>)}<p className="dock-note">A failed destination does not automatically stop the remaining workers. Aggregate bitrate is the sum of native sender payloads, not individual stream bitrate.</p></div>}
+      {snapshot?.mode==='native'&&!!snapshot.destinations?.length&&<div aria-label="Per-destination publishing health" style={{marginBlock:'16px'}}><h3>Destination output</h3>{snapshot.destinations.map((d,i)=><div className="dock-note" key={d.id} style={{marginBlock:'8px'}}><strong>{d.id==='single'?'Single destination':`Destination ${i+1} · ${d.id.slice(0,8)}`}</strong> · {d.phase} · Retry {d.reconnectAttempt??0}{d.interrupted?' · Delivery interrupted':''}<br/>{d.sentPackets} of {d.admittedPackets} admitted packets sent · {(d.sentPayloadBytes/1048576).toFixed(2)} MiB sent · {d.queuedPackets} queued
+        {native&&stoppable.length>=2&&stoppable.some(v=>v.id===d.id)&&<button className="secondary-button" disabled={stopPending} onClick={()=>{if(snapshot.sessionId)setStopReview({sessionId:snapshot.sessionId,destinationId:d.id})}}>Stop destination {i+1}</button>}
+        {stopReview?.sessionId===snapshot.sessionId&&stopReview?.destinationId===d.id&&<div><p>Stop this output only? It cannot rejoin this session. A partial broadcast is not an uninterrupted acceptance pass.</p><button className="secondary-button" disabled={stopPending||stoppable.length<2||!stoppable.some(v=>v.id===d.id)} onClick={()=>void stopOutput()}>Confirm destination stop</button><button className="secondary-button" onClick={()=>setStopReview(null)}>Cancel</button></div>}
+        </div>)}{stopNotice&&<p role="status">{stopNotice}</p>}<p className="dock-note">Use the global Stop control for the last output. A failed destination does not automatically stop the remaining workers. Aggregate bitrate is the sum of native sender payloads, not individual stream bitrate.</p></div>}
       {native&&<section aria-label="Local sender diagnostics export">
         <h3>Local sender diagnostic history</h3>
         <p className="dock-note">Latest observed native session · {history.samples.length} / {HISTORY_LIMIT} samples. Samples are collected about every ten seconds and on observed state changes, including while navigating. Kept in renderer memory only; a reload, close or new session can discard history. Older samples may be dropped. No automatic upload or receiver verification.</p>
