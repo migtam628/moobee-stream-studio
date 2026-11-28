@@ -134,8 +134,57 @@ impl<T:Read+Write> Publisher<T>{
 #[cfg(any(target_os="macos",target_os="windows"))]
 pub(crate) mod tls {
     use super::*;
-    use std::{net::{TcpStream,ToSocketAddrs},time::{Duration,Instant,SystemTime,UNIX_EPOCH},io};
+    use std::{net::{SocketAddr,TcpStream,ToSocketAddrs},time::{Duration,Instant,SystemTime,UNIX_EPOCH},io,sync::{atomic::{AtomicUsize,Ordering},mpsc::{self,Receiver,RecvTimeoutError}}};
     const CONNECT_TIMEOUT:Duration=Duration::from_secs(5);
+    const DNS_TIMEOUT:Duration=Duration::from_secs(5);
+    const DNS_POLL:Duration=Duration::from_millis(25);
+    // An OS resolver cannot be forcibly interrupted. Bound outstanding workers,
+    // including timed-out calls, until they actually return. No credentials or
+    // socket ownership enter these detached resolver threads.
+    const MAX_DNS_WORKERS:usize=4;
+    static DNS_WORKERS:AtomicUsize=AtomicUsize::new(0);
+    struct DnsSlot;
+    impl DnsSlot{
+        fn acquire()->Result<Self>{
+            DNS_WORKERS.fetch_update(Ordering::AcqRel,Ordering::Acquire,|n|(n<MAX_DNS_WORKERS).then_some(n+1))
+                .map(|_|Self).map_err(|_|"RTMPS DNS workers busy".into())
+        }
+    }
+    impl Drop for DnsSlot{fn drop(&mut self){DNS_WORKERS.fetch_sub(1,Ordering::AcqRel);}}
+    fn check_permit(permit:Option<&ConnectionPermit>)->Result<()>{
+        if permit.is_some_and(|p|!p()){Err("RTMPS negotiation cancelled".into())}else{Ok(())}
+    }
+    fn wait_dns(rx:Receiver<Result<Vec<SocketAddr>>>,deadline:Instant,permit:Option<&ConnectionPermit>)->Result<Vec<SocketAddr>>{
+        loop{
+            check_permit(permit)?;
+            let remaining=deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero(){return Err("RTMPS DNS resolution deadline".into())}
+            match rx.recv_timeout(remaining.min(DNS_POLL)){
+                Ok(result)=>{
+                    check_permit(permit)?;
+                    if Instant::now()>=deadline{return Err("RTMPS DNS resolution deadline".into())}
+                    return result
+                }
+                Err(RecvTimeoutError::Timeout)=>{},
+                Err(RecvTimeoutError::Disconnected)=>return Err("RTMPS DNS resolver unavailable".into()),
+            }
+        }
+    }
+    fn resolve_bounded(host:String,port:u16,permit:Option<&ConnectionPermit>)->Result<Vec<SocketAddr>>{
+        check_permit(permit)?;
+        let slot=DnsSlot::acquire()?;
+        let deadline=Instant::now()+DNS_TIMEOUT;
+        let (tx,rx)=mpsc::sync_channel(1);
+        std::thread::Builder::new().name("moobee-rtmps-dns".into()).spawn(move||{
+            let _slot=slot;
+            let result=(host.as_str(),port).to_socket_addrs()
+                .map(|a|a.take(8).collect::<Vec<_>>())
+                .map_err(|_|"RTMPS DNS resolution failed".to_owned())
+                .and_then(|a|if a.is_empty(){Err("RTMPS DNS returned no addresses".into())}else{Ok(a)});
+            let _=tx.send(result);
+        }).map_err(|_|"RTMPS DNS resolver unavailable")?;
+        wait_dns(rx,deadline,permit)
+    }
     const IO_TIMEOUT:Duration=Duration::from_secs(3);
     const NEGOTIATION_TIMEOUT:Duration=Duration::from_secs(20);
     struct Endpoint{host:String,port:u16,app:String,tc_url:String}
@@ -182,8 +231,8 @@ pub(crate) mod tls {
         let _validated=zeroize::Zeroizing::new(rtmp::publish(stream_key)?);
         Ok(())
     }
-    /// Explicit future caller only. DNS resolution is OS-blocking and must
-    /// be isolated from the UI; socket I/O and negotiation are bounded.
+    /// Explicit authorized caller only. OS DNS is isolated with bounded wait
+    /// and worker count; connection and negotiation have separate deadlines.
     pub(crate) fn connect_tls(server_url:&str,stream_key:&str)->Result<Publisher<native_tls::TlsStream<DeadlineSocket>>>{
         connect_tls_classified(server_url,stream_key,&mut Failure::Unknown)
     }
@@ -196,12 +245,12 @@ pub(crate) mod tls {
         allowed()?;
         let target=endpoint(server_url)?;
         let _validated=zeroize::Zeroizing::new(rtmp::publish(stream_key)?);
-        let addresses=(target.host.as_str(),target.port).to_socket_addrs().map_err(|_|"RTMPS DNS resolution failed")?;
+        let addresses=resolve_bounded(target.host.clone(),target.port,permit.as_ref())?;
         allowed()?;
         let deadline=Instant::now()+CONNECT_TIMEOUT;
         let mut socket=None;
         let mut retryable=true;let mut attempted=false;
-        for address in addresses.take(8){
+        for address in addresses{
             allowed()?;
             let remaining=deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero(){break}
@@ -364,6 +413,31 @@ pub(crate) mod tls {
                 }
                 assert_eq!(totals.2,20);assert!(totals.3>80);totals
             });
+        }
+        #[test]fn dns_wait_deadline_and_revocation_do_not_open_sockets(){
+            use std::sync::{Arc,atomic::{AtomicBool,Ordering}};
+            let (_tx,rx)=mpsc::sync_channel(1);
+            assert_eq!(wait_dns(rx,Instant::now()+Duration::from_millis(30),None).unwrap_err(),"RTMPS DNS resolution deadline");
+            let (tx,rx)=mpsc::sync_channel(1);
+            let enabled=Arc::new(AtomicBool::new(false));
+            let flag=enabled.clone();
+            let permit:ConnectionPermit=Arc::new(move||flag.load(Ordering::Acquire));
+            tx.send(Ok(vec!["127.0.0.1:443".parse().unwrap()])).unwrap();
+            assert_eq!(wait_dns(rx,Instant::now()+Duration::from_secs(1),Some(&permit)).unwrap_err(),"RTMPS negotiation cancelled");
+            let (_tx,rx)=mpsc::sync_channel(1);
+            enabled.store(true,Ordering::Release);
+            let revoke=std::thread::spawn(move||{std::thread::sleep(Duration::from_millis(30));enabled.store(false,Ordering::Release);});
+            assert_eq!(wait_dns(rx,Instant::now()+Duration::from_secs(2),Some(&permit)).unwrap_err(),"RTMPS negotiation cancelled");
+            revoke.join().unwrap();
+        }
+        #[test]fn dns_wait_returns_bounded_result_and_channel_failure(){
+            let (tx,rx)=mpsc::sync_channel(1);
+            let address:SocketAddr="127.0.0.1:443".parse().unwrap();
+            tx.send(Ok(vec![address])).unwrap();
+            assert_eq!(wait_dns(rx,Instant::now()+Duration::from_secs(1),None).unwrap(),vec![address]);
+            let (tx,rx)=mpsc::sync_channel(1);
+            drop(tx);
+            assert_eq!(wait_dns(rx,Instant::now()+Duration::from_secs(1),None).unwrap_err(),"RTMPS DNS resolver unavailable");
         }
         #[test]fn cancelled_negotiation_never_resolves_or_connects(){
             let permit:ConnectionPermit=std::sync::Arc::new(||false);
