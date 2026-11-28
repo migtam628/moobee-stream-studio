@@ -22,7 +22,7 @@ pub(crate) struct Snapshot{
     late_frames:u32,bitrate_kbps:u64,error:Option<&'static str>,health:Reading,reconnect_attempt:u8,destinations:Vec<crate::live_fanout::DestinationStats>,
     resources:crate::live_soak::Resources,timing:Option<crate::live_soak::Timing>,bitrate_advice:crate::live_bitrate::Reading,
 }
-struct Entry{snapshot:Snapshot,start:Instant,stop:Arc<AtomicBool>,monitor:Monitor,epoch_started_ms:u64,advisor:crate::live_bitrate::Advisor}
+struct Entry{snapshot:Snapshot,start:Instant,stop:Arc<AtomicBool>,destination_stops:std::collections::HashMap<String,Arc<AtomicBool>>,monitor:Monitor,epoch_started_ms:u64,advisor:crate::live_bitrate::Advisor}
 #[derive(Default)]
 pub(crate) struct Controller{entry:Mutex<Option<Entry>>}
 #[derive(Clone)]
@@ -34,7 +34,7 @@ impl Controller{
         if e.as_ref().is_some_and(|v|!matches!(v.snapshot.phase,Phase::Stopped|Phase::Failed)){return Err("Another streaming session is active".into())}
         let stop=Arc::new(AtomicBool::new(false));
         *e=Some(Entry{snapshot:Snapshot{session_id:id.clone(),mode,phase:Phase::Starting,native_outcome:None,elapsed_ms:0,media_frames:0,
-            sent_packets:0,sent_payload_bytes:0,pending_packets:0,pending_bytes:0,late_frames:0,bitrate_kbps:0,error:None,health:Reading::default(),reconnect_attempt:0,destinations:vec![],resources:crate::live_soak::Resources::default(),timing:None,bitrate_advice:crate::live_bitrate::Reading::default()},start:Instant::now(),stop:stop.clone(),monitor:Monitor::default(),epoch_started_ms:0,advisor:crate::live_bitrate::Advisor::default()});
+            sent_packets:0,sent_payload_bytes:0,pending_packets:0,pending_bytes:0,late_frames:0,bitrate_kbps:0,error:None,health:Reading::default(),reconnect_attempt:0,destinations:vec![],resources:crate::live_soak::Resources::default(),timing:None,bitrate_advice:crate::live_bitrate::Reading::default()},start:Instant::now(),stop:stop.clone(),destination_stops:Default::default(),monitor:Monitor::default(),epoch_started_ms:0,advisor:crate::live_bitrate::Advisor::default()});
         Ok(Run{controller:self.clone(),id,stop,retry_failure:Arc::new(Mutex::new(None))})
     }
     pub(crate) fn current(&self)->Option<Snapshot>{
@@ -65,6 +65,17 @@ impl Controller{
         if matches!(e.snapshot.phase,Phase::Stopped|Phase::Failed){return false}
         e.stop.store(true,Ordering::Release);e.snapshot.phase=Phase::Stopping;true
     }
+    /// Only an existing, independently authorized multistream output may
+    /// be retired. Never create a destination or change another session.
+    pub(crate) fn stop_destination(&self,id:&str,destination:&str)->bool{
+        let Ok(mut entry)=self.entry.lock()else{return false};
+        let Some(e)=entry.as_mut().filter(|e|e.snapshot.session_id==id&&e.snapshot.mode==Mode::Native&&e.snapshot.phase==Phase::Streaming&&!e.stop.load(Ordering::Acquire))else{return false};
+        let active=|d:&crate::live_fanout::DestinationStats|matches!(d.phase,"authorized"|"sending"|"reconnecting")&&e.destination_stops.get(&d.id).is_some_and(|flag|!flag.load(Ordering::Acquire));
+        if e.snapshot.destinations.iter().filter(|d|active(d)).count()<2||
+           !e.snapshot.destinations.iter().any(|d|d.id==destination&&active(d)){return false}
+        let Some(flag)=e.destination_stops.get(destination)else{return false};
+        flag.store(true,Ordering::Release);true
+    }
     pub(crate) fn request_stop(&self,id:&str)->bool{
         let Ok(mut e)=self.entry.lock()else{return false};
         let Some(e)=e.as_mut().filter(|v|v.snapshot.session_id==id)else{return false};
@@ -78,6 +89,16 @@ impl Run{
             entry.as_ref().filter(|e|e.snapshot.session_id==self.id&&Arc::ptr_eq(&e.stop,&self.stop))
                 .map(|e|e.snapshot.mode==Mode::Native&&!matches!(e.snapshot.phase,Phase::Stopped|Phase::Failed|Phase::Stopping)&&!self.cancelled())
         }).unwrap_or(false)
+    }
+    pub(crate) fn register_destination_stops(&self,ids:Vec<String>)->Result<std::collections::HashMap<String,Arc<AtomicBool>>,String>{
+        let mut entry=self.controller.entry.lock().map_err(|_|"Stream state unavailable")?;
+        let e=entry.as_mut().filter(|e|e.snapshot.session_id==self.id&&Arc::ptr_eq(&e.stop,&self.stop)&&e.snapshot.mode==Mode::Native&&e.snapshot.phase==Phase::Starting&&!self.cancelled()).ok_or("Inactive multistream session")?;
+        if !(2..=3).contains(&ids.len())||!e.destination_stops.is_empty(){return Err("Invalid multistream control registration".into())}
+        let mut flags=std::collections::HashMap::new();
+        for id in ids{
+            if !uuid::Uuid::parse_str(&id).is_ok_and(|v|v.to_string()==id)||flags.insert(id,Arc::new(AtomicBool::new(false))).is_some(){return Err("Invalid or duplicate destination identity".into())}
+        }
+        e.destination_stops=flags.clone();Ok(flags)
     }
     pub(crate) fn stop_flag(&self)->Arc<AtomicBool>{self.stop.clone()}
     pub(crate) fn cancelled(&self)->bool{self.stop.load(Ordering::Acquire)}
@@ -222,6 +243,26 @@ mod tests{
         let id=uuid::Uuid::new_v4().to_string();
         let run=c.start(id.clone(),Mode::Rehearsal).unwrap();run.finish(true);
         assert_eq!(c.snapshot(&id).unwrap().native_outcome,None);
+    }
+    #[test]fn destination_stop_is_scoped_and_cannot_retire_last_active_output(){
+        use crate::live_fanout::DestinationStats;
+        let c=Arc::new(Controller::default());
+        let id=uuid::Uuid::new_v4().to_string();
+        let a=uuid::Uuid::new_v4().to_string();let b=uuid::Uuid::new_v4().to_string();
+        let r=c.start(id.clone(),Mode::Native).unwrap();
+        let flags=r.register_destination_stops(vec![a.clone(),b.clone()]).unwrap();
+        assert!(!c.stop_destination(&id,&a));r.running();
+        let row=|id:String|DestinationStats{id,phase:"sending",sent_packets:1,sent_payload_bytes:1,queued_packets:0,queued_bytes:0,admitted_packets:1,admitted_bytes:1,reconnect_attempt:0,interrupted:false};
+        r.destination_telemetry(vec![row(a.clone()),row(b.clone())]);
+        assert!(!c.stop_destination("other",&a));
+        assert!(!c.stop_destination(&id,"unknown"));
+        assert!(c.stop_destination(&id,&a));
+        assert!(flags[&a].load(Ordering::Acquire));
+        assert!(!flags[&b].load(Ordering::Acquire));
+        assert!(!c.stop_destination(&id,&a));assert!(!c.stop_destination(&id,&b));
+        assert!(!r.cancelled());assert!(c.stop_native(&id));
+        r.finish(false);
+        assert!(!c.stop_destination(&id,&b));
     }
     #[test]fn scoped_stop_and_terminal_state(){
         let c=Arc::new(Controller::default());let id=uuid::Uuid::new_v4().to_string();
