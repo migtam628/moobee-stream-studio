@@ -10,10 +10,14 @@ pub(crate) enum Phase{Starting,Streaming,Reconnecting,Stopping,Stopped,Failed}
 #[derive(Clone,Copy,Debug,PartialEq,Eq,Serialize)]
 #[serde(rename_all="camelCase")]
 pub(crate) enum Mode{Rehearsal,Native}
+/// Sender-only termination classification; never receiver acceptance.
+#[derive(Clone,Copy,Debug,PartialEq,Eq,Serialize)]
+#[serde(rename_all="camelCase")]
+pub(crate) enum NativeOutcome{SenderCompleted,StoppedEarly,Failed,Unverified}
 #[derive(Clone,Debug,Serialize)]
 #[serde(rename_all="camelCase")]
 pub(crate) struct Snapshot{
-    session_id:String,mode:Mode,phase:Phase,elapsed_ms:u64,media_frames:u32,
+    session_id:String,mode:Mode,phase:Phase,native_outcome:Option<NativeOutcome>,elapsed_ms:u64,media_frames:u32,
     sent_packets:u64,sent_payload_bytes:u64,pending_packets:usize,pending_bytes:usize,
     late_frames:u32,bitrate_kbps:u64,error:Option<&'static str>,health:Reading,reconnect_attempt:u8,destinations:Vec<crate::live_fanout::DestinationStats>,
     resources:crate::live_soak::Resources,timing:Option<crate::live_soak::Timing>,bitrate_advice:crate::live_bitrate::Reading,
@@ -29,7 +33,7 @@ impl Controller{
         let mut e=self.entry.lock().map_err(|_|"Stream state unavailable")?;
         if e.as_ref().is_some_and(|v|!matches!(v.snapshot.phase,Phase::Stopped|Phase::Failed)){return Err("Another streaming session is active".into())}
         let stop=Arc::new(AtomicBool::new(false));
-        *e=Some(Entry{snapshot:Snapshot{session_id:id.clone(),mode,phase:Phase::Starting,elapsed_ms:0,media_frames:0,
+        *e=Some(Entry{snapshot:Snapshot{session_id:id.clone(),mode,phase:Phase::Starting,native_outcome:None,elapsed_ms:0,media_frames:0,
             sent_packets:0,sent_payload_bytes:0,pending_packets:0,pending_bytes:0,late_frames:0,bitrate_kbps:0,error:None,health:Reading::default(),reconnect_attempt:0,destinations:vec![],resources:crate::live_soak::Resources::default(),timing:None,bitrate_advice:crate::live_bitrate::Reading::default()},start:Instant::now(),stop:stop.clone(),monitor:Monitor::default(),epoch_started_ms:0,advisor:crate::live_bitrate::Advisor::default()});
         Ok(Run{controller:self.clone(),id,stop,retry_failure:Arc::new(Mutex::new(None))})
     }
@@ -154,10 +158,26 @@ impl Run{
         }
         e.monitor.observe(Sample{elapsed_ms:s.elapsed_ms,frames,late_frames:late,sent_bytes:s.sent_payload_bytes,sent_packets:s.sent_packets,queue_bytes:s.pending_bytes,queue_packets:s.pending_packets});
     }
-    pub(crate) fn finish(&self,success:bool){self.update(|s|{
+    pub(crate) fn finish(&self,success:bool){self.finish_with_outcome(success,None)}
+    /// Only the native Program report may establish completed sender duration.
+    /// A clean early stop remains successful shutdown, not a full-duration test.
+    pub(crate) fn finish_native(&self,stopped_early:Option<bool>){
+        let outcome=match stopped_early{
+            Some(false)=>NativeOutcome::SenderCompleted,
+            Some(true)=>NativeOutcome::StoppedEarly,
+            None=>NativeOutcome::Failed,
+        };
+        self.finish_with_outcome(stopped_early.is_some(),Some(outcome));
+    }
+    fn finish_with_outcome(&self,success:bool,outcome:Option<NativeOutcome>){self.update(|s|{
         s.phase=if success{Phase::Stopped}else{Phase::Failed};
         if success{s.pending_packets=0;s.pending_bytes=0;}
         s.error=if success{None}else{Some("Streaming session ended before successful completion")};
+        if s.mode==Mode::Native{
+            s.native_outcome=Some(if success{
+                if self.cancelled(){NativeOutcome::StoppedEarly}else{outcome.unwrap_or(NativeOutcome::Unverified)}
+            }else{NativeOutcome::Failed});
+        }
     });}
 }
 pub(crate) fn start_rehearsal(controller:&Arc<Controller>,id:String,seconds:u32)->Result<(),String>{
@@ -179,6 +199,30 @@ pub(crate) fn start_rehearsal(controller:&Arc<Controller>,id:String,seconds:u32)
 #[cfg(test)]
 mod tests{
     use super::*;
+    #[test]fn native_sender_completion_is_distinct_from_early_stop_and_failure(){
+        let c=Arc::new(Controller::default());
+        for (reported,expected,phase) in [(Some(false),NativeOutcome::SenderCompleted,Phase::Stopped),
+            (Some(true),NativeOutcome::StoppedEarly,Phase::Stopped),(None,NativeOutcome::Failed,Phase::Failed)]{
+            let id=uuid::Uuid::new_v4().to_string();
+            let run=c.start(id.clone(),Mode::Native).unwrap();
+            run.running();
+            run.finish_native(reported);
+            run.finish(true); // A later generic worker completion cannot overwrite terminal evidence.
+            let status=c.snapshot(&id).unwrap();
+            assert_eq!(status.native_outcome,Some(expected));
+            assert_eq!(status.phase,phase);
+        }
+        let id=uuid::Uuid::new_v4().to_string();
+        let run=c.start(id.clone(),Mode::Native).unwrap();
+        assert!(c.stop_native(&id));run.finish_native(Some(false));
+        assert_eq!(c.snapshot(&id).unwrap().native_outcome,Some(NativeOutcome::StoppedEarly));
+        let id=uuid::Uuid::new_v4().to_string();
+        let run=c.start(id.clone(),Mode::Native).unwrap();run.finish(true);
+        assert_eq!(c.snapshot(&id).unwrap().native_outcome,Some(NativeOutcome::Unverified));
+        let id=uuid::Uuid::new_v4().to_string();
+        let run=c.start(id.clone(),Mode::Rehearsal).unwrap();run.finish(true);
+        assert_eq!(c.snapshot(&id).unwrap().native_outcome,None);
+    }
     #[test]fn scoped_stop_and_terminal_state(){
         let c=Arc::new(Controller::default());let id=uuid::Uuid::new_v4().to_string();
         let r=c.start(id.clone(),Mode::Rehearsal).unwrap();r.running();
