@@ -403,6 +403,91 @@ pub(crate) mod tls {
                 server.join().unwrap();
             }
         }
+        #[test]fn encrypted_fanout_recovers_only_disconnected_receiver_at_fresh_idr(){
+            use std::{net::{TcpListener,Ipv4Addr},sync::Arc,thread::JoinHandle};
+            use crate::{live_session::Session,live_publish_worker::Worker,live_fanout::{Fanout,Connector},rtmps_test_receiver::Report,stream_mux::{avc_sequence,avc_access_unit}};
+            fn client(addr:SocketAddr,root:native_tls::Certificate)->Worker{
+                let socket=TcpStream::connect_timeout(&addr,Duration::from_secs(3)).unwrap();
+                socket.set_nodelay(true).unwrap();
+                let mut builder=native_tls::TlsConnector::builder();
+                builder.min_protocol_version(Some(native_tls::Protocol::Tlsv12)).max_protocol_version(Some(native_tls::Protocol::Tlsv12)).add_root_certificate(root);
+                let tls=builder.build().unwrap().connect("localhost",DeadlineSocket{socket,deadline:Some(Instant::now()+NEGOTIATION_TIMEOUT),permit:None,_lease:None}).unwrap_or_else(|_|panic!("Fixture TLS handshake failed"));
+                let mut publisher=Publisher::establish(tls,"live","rtmps://localhost/live","loopback-fixture-only",0,&[9;1528]).unwrap();
+                publisher.io.get_mut().deadline=None;
+                Worker::start_with_poll(Session::new(publisher).unwrap(),|s|s.poll_tls_inbound()).unwrap()
+            }
+            fn open()->(Worker,JoinHandle<Result<Report>>){
+                let (config,root)=certificates();
+                let listener=TcpListener::bind((Ipv4Addr::LOCALHOST,0)).unwrap();
+                let addr=listener.local_addr().unwrap();
+                let server=std::thread::spawn(move||{
+                    let (socket,_)=listener.accept().unwrap();
+                    socket.set_read_timeout(Some(Duration::from_secs(8))).unwrap();
+                    socket.set_write_timeout(Some(Duration::from_secs(5))).unwrap();
+                    let mut stream=rustls::StreamOwned::new(rustls::ServerConnection::new(config).unwrap(),socket);
+                    crate::rtmps_test_receiver::serve(&mut stream,"loopback-fixture-only",None)
+                });
+                (client(addr,root),server)
+            }
+            let (healthy,healthy_server)=open();
+            let (config,root)=certificates();
+            let listener=TcpListener::bind((Ipv4Addr::LOCALHOST,0)).unwrap();
+            let addr=listener.local_addr().unwrap();
+            let broken_server=std::thread::spawn(move||{
+                let (socket,_)=listener.accept().unwrap();
+                socket.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+                socket.set_write_timeout(Some(Duration::from_secs(5))).unwrap();
+                let mut stream=rustls::StreamOwned::new(rustls::ServerConnection::new(config).unwrap(),socket);
+                crate::rtmps_test_receiver::authorize_fixture(&mut stream,"loopback-fixture-only").unwrap();
+                crate::rtmps_test_receiver::consume_video_start_fixture(&mut stream).unwrap();
+                stream.conn.send_close_notify();
+                stream.flush().unwrap();
+            });
+            let broken=client(addr,root);
+            let (tx,rx)=mpsc::sync_channel(1);
+            let connector:Connector=Arc::new(move|permit|{
+                if !permit(){return Err(Failure::Unknown)}
+                let (worker,server)=open();
+                if !permit(){worker.request_stop();return Err(Failure::Unknown)}
+                tx.try_send(server).map_err(|_|Failure::Unknown)?;
+                Ok(worker)
+            });
+            let mut fanout=Fanout::with_recovery(vec![(uuid::Uuid::new_v4().to_string(),healthy,None),(uuid::Uuid::new_v4().to_string(),broken,Some(connector))],None).unwrap();
+            let video=|t,key|avc_access_unit(&[&[if key{0x65}else{0x41},1]],t,0,key).unwrap();
+            fanout.submit(vec![avc_sequence(&[0x67,0x64,0,0x28],&[0x68,0xee]).unwrap(),video(0,true)]).unwrap();
+            let origin=Instant::now();let until=origin+Duration::from_secs(5);
+            while fanout.destinations()[1].phase!="failed"{
+                assert!(Instant::now()<until,"Receiver disconnect not observed");
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            broken_server.join().unwrap();
+            let mut expected=1u64;
+            let mut ts=0;
+            while !fanout.test_awaiting_key(1){
+                assert!(Instant::now()<until,"Receiver reconnect not observed");
+                std::thread::sleep(Duration::from_millis(50));
+                ts=(origin.elapsed().as_millis() as u32).max(ts+1);
+                fanout.submit(vec![video(ts,false)]).unwrap();
+                expected+=1;
+            }
+            let rejoined=rx.recv_timeout(Duration::from_secs(1)).unwrap();
+            assert!(fanout.destinations()[1].interrupted);
+            ts+=50;fanout.submit(vec![video(ts,true)]).unwrap();expected+=1;
+            ts+=50;fanout.submit(vec![video(ts,false)]).unwrap();expected+=1;
+            // The healthy receiver finishes normally; rejoining is not an uninterrupted soak.
+            assert!(fanout.finish().is_err());
+            let rows=fanout.destinations();
+            let healthy_report=healthy_server.join().unwrap().unwrap();
+            let rejoined_report=rejoined.join().unwrap().unwrap();
+            assert_eq!(healthy_report.video_frames,expected);
+            assert_eq!(rejoined_report.video_frames,2);
+            assert_eq!(rejoined_report.idr_frames,1);
+            assert_eq!(rejoined_report.last_video_ms,Some(50));
+            assert!(healthy_report.orderly_close&&rejoined_report.orderly_close);
+            assert!(!rows[0].interrupted&&rows[1].interrupted);
+            assert_eq!(rows[1].reconnect_attempt,1);
+            assert_eq!(rows[0].phase,"stopped");assert_eq!(rows[1].phase,"stopped");
+        }
         #[test]fn loopback_tls_rejects_untrusted_root_and_wrong_hostname(){
             use std::net::{TcpListener,Ipv4Addr};
             for (trust,host) in [(false,"localhost"),(true,"wrong.invalid")]{
