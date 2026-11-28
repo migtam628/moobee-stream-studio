@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "target": "v0.4.0-beta.1",
-  "reviewDate": "2026-11-25",
+  "reviewDate": "2026-11-27",
   "note": "Statuses are engineering tracking claims, not proof of device acceptance. Do not set verified without linked real-device evidence, human review, and required signoffs.",
   "gates": [
     {
@@ -38,15 +38,22 @@
     },
     {
       "id": "windows-h264-aac",
-      "status": "blocked",
-      "details": "Windows Graphics Capture + Media Foundation native H.264/AAC recording not validated; silent MJPEG AVI is diagnostic only.",
-      "evidence": []
+      "status": "needs-hardware-qa",
+      "details": "Native Media Foundation synthetic H.264 MP4 encoding and H.264/AAC encrypted local RTMPS encoding and independent decoding passed in CI. Real Windows Graphics Capture, physical microphone/HDMI, long-duration recording and lip-sync remain unverified.",
+      "evidence": [
+        "https://github.com/migtam628/moobee-stream-studio/actions/runs/46078570916"
+      ]
     },
     {
       "id": "rtmps-broadcast",
-      "status": "blocked",
-      "details": "No user-authorized RTMP/RTMPS broadcast transport, receiving-side evidence, reconnect, 2-hour soak or credential-safe lifecycle.",
-      "evidence": []
+      "status": "needs-hardware-qa",
+      "details": "Developer-only explicit native RTMPS acceptance path and native H.264/AAC synthetic loopback with independent decoder passed on macOS ARM64, macOS Intel and Windows x64 (PR #93); independent offline receiver soak file verifier merged (PR #94). Real capture-device and external private receiver interoperability, physical lip-sync, reconnect and two-hour soak, independent security review and production Go Live remain pending. Synthetic evidence is not physical acceptance.",
+      "evidence": [
+        "https://github.com/migtam628/moobee-stream-studio/pull/93",
+        "https://github.com/migtam628/moobee-stream-studio/pull/94",
+        "https://github.com/migtam628/moobee-stream-studio/actions/runs/46078570981",
+        "https://github.com/migtam628/moobee-stream-studio/actions/runs/46078570916"
+      ]
     },
     {
       "id": "secure-credentials-and-api",
