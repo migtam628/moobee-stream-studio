@@ -4,7 +4,7 @@ export const SAMPLE_INTERVAL_MS = 10000
 const phases = new Set(['starting','streaming','reconnecting','stopping','stopped','failed'])
 const outcomes = new Set(['senderCompleted','stoppedEarly','failed','unverified'])
 const healthStates = new Set(['unavailable','warmingUp','normal','backpressure','stalled','stale','ended'])
-const destinationPhases = new Set(['starting','connecting','sending','reconnecting','stopping','stopped','failed','complete','draining','waiting','awaitingKey','closed'])
+const destinationPhases = new Set(['starting','connecting','authorized','sending','reconnecting','stopping','stopped','failed','complete','draining','waiting','awaitingKey','closed'])
 const integer = (v, signed = false) => Number.isSafeInteger(v) && (signed || v >= 0) ? v : null
 const pick = (obj, keys, signed = []) => Object.fromEntries(keys.map(key => [key, integer(obj?.[key], signed.includes(key))]))
 export function sanitizeLiveSample(value) {
@@ -37,7 +37,7 @@ export function appendLiveSample(history, snapshot) {
   if (last && next.elapsedMs < last.elapsedMs) return history
   if (last && next.elapsedMs-last.elapsedMs < SAMPLE_INTERVAL_MS && next.phase===last.phase &&
       next.nativeOutcome===last.nativeOutcome && next.reconnectAttempt===last.reconnectAttempt && next.bitrateAdvice.currentKbps===last.bitrateAdvice.currentKbps &&
-      next.bitrateAdvice.inplaceChanges===last.bitrateAdvice.inplaceChanges && next.health.health===last.health.health && JSON.stringify(next.destinations.map(d=>[d.phase,d.reconnectAttempt,d.interrupted]))===JSON.stringify(last.destinations.map(d=>[d.phase,d.reconnectAttempt,d.interrupted]))) return history
+      next.bitrateAdvice.inplaceChanges===last.bitrateAdvice.inplaceChanges && next.bitrateAdvice.inplaceUnsupported===last.bitrateAdvice.inplaceUnsupported && next.bitrateAdvice.inplaceUncertain===last.bitrateAdvice.inplaceUncertain && next.health.health===last.health.health && JSON.stringify(next.destinations.map(d=>[d.phase,d.reconnectAttempt,d.interrupted]))===JSON.stringify(last.destinations.map(d=>[d.phase,d.reconnectAttempt,d.interrupted]))) return history
   return [...history.slice(1-HISTORY_LIMIT),next]
 }
 export function readLiveHistory(raw) {
