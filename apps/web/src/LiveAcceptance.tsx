@@ -170,7 +170,7 @@ export default function LiveAcceptance({active,disabled,prepare,onBusy}:{active:
   }
   async function stop(){
     const sessionId=current.current
-    if(!sessionId||stopping)return
+    if(!sessionId||(stopping&&!statusUncertain))return
     setStopping(true);setError('')
     try{if(!await request<boolean>('/studio/live-acceptance/stop',{sessionId})){if(current.current===sessionId)setError('Stop not acknowledged yet; retry if the test is still starting.');setStopping(false)}}
     catch{if(current.current===sessionId)setError('Stop request failed; retry.');setStopping(false)}
@@ -179,7 +179,7 @@ export default function LiveAcceptance({active,disabled,prepare,onBusy}:{active:
   const budget=review?reviewBudget(review.prepared.config,review.targets.length):null
   const dock=document.getElementById('native-live-session-dock')
   const controls=<>
-    {busy.current&&<button className="secondary-button" disabled={stopping} onClick={()=>void stop()}>{stopping?'Stop requested — draining':'Stop real test stream'}</button>}
+    {busy.current&&<button className="secondary-button" disabled={stopping&&!statusUncertain} onClick={()=>void stop()}>{stopping&&!statusUncertain?'Stop requested — draining':'Stop real test stream'}</button>}
     {statusUncertain&&busy.current&&<p role="status">Native session status uncertain. Stop remains available; checking the controller before unlocking capture.</p>}
     {session&&<p role="status">Native test: {statusUncertain?'status uncertain':status?.phase??(busy.current?'starting':'status unavailable')} · {status?.mediaFrames??0} submitted frames · {status?.sentPackets??0} sent packets. Receiver verification required.</p>}
     {error&&<p role="alert" className="preview-error">{error}</p>}
