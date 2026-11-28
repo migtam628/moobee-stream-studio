@@ -1,0 +1,75 @@
+name: macOS ARM64 developer acceptance DMG
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+permissions:
+  contents: read
+concurrency:
+  group: macos-arm64-qa-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  dmg:
+    if: github.repository == 'migtam628/moobee-stream-studio' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'qa/macos-arm64-group-a'
+    runs-on: macos-latest
+    timeout-minutes: 60
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '13.0'
+      APPLE_SIGNING_IDENTITY: '-'
+      QA_BUILD_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+      - run: npm ci
+      - name: Check exact source and native architecture
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          test "$(uname -m)" = arm64
+      - name: Build acceptance-enabled DMG (never launch)
+        working-directory: apps/desktop
+        run: GITHUB_SHA="$QA_BUILD_SHA" GITHUB_REF_NAME=qa/macos-arm64-group-a npm run tauri:build -- --features native-live-acceptance --target aarch64-apple-darwin --bundles dmg
+      - name: Validate and collect Apple Silicon installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          DIR=apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg
+          DMG="$(find "$DIR" -maxdepth 1 -type f -name '*.dmg' -print -quit)"
+          test -s "$DMG"
+          # Inspect without launching, then unmount even if verification fails.
+          mount="$(mktemp -d)"
+          trap 'hdiutil detach "$mount" -quiet || true; rmdir "$mount" || true' EXIT
+          hdiutil attach -readonly -nobrowse -quiet -mountpoint "$mount" "$DMG"
+          app="$mount/MooBee Stream Studio.app"
+          bash scripts/verify-macos-app-bundle.sh "$app"
+          exe=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")
+          test "$(lipo -archs "$app/Contents/MacOS/$exe")" = arm64
+          codesign --verify --deep --strict "$app"
+          mkdir -p qa-output
+          cp "$DMG" "qa-output/MooBee-Stream-Studio-ARM64-QA-${{ github.event.pull_request.head.sha }}.dmg"
+          hdiutil detach "$mount" -quiet
+          rmdir "$mount"
+          trap - EXIT
+      - name: Write test-only provenance and checksums
+        env:
+          QA_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          node --input-type=module -e 'import fs from "node:fs"; import crypto from "node:crypto";const name=fs.readdirSync("qa-output").find(x=>x.endsWith(".dmg"));if(!name)throw Error("Missing DMG");const sha256=crypto.createHash("sha256").update(fs.readFileSync("qa-output/"+name)).digest("hex");fs.writeFileSync("qa-output/SHA256SUMS.txt",sha256+"  "+name+"\n");fs.writeFileSync("qa-output/QA-MANIFEST.json",JSON.stringify({schemaVersion:1,commit:process.env.QA_SHA,platform:"macos-arm64",minimumMacOS:"13.0",feature:"native-live-acceptance",signing:"ad-hoc",notarized:false,productionRelease:false,physicalAcceptanceVerified:false,file:name,sha256},null,2)+"\n");'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MooBee-macOS-ARM64-QA-DMG
+          path: qa-output/
+          if-no-files-found: error
+          retention-days: 7
