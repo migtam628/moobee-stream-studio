@@ -15,6 +15,7 @@ pub(crate) struct Reader{size:usize,headers:HashMap<u32,Header>,pending:HashMap<
 impl Default for Reader{fn default()->Self{Self{size:128,headers:HashMap::new(),pending:HashMap::new(),bytes:0}}}
 impl Reader{
     pub(crate) fn bytes(&self)->u64{self.bytes}
+    pub(crate) fn has_pending_message(&self)->bool{!self.pending.is_empty()}
     /// Inspect the bounded wire header without consuming bytes or changing
     /// chunk history. A partial TCP/TLS read must never mutate the parser.
     pub(crate) fn complete_chunk_len(&self,buf:&[u8])->Result<Option<usize>>{
