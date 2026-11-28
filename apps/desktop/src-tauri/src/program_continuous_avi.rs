@@ -1126,6 +1126,42 @@ fn capture_authorized_live_program_with_lifecycle(
     capture_live_fanout(display_ids,video_device_id,seconds,profile,bitrate_kbps,layout,overlay,audio_inputs,transforms,stop,move||crate::live_fanout::Fanout::single(connect()?),lifecycle)
 }
 
+// Shared validation for native consent and the actual capture entry point.
+// No devices, credentials, filesystem or networking are accessed.
+fn validated_live_config(
+    display_ids:&[usize],video_device_id:Option<&str>,seconds:u32,profile:&str,
+    bitrate_kbps:Option<u32>,layout:Option<&str>,audio_inputs:&[crate::program_audio::AudioInput],
+    transforms:Option<&[crate::source_transform::SourceTransform]>,
+)->Result<(EncodingProfile,crate::scene_compositor::SceneLayout),String>{
+    if !(2..=crate::live_acceptance::MAX_LIVE_SECONDS).contains(&seconds){return Err("Live integration test supports 2–7200 seconds".into())}
+    let mut p=encoding_profile(profile)?;
+    p.bitrate_kbps=validate_bitrate(bitrate_kbps,p.bitrate_kbps)?;
+    if let Some(id)=video_device_id{
+        if !display_ids.is_empty()||id.is_empty()||id.len()>1024||id.chars().any(char::is_control){
+            return Err("Select one video device or up to four displays".into())
+        }
+    }else{crate::scene_compositor::validate_ids(display_ids)?;}
+    crate::program_audio::validate(audio_inputs)?;
+    #[cfg(target_os="windows")]
+    crate::windows_audio::validate(&audio_inputs)?;
+    crate::source_transform::validate_list(transforms,display_ids.len()+usize::from(video_device_id.is_some()))?;
+    let layout=crate::scene_compositor::SceneLayout::parse(layout)?;
+    Ok((p,layout))
+}
+pub(crate) fn validate_live_preview(
+    display_ids:&[usize],video_device_id:Option<&str>,seconds:u32,profile:&str,
+    bitrate_kbps:Option<u32>,layout:Option<&str>,audio_inputs:&[crate::program_audio::AudioInput],
+    transforms:Option<&[crate::source_transform::SourceTransform]>,
+    overlay:Option<&crate::program_overlay::OverlayInput>,
+)->Result<(u32,u32,u32,u32),String>{
+    let (p,_)=validated_live_config(display_ids,video_device_id,seconds,profile,bitrate_kbps,layout,audio_inputs,transforms)?;
+    #[cfg(any(target_os="macos",target_os="windows"))]
+    if let Some(overlay)=overlay{overlay.clone().prepare(p.width,p.height)?;}
+    #[cfg(not(any(target_os="macos",target_os="windows")))]
+    let _=overlay;
+    Ok((p.width,p.height,p.fps,p.bitrate_kbps))
+}
+
 #[cfg(any(target_os="macos",target_os="windows"))]
 fn capture_live_fanout(
     display_ids:Vec<usize>,video_device_id:Option<String>,seconds:u32,profile:&str,
@@ -1136,19 +1172,7 @@ fn capture_live_fanout(
     connect:impl FnOnce()->Result<crate::live_fanout::Fanout,String>+'static,
     lifecycle:Option<crate::live_lifecycle::Run>,
 )->Result<ContinuousProgramReport,String>{
-    if !(2..=crate::live_acceptance::MAX_LIVE_SECONDS).contains(&seconds){return Err("Live integration test supports 2–7200 seconds".into())}
-    let mut p=encoding_profile(profile)?;
-    p.bitrate_kbps=validate_bitrate(bitrate_kbps,p.bitrate_kbps)?;
-    if let Some(id)=video_device_id.as_ref(){
-        if !display_ids.is_empty()||id.is_empty()||id.len()>1024||id.chars().any(char::is_control){
-            return Err("Select one video device or up to four displays".into())
-        }
-    }else{crate::scene_compositor::validate_ids(&display_ids)?;}
-    crate::program_audio::validate(&audio_inputs)?;
-    #[cfg(target_os="windows")]
-    crate::windows_audio::validate(&audio_inputs)?;
-    crate::source_transform::validate_list(transforms.as_deref(),display_ids.len()+usize::from(video_device_id.is_some()))?;
-    let layout=crate::scene_compositor::SceneLayout::parse(layout)?;
+    let (p,layout)=validated_live_config(&display_ids,video_device_id.as_deref(),seconds,profile,bitrate_kbps,layout,&audio_inputs,transforms.as_deref())?;
     if stop.load(Ordering::Acquire){return Err("Live Program cancelled before capture".into())}
     use crate::clip::{CaptureLock,CAPTURE_BUSY};
     CAPTURE_BUSY.compare_exchange(false,true,Ordering::AcqRel,Ordering::Acquire)

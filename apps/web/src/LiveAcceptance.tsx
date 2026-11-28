@@ -5,6 +5,14 @@ type Destination={id:string;name:string;serverUrl:string|null;credentialAvailabl
 type Prepared={scene:string;sources:string[];audio:string[];config:Record<string,unknown>}
 type Snapshot={sessionId:string;mode:string;phase:string;mediaFrames:number;sentPackets:number;elapsedMs:number;error?:string|null}
 const confirmation='START REAL TEST STREAM'
+const profileSettings:Record<string,{label:string;kbps:number}>={baseline:{label:'640 × 360 · 10 fps',kbps:3000},'720p15':{label:'1280 × 720 · 15 fps',kbps:3000},'1080p30':{label:'1920 × 1080 · 30 fps',kbps:6000}}
+function reviewBudget(config:Record<string,unknown>,count:number){
+  const profile=profileSettings[String(config.profile)]
+  if(!profile)return null
+  const kbps=typeof config.bitrateKbps==='number'?config.bitrateKbps:profile.kbps
+  if(![1500,3000,6000].includes(kbps))return null
+  return {label:profile.label,kbps,total:kbps*count}
+}
 const activePhase=(phase:string)=>['starting','streaming','reconnecting','stopping'].includes(phase)
 const validId=(id:string)=>/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)
 export default function LiveAcceptance({active,disabled,prepare,onBusy}:{active:boolean;disabled:boolean;prepare:(seconds:number)=>Promise<Prepared>;onBusy:(busy:boolean)=>void}){
@@ -140,6 +148,7 @@ export default function LiveAcceptance({active,disabled,prepare,onBusy}:{active:
     catch{if(current.current===sessionId)setError('Stop request failed; retry.');setStopping(false)}
   }
   if(!available)return null
+  const budget=review?reviewBudget(review.prepared.config,review.targets.length):null
   const dock=document.getElementById('native-live-session-dock')
   const controls=<>
     {busy.current&&<button className="secondary-button" disabled={stopping} onClick={()=>void stop()}>{stopping?'Stop requested — draining':'Stop real test stream'}</button>}
@@ -160,6 +169,7 @@ export default function LiveAcceptance({active,disabled,prepare,onBusy}:{active:
       <b>Confirm the exact capture and destinations</b>
       <p>Local vault and destination selection checked. Provider credentials and network reception are not verified.</p>
       <p>Scene: {review.prepared.scene} · {String(review.prepared.config.seconds)}s · {String(review.prepared.config.profile)}</p>
+      {budget&&<p>Video: {budget.label} · {budget.kbps} kbps per destination · {budget.total} kbps aggregate video target (audio and transport overhead excluded).</p>}
       <p>Sources: {review.prepared.sources.join(', ')}</p>
       <p>Audio: {review.prepared.audio.join(', ')||'None'}</p>
       <p>Bitrate fallback: {review.fallback?'Enabled — lower preset after a classified transport retry':'Disabled'}</p>
