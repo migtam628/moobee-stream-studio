@@ -707,7 +707,7 @@ export default function App() {
       {tab === 'Alerts' && <Alerts perform={perform}/>}
       {tab === 'Overlays' && <Overlays setTab={go}/>}
       {tab === 'Clips' && <ClipLab/>}
-      {tab === 'Analytics' && <LiveHealth/>}
+      <div hidden={tab !== 'Analytics'} style={{display:tab === 'Analytics'?'contents':'none'}}><LiveHealth/></div>
       {tab === 'Multistream' && <StreamDestinations/>}
       {(tab === 'Multistream' || tab === 'AI Sidekick' || tab === 'Chatbot' || tab === 'Analytics') && <PlannedModule tab={tab}/>}
     </main>
