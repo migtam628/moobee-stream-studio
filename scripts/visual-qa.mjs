@@ -150,6 +150,8 @@ try {
       ]
     }));
     window.__programRequests = [];
+    const restoredId=sessionStorage.getItem('mock-native-active-session');
+    if(restoredId){window.__acceptanceState={sessionId:restoredId,mode:'native',phase:'streaming',mediaFrames:10,sentPackets:11,elapsedMs:1000};sessionStorage.removeItem('mock-native-active-session');}
     window.__snapshotCount = 0;
     window.__movingCalls = [];
     window.__captureOrder = [];
@@ -181,7 +183,7 @@ try {
       }
       if(cmd==='stop_live_acceptance'){
         window.__liveStopCalls=(window.__liveStopCalls??0)+1;
-        if(window.__liveStopCalls===1)return false; // IPC arrives before native controller registration.
+        if(window.__liveStopCalls===1&&window.__acceptanceRequest)return false; // IPC arrives before native controller registration.
         if(window.__acceptanceState?.sessionId!==args.sessionId)return false;
         window.__acceptanceState.phase='stopped';window.__acceptanceResolve?.(null);return true;
       }
@@ -196,7 +198,7 @@ try {
         window.__destinationRows=[row];return row;
       }
       if(cmd==='remove_stream_destination'){window.__destinationRows=[];return null;}
-      if(cmd==='live_health_status')return window.__healthFixture??window.__rehearsal??null;
+      if(cmd==='live_health_status')return window.__healthFixture??(window.__acceptanceState?.phase==='streaming'?window.__acceptanceState:null)??window.__rehearsal??null;
       if(cmd==='live_session_status')return window.__acceptanceState?.sessionId===args.sessionId?window.__acceptanceState:window.__rehearsal?.sessionId===args.sessionId?window.__rehearsal:null;
       if(cmd==='stop_live_rehearsal'){if(window.__rehearsal?.sessionId!==args.sessionId)return false;window.__rehearsal.phase='stopped';return true;}
       if (cmd === 'capture_program_live_packet_test') {window.__flvRequest=args;return {...clip,format:'flv',path:'/test/clip.flv',webcamIncluded:false};}
@@ -465,6 +467,18 @@ try {
   await dest.getByRole('button',{name:'Remove Fixture destination',exact:true}).click();
   await dest.getByRole('button',{name:'Confirm removal',exact:true}).click();
   await dest.getByText('No saved destinations.',{exact:true}).waitFor();
+  // A renderer reload must recover the existing native session without starting another one.
+  const recoveredId='b3c2a809-7e11-4b5a-8e77-841289d25049';
+  await macPage.evaluate(id=>sessionStorage.setItem('mock-native-active-session',id),recoveredId);
+  await macPage.reload({waitUntil:'domcontentloaded'});
+  await macPage.getByRole('button',{name:'Studio',exact:true}).click();
+  const recovered=macPage.getByRole('region',{name:'Real native streaming acceptance'});
+  await recovered.getByText(/Native test: streaming/).waitFor();
+  if(await macPage.evaluate(()=>!!window.__acceptanceRequest))throw new Error('Reload must not start a new stream');
+  await recovered.getByRole('button',{name:'Stop real test stream',exact:true}).click();
+  await recovered.getByText(/Native test: stopped/).waitFor();
+  if(await macPage.evaluate(()=>window.__acceptanceState?.sessionId)!==recoveredId)throw new Error('Reload recovery stopped the wrong session');
+  await recovered.getByRole('button',{name:'Load test destinations',exact:true}).waitFor();
   await macPage.close();
   const winPage = await browser.newPage({viewport:{width:1440,height:900},userAgent:'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36'});
   winPage.on('pageerror',error=>errors.push(error.message));
