@@ -64,3 +64,21 @@ jobs:
         run: |
           cargo test --lib windows_mp4_sink::tests::synthetic_windows_mp4_finalizes -- --ignored --exact
           cargo test --lib windows_mp4_sink::tests::synthetic_windows_av_finalizes -- --ignored --exact
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install independent receiver QA decoder if missing
+        shell: pwsh
+        run: |
+          if (!(Get-Command ffmpeg -ErrorAction SilentlyContinue) -or !(Get-Command ffprobe -ErrorAction SilentlyContinue)) {
+            choco install ffmpeg --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $env:Path += ";$env:ChocolateyInstall\bin"
+            "$env:ChocolateyInstall\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          }
+          ffmpeg -version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ffprobe -version
+      - name: Decode synthetic native AVC and AAC through encrypted loopback
+        run: python scripts/verify-native-rtmps-decode.py

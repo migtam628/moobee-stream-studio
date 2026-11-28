@@ -248,15 +248,27 @@ pub(crate) mod tls {
         // Test-only trust anchor and loopback socket. Never installed into
         // system trust, never passed into a production connector.
         fn certificates()->(std::sync::Arc<rustls::ServerConfig>,native_tls::Certificate){
-            use rcgen::{CertificateParams,KeyPair,IsCa,BasicConstraints,ExtendedKeyUsagePurpose};
+            use rcgen::{CertificateParams,KeyPair,IsCa,BasicConstraints,ExtendedKeyUsagePurpose,KeyUsagePurpose,DnType,date_time_ymd};
             let mut ca=CertificateParams::new(Vec::<String>::new()).unwrap();
             ca.is_ca=IsCa::Ca(BasicConstraints::Unconstrained);
+            ca.distinguished_name.push(DnType::CommonName,"MooBee loopback test CA");
+            ca.key_usages=vec![KeyUsagePurpose::KeyCertSign,KeyUsagePurpose::CrlSign];
+            // Apple trust policy rejects overly long server certificate lifetimes.
+            // Derive a short test-only validity window from the runner clock.
+            let now=SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+            let epoch=date_time_ymd(1970,1,1);
+            let not_before=epoch+now.saturating_sub(Duration::from_secs(86400));
+            let not_after=epoch+now+Duration::from_secs(7*86400);
+            ca.not_before=not_before;ca.not_after=not_after;
             let ca_key=KeyPair::generate().unwrap();let ca=ca.self_signed(&ca_key).unwrap();
             let mut leaf=CertificateParams::new(vec!["localhost".to_owned()]).unwrap();
+            leaf.distinguished_name.push(DnType::CommonName,"localhost");
+            leaf.key_usages=vec![KeyUsagePurpose::DigitalSignature];
             leaf.extended_key_usages=vec![ExtendedKeyUsagePurpose::ServerAuth];
+            leaf.not_before=not_before;leaf.not_after=not_after;
             let key=KeyPair::generate().unwrap();let leaf=leaf.signed_by(&key,&ca,&ca_key).unwrap();
             let config=rustls::ServerConfig::builder_with_provider(std::sync::Arc::new(rustls::crypto::ring::default_provider()))
-                .with_safe_default_protocol_versions().unwrap().with_no_client_auth()
+                .with_protocol_versions(&[&rustls::version::TLS12]).unwrap().with_no_client_auth()
                 .with_single_cert(vec![leaf.der().clone(),ca.der().clone()],rustls::pki_types::PrivatePkcs8KeyDer::from(key.serialize_der()).into()).unwrap();
             (std::sync::Arc::new(config),native_tls::Certificate::from_der(ca.der().as_ref()).unwrap())
         }
@@ -276,8 +288,11 @@ pub(crate) mod tls {
             let socket=TcpStream::connect_timeout(&addr,Duration::from_secs(3)).unwrap();
             socket.set_nodelay(true).unwrap();
             let mut builder=native_tls::TlsConnector::builder();
-            builder.min_protocol_version(Some(native_tls::Protocol::Tlsv12)).add_root_certificate(root);
-            let tls=builder.build().unwrap().connect("localhost",DeadlineSocket{socket,deadline:Some(Instant::now()+NEGOTIATION_TIMEOUT),permit:None,_lease:None}).unwrap_or_else(|_|panic!("Loopback TLS handshake failed"));
+            builder.min_protocol_version(Some(native_tls::Protocol::Tlsv12)).max_protocol_version(Some(native_tls::Protocol::Tlsv12)).add_root_certificate(root);
+            let tls=builder.build().unwrap().connect("localhost",DeadlineSocket{socket,deadline:Some(Instant::now()+NEGOTIATION_TIMEOUT),permit:None,_lease:None}).unwrap_or_else(|e|match e{
+                native_tls::HandshakeError::Failure(err)=>panic!("Loopback TLS handshake failed: {err}"),
+                native_tls::HandshakeError::WouldBlock(_)=>panic!("Loopback TLS handshake unexpectedly blocked"),
+            });
             let mut random=[0u8;1528];getrandom::fill(&mut random).unwrap();
             let mut publisher=Publisher::establish(tls,"live","rtmps://localhost/live",key,0,&random).unwrap();
             publisher.io.get_mut().deadline=None;
@@ -309,7 +324,7 @@ pub(crate) mod tls {
                     while conn.is_handshaking(){if conn.complete_io(&mut socket).is_err(){break}}
                 });
                 let mut builder=native_tls::TlsConnector::builder();
-                builder.min_protocol_version(Some(native_tls::Protocol::Tlsv12));
+                builder.min_protocol_version(Some(native_tls::Protocol::Tlsv12)).max_protocol_version(Some(native_tls::Protocol::Tlsv12));
                 if trust{builder.add_root_certificate(root);}
                 let result=builder.build().unwrap().connect(host,DeadlineSocket{socket,deadline:Some(Instant::now()+Duration::from_secs(5)),permit:None,_lease:None});
                 assert!(result.is_err());drop(result);server.join().unwrap();

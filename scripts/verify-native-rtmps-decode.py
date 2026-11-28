@@ -21,7 +21,7 @@ def run(args, timeout, **kwargs):
     result = subprocess.run(args, capture_output=True, text=True, timeout=timeout,
                             check=False, **kwargs)
     if result.returncode:
-        raise RuntimeError(f"{Path(args[0]).name} failed ({result.returncode}):\n{result.stderr[-4000:]}")
+        raise RuntimeError(f"{Path(args[0]).name} failed ({result.returncode}):\nstdout:\n{result.stdout[-6000:]}\nstderr:\n{result.stderr[-6000:]}")
     return result.stdout
 
 def validate(media, report, ffprobe, ffmpeg):

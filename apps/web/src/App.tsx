@@ -701,6 +701,7 @@ export default function App() {
     <aside className={`sidebar ${drawerOpen ? 'drawer-open' : ''}`}><nav>{navigation.map(({ label, icon: Icon }) => <button key={label} className={`nav-item ${tab === label ? 'active' : ''}`} onClick={() => go(label)}><Icon size={19}/><span>{label}</span></button>)}</nav><div className="sidebar-bottom"><div className="release-label" title="Release tag and immutable GitHub commit"><span>BUILD {buildIdentity}</span></div><button onClick={() => go('Settings')}><CircleHelp size={16}/>Engine guide</button></div></aside>
     <main className={`workspace ${productionTab ? 'production-workspace' : ''}`}>
       {error && <div className="error-banner" role="alert"><span>{error}</span><button onClick={() => setError('')}><X size={17}/></button></div>}
+      <div id="native-live-session-dock" style={{display:'contents'}}/>
       <div className="retained-studio" hidden={!productionTab}><Studio status={status} perform={perform} pending={pending} setTab={go} active={productionTab}/></div>
       {tab === 'Settings' && <Settings status={status}/>}
       {tab === 'Alerts' && <Alerts perform={perform}/>}

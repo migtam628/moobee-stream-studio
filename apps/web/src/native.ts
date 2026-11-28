@@ -274,8 +274,20 @@ export async function nativeRequest(path: string, body: Body = {}): Promise<unkn
   }
   if(path==='/studio/live-acceptance/stop'){
     if(typeof body.sessionId!=='string')throw new Error('Invalid acceptance session');
-    if(pendingLive?.id===body.sessionId&&!pendingLive.dispatched){pendingLive.cancelled=true;return true;}
-    return invoke('stop_live_acceptance',{sessionId:body.sessionId});
+    const run=pendingLive;
+    const sessionId=body.sessionId;
+    if(run?.id===sessionId&&!run.dispatched){run.cancelled=true;return true;}
+    // The start IPC can be dispatched before its native controller exists.
+    // Retry only this exact pending session, never a different or future run.
+    if(run?.id===sessionId){
+      for(let attempt=0;attempt<20;attempt++){
+        if(pendingLive!==run)return false;
+        if(await invoke<boolean>('stop_live_acceptance',{sessionId}))return true;
+        await new Promise<void>(resolve=>setTimeout(resolve,50));
+      }
+      return false;
+    }
+    return invoke('stop_live_acceptance',{sessionId});
   }
   if(path==='/studio/destinations')return invoke('list_stream_destinations');
   if(path==='/studio/destinations/add'){
