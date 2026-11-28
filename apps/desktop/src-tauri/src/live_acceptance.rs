@@ -29,16 +29,12 @@ fn display_label(value:&str)->String{
     value.chars().map(|c|if c.is_ascii_graphic()||c==' '{c.to_string()}else{c.escape_default().to_string()}).collect()
 }
 fn consent_summary(request:&Request)->Result<String,String>{
-    if request.display_ids.len()>4||request.video_device_id.as_ref().is_some_and(|v|v.is_empty()||v.len()>1024||v.chars().any(char::is_control)){
-        return Err("Invalid capture source selection".into())
-    }
-    crate::program_audio::validate(&request.audio_inputs)?;
-    if !["baseline","720p15","1080p30"].contains(&request.profile.as_str()){
-        return Err("Unsupported Program test profile".into())
-    }
-    let mut detail=format!("This sends actual video and selected audio over the network. Review the source preview in Studio before approving. A destination may be public.\n\nDuration: up to {} seconds\nProfile: {}\n",request.seconds,display_label(&request.profile));
+    let (width,height,fps,kbps)=crate::program_continuous_avi::validate_live_preview(
+        &request.display_ids,request.video_device_id.as_deref(),request.seconds,&request.profile,
+        request.bitrate_kbps,request.layout.as_deref(),&request.audio_inputs,request.transforms.as_deref(),request.overlay.as_ref())?;
+    let mut detail=format!("This sends actual video and selected audio over the network. Review the source preview in Studio before approving. A destination may be public.\n\nDuration: up to {} seconds\nProfile: {} ({}x{}, {} fps)\n",request.seconds,display_label(&request.profile),width,height,fps);
     detail.push_str(&format!("Display sources: {}\nVideo device selected: {}\nAudio inputs: {} ({} unmuted)\nOverlay: {}\n",request.display_ids.len(),if request.video_device_id.is_some(){"yes"}else{"no"},request.audio_inputs.len(),request.audio_inputs.iter().filter(|v|!v.muted&&v.gain>0.).count(),if request.overlay.is_some(){"yes"}else{"no"}));
-    detail.push_str(&format!("Requested bitrate: {}\n",request.bitrate_kbps.map_or_else(||"profile default".to_owned(),|v|format!("{v} kbps"))));
+    detail.push_str(&format!("Video target: {kbps} kbps per destination\nAggregate video target: {} kbps (excludes audio and transport overhead)\n",kbps as usize*request.destinations.len()));
     detail.push_str(&format!("Reconnect bitrate fallback: {}\nIn-place adaptive bitrate: {}\n\nConfirmed destinations:\n",request.fallback_on_reconnect.unwrap_or(false),request.adaptive_bitrate.unwrap_or(false)));
     for (i,d) in request.destinations.iter().enumerate(){
         if d.name.is_empty()||d.name.len()>80||d.name.chars().any(char::is_control)||d.server_url.len()>768||!d.server_url.is_ascii()||d.server_url.chars().any(|c|c.is_ascii_whitespace()||c.is_control()){
@@ -171,6 +167,16 @@ mod tests{
         assert!(!summary.contains('\u{202e}'));
         assert!(!summary.contains("consent-validation-only"));
         assert!(!summary.contains(&request.session_id));
+    }
+    #[test]fn native_consent_validates_the_exact_capture_configuration(){
+        let base=serde_json::json!({"sessionId":uuid::Uuid::new_v4().to_string(),"confirmation":"START REAL TEST STREAM","destinations":[{"id":uuid::Uuid::new_v4().to_string(),"name":"Fixture","serverUrl":"rtmps://example.invalid/live"},{"id":uuid::Uuid::new_v4().to_string(),"name":"Second fixture","serverUrl":"rtmps://other.invalid/live"}],"displayIds":[1],"seconds":15,"profile":"1080p30","audioInputs":[]});
+        let summary=consent_summary(&serde_json::from_value(base.clone()).unwrap()).unwrap();
+        assert!(summary.contains("1920x1080, 30 fps"));
+        assert!(summary.contains("Aggregate video target: 12000 kbps"));
+        for (key,value) in [("displayIds",serde_json::json!([])),("displayIds",serde_json::json!([1,1])),("videoDeviceId",serde_json::json!("device")),("bitrateKbps",serde_json::json!(2000)),("layout",serde_json::json!("unsupported")),("profile",serde_json::json!("4k")),("seconds",serde_json::json!(7201)),("transforms",serde_json::json!([]))]{
+            let mut changed=base.clone();changed[key]=value;
+            assert!(consent_summary(&serde_json::from_value(changed).unwrap()).is_err(),"{key}");
+        }
     }
     #[cfg(not(feature="native-live-acceptance"))]
     #[test]fn default_build_is_disabled(){assert!(!supported());}
