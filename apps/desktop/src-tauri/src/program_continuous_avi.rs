@@ -1053,6 +1053,7 @@ pub(crate) fn run_saved_multistream_session(
         }
         let initial=validate_bitrate(bitrate_kbps,encoding_profile(profile)?.bitrate_kbps)?;
         run.bitrate_config(initial,initial,false);
+        let flags=run.register_destination_stops(leases.iter().map(|(id,_)|id.clone()).collect())?;
         let credentials=leases.clone();
         let stop=run.stop_flag();let cancel=stop.clone();
         let result=capture_live_fanout(display_ids,video_device_id,seconds,profile,bitrate_kbps,layout,overlay,audio_inputs,transforms,stop,move||{
@@ -1083,7 +1084,7 @@ pub(crate) fn run_saved_multistream_session(
                 });
                 workers.push((id,worker,Some(connector)));
             }
-            crate::live_fanout::Fanout::with_recovery(workers,Some(cancel.clone()))
+            crate::live_fanout::Fanout::with_recovery(workers,Some(cancel.clone()))?.bind_destination_stops(flags)
         },Some(run.clone()));
         drop(leases);result
     })();
