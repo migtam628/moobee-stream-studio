@@ -5,6 +5,8 @@ type Destination={id:string;name:string;serverUrl:string|null;credentialAvailabl
 type Prepared={scene:string;sources:string[];audio:string[];config:Record<string,unknown>}
 type Snapshot={sessionId:string;mode:string;phase:string;mediaFrames:number;sentPackets:number;elapsedMs:number;error?:string|null}
 const confirmation='START REAL TEST STREAM'
+const activePhase=(phase:string)=>['starting','streaming','reconnecting','stopping'].includes(phase)
+const validId=(id:string)=>/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)
 export default function LiveAcceptance({active,disabled,prepare,onBusy}:{active:boolean;disabled:boolean;prepare:(seconds:number)=>Promise<Prepared>;onBusy:(busy:boolean)=>void}){
   const [available,setAvailable]=useState(false)
   const [destinations,setDestinations]=useState<Destination[]>([])
@@ -22,12 +24,44 @@ export default function LiveAcceptance({active,disabled,prepare,onBusy}:{active:
   const busy=useRef(false)
   const reviewGeneration=useRef(0)
   const [stopping,setStopping]=useState(false)
+  const [checked,setChecked]=useState(false)
+  const adopted=useRef(false)
+  const busyCallback=useRef(onBusy)
+  busyCallback.current=onBusy
   useEffect(()=>{
     if(!runningInTauri())return
     let alive=true
     void request<boolean>('/studio/live-acceptance/available').then(v=>{if(alive)setAvailable(v===true)}).catch(()=>{})
     return()=>{alive=false}
   },[])
+  // A renderer reload must not hide the Stop control for an already
+  // authorized native stream. Recover only the native controller identity;
+  // never persist credentials, restart a stream or replay authorization.
+  useEffect(()=>{
+    if(!available)return
+    let alive=true,inflight=false,done=false
+    const discover=async()=>{
+      if(inflight||done)return
+      inflight=true
+      try{
+        const s=await request<Snapshot|null>('/studio/live-health')
+        if(!alive)return
+        if(s?.mode==='native'&&activePhase(s.phase)){
+          if(!validId(s.sessionId))return
+          if(!current.current){
+            adopted.current=true;current.current=s.sessionId;busy.current=true
+            setSession(s.sessionId);setStatus(s);setStopping(s.phase==='stopping')
+            busyCallback.current(true)
+          }
+        }
+        done=true;setChecked(true)
+      }catch{/* Fail closed for new starts until the native state can be read. */}
+      finally{inflight=false}
+    }
+    void discover()
+    const timer=setInterval(()=>void discover(),1000)
+    return()=>{alive=false;clearInterval(timer)}
+  },[available])
   async function refresh(){
     if(!available||busy.current)return
     setLoading(true);setError('');setReview(null);setSelected([])
@@ -43,7 +77,16 @@ export default function LiveAcceptance({active,disabled,prepare,onBusy}:{active:
       inflight=true
       try{
         const s=await request<Snapshot|null>('/studio/live-rehearsal/status',{sessionId:session})
-        if(alive&&s?.sessionId===session&&s.mode==='native')setStatus(s)
+        if(alive&&s?.sessionId===session&&s.mode==='native'){
+          setStatus(s)
+          if(adopted.current&&current.current===session){
+            if(s.phase==='stopping')setStopping(true)
+            if(s.phase==='stopped'||s.phase==='failed'){
+              adopted.current=false;current.current=null;busy.current=false
+              setStopping(false);busyCallback.current(false)
+            }
+          }
+        }
       }catch{/* Start/stop remain available even if status polling fails. */}
       finally{inflight=false}
     }
@@ -59,7 +102,7 @@ export default function LiveAcceptance({active,disabled,prepare,onBusy}:{active:
     }
   },[active])
   async function reviewSelection(){
-    if(disabled||busy.current||!active||selected.length===0||selected.length>3)return
+    if(!checked||disabled||busy.current||!active||selected.length===0||selected.length>3)return
     const generation=++reviewGeneration.current
     setLoading(true);setError('');setPhrase('')
     try{
@@ -71,10 +114,10 @@ export default function LiveAcceptance({active,disabled,prepare,onBusy}:{active:
     finally{setLoading(false)}
   }
   async function start(){
-    if(!review||phrase!==confirmation||busy.current||disabled||!active)return
+    if(!checked||!review||phrase!==confirmation||busy.current||disabled||!active)return
     const snapshot=review
     const sessionId=crypto.randomUUID()
-    busy.current=true;current.current=sessionId;onBusy(true)
+    adopted.current=false;busy.current=true;current.current=sessionId;onBusy(true)
     setSession(sessionId);setStatus(null);setError('');setPhrase('');setReview(null);setStopping(false)
     try{
       await request('/studio/live-acceptance/start',{
@@ -105,10 +148,11 @@ export default function LiveAcceptance({active,disabled,prepare,onBusy}:{active:
   return <section className="dock-note" aria-label="Real native streaming acceptance">
     <strong>Developer-only real stream test</strong>
     <p>Actual capture and network transmission. Use a private test destination. This is not production Go Live.</p>
-    <button className="secondary-button" disabled={disabled||loading||busy.current} onClick={()=>void refresh()}>Load test destinations</button>
+    {!checked&&<p role="status">Checking native session state before enabling a new test.</p>}
+    <button className="secondary-button" disabled={!checked||disabled||loading||busy.current} onClick={()=>void refresh()}>Load test destinations</button>
     {destinations.map(d=><label key={d.id} className="layer-switch"><span>{d.name}<small>{d.serverUrl??'Missing credential'}</small></span><input type="checkbox" checked={selected.includes(d.id)} disabled={disabled||loading||busy.current||!d.credentialAvailable||(!selected.includes(d.id)&&selected.length>=3)} onChange={e=>{setReview(null);setSelected(old=>e.target.checked?[...old,d.id]:old.filter(id=>id!==d.id))}}/></label>)}
     <label>Test stream duration <select aria-label="Test stream duration" value={duration} disabled={disabled||loading||busy.current} onChange={e=>{setDuration(Number(e.target.value));setReview(null);setPhrase('')}}>{[4,15,30,60,300,900,1800,3600,7200].map(s=><option key={s} value={s}>{s>=60?s/60+' min':s+' sec'}</option>)}</select></label>
-    <button className="secondary-button" disabled={disabled||loading||busy.current||selected.length===0} onClick={()=>void reviewSelection()}>Review real stream test</button>
+    <button className="secondary-button" disabled={!checked||disabled||loading||busy.current||selected.length===0} onClick={()=>void reviewSelection()}>Review real stream test</button>
     {selected.length===1&&<label className="layer-switch"><span>Lower bitrate after reconnect <small>Optional; only a new single-destination encoder epoch</small></span><input aria-label="Lower bitrate after reconnect" type="checkbox" checked={fallback} disabled={disabled||loading||busy.current} onChange={e=>{setFallback(e.target.checked);setReview(null);setPhrase('')}}/></label>}
     {selected.length===1&&<label className="layer-switch"><span>Adaptive bitrate during stream <small>Experimental; reduce only at GOP boundaries if encoder supports it</small></span><input aria-label="Adaptive bitrate during stream" type="checkbox" checked={adaptive} disabled={disabled||loading||busy.current} onChange={e=>{setAdaptive(e.target.checked);setReview(null);setPhrase('')}}/></label>}
     {review&&<div>
@@ -120,7 +164,7 @@ export default function LiveAcceptance({active,disabled,prepare,onBusy}:{active:
       <p>In-place bitrate reduction: {review.adaptive?'Enabled — experimental single-output downshift':'Disabled'}</p>
       {review.targets.map(d=><p key={d.id}>{d.name} — {d.serverUrl}</p>)}
       <label>Type {confirmation}<input aria-label="Real stream confirmation" value={phrase} onChange={e=>setPhrase(e.target.value)} autoComplete="off"/></label>
-      <button className="secondary-button" disabled={disabled||phrase!==confirmation} onClick={()=>void start()}>Start real test stream</button>
+      <button className="secondary-button" disabled={!checked||disabled||phrase!==confirmation} onClick={()=>void start()}>Start real test stream</button>
       <button className="secondary-button" onClick={()=>{setReview(null);setPhrase('')}}>Cancel review</button>
     </div>}
     {active&&controls}
