@@ -33,13 +33,12 @@ fn consent_summary(request:&Request)->Result<String,String>{
         return Err("Invalid capture source selection".into())
     }
     crate::program_audio::validate(&request.audio_inputs)?;
-    if !["360p10","720p15","1080p30","720p30","1080p15"].contains(&request.profile.as_str()) {
-        // The Program engine validates the exact supported profile before
-        // opening sources. Bound and sanitize arbitrary labels for this dialog.
-        if request.profile.is_empty()||request.profile.len()>40||!request.profile.bytes().all(|c|c.is_ascii_alphanumeric()||c==b'-'){return Err("Invalid profile".into())}
+    if !["baseline","720p15","1080p30"].contains(&request.profile.as_str()){
+        return Err("Unsupported Program test profile".into())
     }
     let mut detail=format!("This sends actual video and selected audio over the network. Review the source preview in Studio before approving. A destination may be public.\n\nDuration: up to {} seconds\nProfile: {}\n",request.seconds,display_label(&request.profile));
     detail.push_str(&format!("Display sources: {}\nVideo device selected: {}\nAudio inputs: {} ({} unmuted)\nOverlay: {}\n",request.display_ids.len(),if request.video_device_id.is_some(){"yes"}else{"no"},request.audio_inputs.len(),request.audio_inputs.iter().filter(|v|!v.muted&&v.gain>0.).count(),if request.overlay.is_some(){"yes"}else{"no"}));
+    detail.push_str(&format!("Requested bitrate: {}\n",request.bitrate_kbps.map_or_else(||"profile default".to_owned(),|v|format!("{v} kbps"))));
     detail.push_str(&format!("Reconnect bitrate fallback: {}\nIn-place adaptive bitrate: {}\n\nConfirmed destinations:\n",request.fallback_on_reconnect.unwrap_or(false),request.adaptive_bitrate.unwrap_or(false)));
     for (i,d) in request.destinations.iter().enumerate(){
         if d.name.is_empty()||d.name.len()>80||d.name.chars().any(char::is_control)||d.server_url.len()>768||!d.server_url.is_ascii()||d.server_url.chars().any(|c|c.is_ascii_whitespace()||c.is_control()){
