@@ -42,10 +42,10 @@ jobs:
       - run: npm ci
       - name: Build macOS QA app (no installer)
         if: runner.os == 'macOS'
-        run: npm run desktop:build -- --features native-live-acceptance --target ${{ matrix.target }} --bundles app
+        run: npm run tauri:build -w @moobee-live/desktop -- --features native-live-acceptance --target ${{ matrix.target }} --bundles app
       - name: Build Windows QA executable (no installer)
         if: runner.os == 'Windows'
-        run: npm run desktop:build -- --features native-live-acceptance --target ${{ matrix.target }} --no-bundle
+        run: npm run tauri:build -w @moobee-live/desktop -- --features native-live-acceptance --target ${{ matrix.target }} --no-bundle
       - name: Archive macOS application
         if: runner.os == 'macOS'
         shell: bash
