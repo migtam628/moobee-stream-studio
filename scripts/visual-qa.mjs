@@ -440,7 +440,7 @@ try {
   await macPage.getByText(/Rehearsal: stopped/).waitFor();
   await macPage.getByRole('button',{name:'Analytics',exact:true}).click();
   await macPage.getByRole('region',{name:'Native streaming health'}).getByText('Offline rehearsal — no network measurements',{exact:true}).waitFor();
-  await macPage.evaluate(()=>{window.__healthFixture={mode:'native',phase:'streaming',elapsedMs:2000,sentPackets:90,sentPayloadBytes:750000,mediaFrames:60,bitrateAdvice:{initialKbps:6000,currentKbps:6000,fallbackEnabled:true,suggestedKbps:3000,pressureMs:3000,inplaceEnabled:true,inplaceChanges:0,inplaceUnsupported:false,inplaceUncertain:false},resources:{samples:2,sampleElapsedMs:1900,residentBytes:134217728,baselineResidentBytes:100663296,peakResidentBytes:134217728,cpuTenths:735,peakCpuTenths:735},timing:{videoPackets:60,audioPackets:90,videoEndMs:2000,audioEndMs:1920,encodedVideoLeadMs:80,maxAbsEncodedGapMs:80,pendingAudioFrames:3840,pcmFramesSupplied:96000,windowsMissingSourceFrames:null,maxEncodeMs:14},health:{health:'normal',payloadKbps:3000,outputFpsTenths:300,queueBytes:0,queuePackets:0,lateFramesInWindow:0,sampleAgeMs:25}};});
+  await macPage.evaluate(()=>{window.__healthFixture={sessionId:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',streamKey:'never-export-this-key',serverUrl:'rtmps://private.invalid/live',mode:'native',phase:'streaming',elapsedMs:2000,sentPackets:90,sentPayloadBytes:750000,mediaFrames:60,bitrateAdvice:{initialKbps:6000,currentKbps:6000,fallbackEnabled:true,suggestedKbps:3000,pressureMs:3000,inplaceEnabled:true,inplaceChanges:0,inplaceUnsupported:false,inplaceUncertain:false},resources:{samples:2,sampleElapsedMs:1900,residentBytes:134217728,baselineResidentBytes:100663296,peakResidentBytes:134217728,cpuTenths:735,peakCpuTenths:735},timing:{videoPackets:60,audioPackets:90,videoEndMs:2000,audioEndMs:1920,encodedVideoLeadMs:80,maxAbsEncodedGapMs:80,pendingAudioFrames:3840,pcmFramesSupplied:96000,windowsMissingSourceFrames:null,maxEncodeMs:14},health:{health:'normal',payloadKbps:3000,outputFpsTenths:300,queueBytes:0,queuePackets:0,lateFramesInWindow:0,sampleAgeMs:25}};});
   const health=macPage.getByRole('region',{name:'Native streaming health'});
   await health.getByText('3000 kbps',{exact:true}).waitFor();
   await health.getByText('Sender normal',{exact:true}).waitFor();
@@ -455,6 +455,17 @@ try {
   await health.getByText('Stopped early — not a full-duration acceptance pass',{exact:true}).waitFor();
   await macPage.evaluate(()=>{window.__healthFixture={...window.__healthFixture,nativeOutcome:'senderCompleted'};});
   await health.getByText('Sender completed requested duration — receiver evidence required',{exact:true}).waitFor();
+  await macPage.getByRole('button',{name:'Studio',exact:true}).click();
+  await macPage.evaluate(()=>{window.__healthFixture={...window.__healthFixture,elapsedMs:12000,phase:'reconnecting',reconnectAttempt:1,nativeOutcome:null};});
+  await macPage.waitForTimeout(800);
+  await macPage.getByRole('button',{name:'Analytics',exact:true}).click();
+  const history=macPage.getByRole('region',{name:'Local sender diagnostics export'});
+  await history.getByRole('button',{name:'Prepare redacted sender report'}).click();
+  const report=await history.getByRole('textbox',{name:'Redacted sender report JSON'}).inputValue();
+  const parsedReport=JSON.parse(report);
+  if(parsedReport.receiverVerified!==false||!parsedReport.samples.some(s=>s.phase==='reconnecting'&&s.reconnectAttempt===1)||!parsedReport.samples.some(s=>s.nativeOutcome==='senderCompleted'))throw new Error('Sender history did not retain navigation or outcome samples');
+  if(/never-export-this-key|private\.invalid|aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/.test(report))throw new Error('Sender report exposes credentials or session identity');
+  await history.getByRole('button',{name:'Close report'}).click();
   await macPage.getByRole('button',{name:'Multistream',exact:true}).click();
   const dest=macPage.getByRole('region',{name:'Secure stream destinations'});
   await dest.getByText('No saved destinations.',{exact:true}).waitFor();
