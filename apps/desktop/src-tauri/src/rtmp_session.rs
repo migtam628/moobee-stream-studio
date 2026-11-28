@@ -63,6 +63,7 @@ impl<T:Read+Write> Publisher<T>{
         Err("RTMP negotiation exceeded chunk limit".into())
     }
     pub(crate) fn transport_failure(&self)->Option<Failure>{self.transport_failure}
+    fn clean_inbound_boundary(&self)->bool{self.inbound.is_empty()&&!self.reader.has_pending_message()}
     pub(crate) fn authorized(&self)->bool{!self.failed&&matches!(self.state.phase(),Phase::Live(_))}
     /// Send a protocol-level end command after draining all admitted media.
     /// Successful local write is not a server acknowledgement.
@@ -288,13 +289,13 @@ pub(crate) mod tls {
                     // EOF after an authorized publish, without a parsed terminal
                     // protocol command, is a transport interruption. A partial
                     // inbound chunk is ambiguous and remains fail-closed.
-                    self.transport_failure=if self.inbound.is_empty(){Some(Failure::TransientTransport)}else{None};
+                    self.transport_failure=if self.clean_inbound_boundary(){Some(Failure::TransientTransport)}else{None};
                     self.failed=true;
                     Err("RTMPS server closed connection".into())
                 },
                 Ok(n)=>{self.ingest_inbound(&bytes[..n])?;Ok(())},
                 Err(e) if matches!(e.kind(),io::ErrorKind::WouldBlock|io::ErrorKind::TimedOut|io::ErrorKind::Interrupted)=>Ok(()),
-                Err(e)=>{if transient_io(e.kind())||(e.kind()==io::ErrorKind::UnexpectedEof&&self.inbound.is_empty()){self.transport_failure=Some(Failure::TransientTransport);}self.failed=true;Err("RTMPS inbound transport failed".into())},
+                Err(e)=>{self.transport_failure=if self.clean_inbound_boundary()&&(transient_io(e.kind())||e.kind()==io::ErrorKind::UnexpectedEof){Some(Failure::TransientTransport)}else{None};self.failed=true;Err("RTMPS inbound transport failed".into())},
             }
         }
     }
@@ -739,6 +740,20 @@ mod tests{
             let s=worker.stats().unwrap();
             assert_eq!(s.session.phase,Phase::Failed);assert_eq!(s.pending_bytes,0);assert!(s.session.restart_required);
         }
+    }
+    #[test]fn incomplete_message_is_not_a_clean_disconnect_boundary(){
+        let mut p=Publisher::establish(fixture(true),"live","rtmps://example.invalid/live","fixture-key",7,&[9;1528]).unwrap();
+        assert!(p.clean_inbound_boundary());
+        let body=vec![0u8;200];
+        let wire=rtmp::chunks(6,0,18,0,&body,128).unwrap();
+        assert_eq!(p.ingest_inbound(&wire[..140]).unwrap(),1);
+        assert!(p.inbound.is_empty());
+        assert!(p.reader.has_pending_message());
+        assert!(!p.clean_inbound_boundary());
+        assert_eq!(p.ingest_inbound(&wire[140..]).unwrap(),1);
+        assert!(p.clean_inbound_boundary());
+        assert_eq!(p.ingest_inbound(&wire[..5]).unwrap(),0);
+        assert!(!p.clean_inbound_boundary());
     }
     #[test]fn buffered_inbound_survives_fragmentation_and_services_ping(){
         let mut p=Publisher::establish(fixture(true),"live","rtmps://example.invalid/live","fixture-key",7,&[9;1528]).unwrap();
