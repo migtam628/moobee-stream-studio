@@ -2,7 +2,7 @@
 
 Final target: all 20 of the following equally counted workstreams must have their scoped core functionality wired into the application, reviewed and merged with passing CI. 100% core coverage is necessary but not sufficient: production readiness also requires all real-device, security, reliability and release acceptance gates. The previous 75% milestone is not a stopping point. This is a development coverage metric, not a time estimate, feature-parity percentage, or production readiness score. A primitive, mock, prototype, open PR or isolated codec does not satisfy an integration gate by itself. A workstream may be implemented for a bounded diagnostic while hardware acceptance remains pending; the documented scope must be visible in the UI.
 
-| Workstream | Required core integration | Snapshot (2026-11-26) |
+| Workstream | Required core integration | Snapshot (RTMPS updated 2026-11-27) |
 |---|---|---|
 | 1. Studio workspace and scenes | create/edit/persist/import/export collections, Preview/Program, Studio Mode | Implemented, bounded |
 | 2. macOS display and video devices | display selection, webcam/HDMI enumeration and preview | Implemented, bounded |
@@ -12,10 +12,10 @@ Final target: all 20 of the following equally counted workstreams must have thei
 | 6. Local recording | native composed H.264/AAC on Mac and Windows, stop/pause, file recovery | Implemented, bounded (#54/#55) |
 | 7. Native transitions | encoded cut/fade/slide/wipe on same opened inputs | Implemented, bounded (#53) |
 | 8. Local clips and browser recording | clip inventory, reveal/save, browser-local shared capture | Implemented, bounded |
-| 9. Live RTMPS | authorized connection, continuous native media source and Go Live/Stop | Partial: protocol/TLS, queue, codecs, worker and offline Program FLV integration merged; Mac internal capture-to-network sink merged; Windows internal sink and credential handoff under review; Go Live and receiving-side acceptance pending |
-| 10. Live reliability | connection recovery, independent inbound servicing, health and output timing | Partial: queue and pacing merged; buffered TLS polling and drain merged; Mac recovery orchestration and health merged; Windows recovery path under review; receiving-side QA pending |
-| 11. Destination management | secure storage, explicit per-destination authorization and configuration | Partial: local OS-vault CRUD merged; confirmed native session credential lease/handoff under review; actual Go Live remains gated |
-| 12. Multistream | independent destination delivery and per-destination failure isolation | Partial: internal fanout and health under review; explicit UI authorization and real receivers pending |
+| 9. Live RTMPS | authorized connection, continuous native media source and Go Live/Stop | Partial: developer-only explicit native live test and Stop, native Mac/Windows AVC/AAC, encrypted loopback and independent decoder CI verified on three architectures (#93); independent receiver-file verifier merged (#94); production Go Live and real-device receiver acceptance pending |
+| 10. Live reliability | connection recovery, independent inbound servicing, health and output timing | Partial: native Mac/Windows recovery, sender health, queue/pacing, drain and optional adaptive downshift (#92) merged; receiving-side reconnect, sustained load and physical QA pending |
+| 11. Destination management | secure storage, explicit per-destination authorization and configuration | Partial: local OS-vault CRUD, explicit test destination confirmation and native credential lease merged; production Go Live and security review remain gated |
+| 12. Multistream | independent destination delivery and per-destination failure isolation | Partial: independent native fanout and per-destination health, explicit authorization for up to three test destinations merged; multiple real receivers and failure isolation acceptance pending |
 | 13. Overlays and alerts | configurable dynamic scene layers, alert events in actual encoded output | Partial: static overlay/local alert test |
 | 14. Unified chat and moderation | authenticated platform integration, chat and moderation controls | Pending |
 | 15. Replay and clipping | rolling buffer, hotkeys, export and local editing | Partial: local clip inventory only |
@@ -86,3 +86,6 @@ PR #90 merged startup refresh and overload protection. This increment adds expli
 
 ## Workstream 10 — experimental in-place bitrate downshift
 PR #91 merged recovery fallback and sustained sender pressure advice. This increment adds explicitly opted-in single-output native bitrate property updates at complete GOP boundaries, rate readback, cooldown, bounded reductions and unsupported/uncertain state reporting. See LIVE_INPLACE_BITRATE.md. Hardware driver support and independent receiver continuity after reconfiguration remain unverified; core completion stays 8/20. No production Go Live activation.
+
+## RTMPS synthetic receiver milestone — 2026-11-27
+PR #93 merged after all six CI workflows passed. Independent receiver decoding verified 20/20 synthetic H.264 frames on macOS ARM64, macOS Intel and Windows x64, with 93/93/91 AAC blocks respectively. Encoded track endpoint differences were 16.667/16.667/58.667 ms, below the 200 ms diagnostic bound. TLS hostname/trust checks, ping/pong and orderly closure passed. PR #94 merged its offline receiver-file evidence utility. This is synthetic CI verification, not physical A/V synchronization or a private external receiver test. See BETA_READINESS.json for the exact workflow evidence. Core workstream coverage stays at 8/20 until the full scoped integration requirements are met; no beta gate is marked verified.
