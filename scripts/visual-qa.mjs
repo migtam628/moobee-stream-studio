@@ -179,6 +179,7 @@ try {
       if(cmd==='start_live_acceptance'){
         window.__acceptanceRequest=args.request;
         window.__acceptanceState={sessionId:args.request.sessionId,mode:'native',phase:'streaming',mediaFrames:10,sentPackets:11,elapsedMs:1000};
+        if(window.__loseAcceptanceResponse)throw new Error('Simulated lost start IPC response');
         return await new Promise(resolve=>{window.__acceptanceResolve=resolve;});
       }
       if(cmd==='stop_live_acceptance'){
@@ -220,7 +221,7 @@ try {
       }
       if(cmd==='remove_stream_destination'){window.__destinationRows=[];return null;}
       if(cmd==='live_health_status')return window.__healthFixture??(window.__acceptanceState?.phase==='streaming'?window.__acceptanceState:null)??window.__rehearsal??null;
-      if(cmd==='live_session_status')return window.__acceptanceState?.sessionId===args.sessionId?window.__acceptanceState:window.__rehearsal?.sessionId===args.sessionId?window.__rehearsal:null;
+      if(cmd==='live_session_status')return window.__hideScopedSession?null:window.__acceptanceState?.sessionId===args.sessionId?window.__acceptanceState:window.__rehearsal?.sessionId===args.sessionId?window.__rehearsal:null;
       if(cmd==='stop_live_rehearsal'){if(window.__rehearsal?.sessionId!==args.sessionId)return false;window.__rehearsal.phase='stopped';return true;}
       if (cmd === 'capture_program_live_packet_test') {window.__flvRequest=args;return {...clip,format:'flv',path:'/test/clip.flv',webcamIncluded:false};}
       if (cmd === 'capture_continuous_program_mp4') {
@@ -546,7 +547,28 @@ try {
   await recovered.getByRole('button',{name:'Stop real test stream',exact:true}).click();
   await recovered.getByText(/Native test: stopped/).waitFor();
   if(await macPage.evaluate(()=>window.__acceptanceState?.sessionId)!==recoveredId)throw new Error('Reload recovery stopped the wrong session');
-  await recovered.getByRole('button',{name:'Load test destinations',exact:true}).waitFor();
+  const reloadDestinations=recovered.getByRole('button',{name:'Load test destinations',exact:true});
+  await reloadDestinations.click();
+  // Lose the start response after native registration. The Stop control must
+  // remain bound to the active native session rather than unlocking capture.
+  await macPage.evaluate(()=>{
+    window.__loseAcceptanceResponse=true;
+    window.__destinationRows=[{id:'e9525c58-0e63-40b3-94b6-a9d0f0de4e99',name:'Private fixture',serverUrl:'rtmps://example.invalid/live',credentialAvailable:true,revision:'c1111111-1111-4111-8111-111111111111'}];
+  });
+  await reloadDestinations.click();
+  await recovered.getByRole('checkbox').check();
+  await recovered.getByRole('button',{name:'Review real stream test',exact:true}).click();
+  await recovered.getByLabel('Real stream confirmation').fill('START REAL TEST STREAM');
+  await recovered.getByRole('button',{name:'Start real test stream',exact:true}).click();
+  await recovered.getByText(/Native test stream did not complete successfully/).waitFor();
+  await recovered.getByText(/Native test: streaming/).waitFor();
+  if(!await reloadDestinations.isDisabled())throw new Error('Lost start IPC response unlocked an active native broadcast');
+  await macPage.evaluate(()=>{window.__hideScopedSession=true;});
+  await macPage.waitForTimeout(600);
+  if(!await reloadDestinations.isDisabled())throw new Error('Missing scoped snapshot unlocked active native broadcast');
+  await recovered.getByRole('button',{name:'Stop real test stream',exact:true}).click();
+  await macPage.waitForFunction(()=>window.__acceptanceState?.phase==='stopped');
+  await reloadDestinations.click();
   await macPage.close();
   const winPage = await browser.newPage({viewport:{width:1440,height:900},userAgent:'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36'});
   winPage.on('pageerror',error=>errors.push(error.message));
